@@ -21,29 +21,55 @@ from html.parser import HTMLParser as _HTMLParser
 
 # ── Importaciones con autoinstalación amigable ───────────────────────────────
 
-def _instalar(paquete):
-    print(f"  Instalando {paquete}...")
-    import importlib
-    # Verificar si pip está disponible como módulo
-    pip_disponible = subprocess.run(
+def _pip_disponible():
+    return subprocess.run(
         [sys.executable, '-m', 'pip', '--version'],
         capture_output=True,
     ).returncode == 0
-    if not pip_disponible:
-        print("  [*] pip no disponible, instalando python3-pip...")
-        os.system('sudo apt-get install -y python3-pip -qq 2>/dev/null')
-    # Intentar instalación con python -m pip
-    ret = os.system(f'"{sys.executable}" -m pip install --user --break-system-packages {paquete} -q')
+
+
+def _instalar(paquete):
+    print(f"  Instalando {paquete}...")
+    import importlib
+    if not _pip_disponible():
+        print("  [*] pip no disponible. Intentando activarlo con ensurepip...")
+        # Intento 1: ensurepip — sin internet ni sudo, usa wheels del propio Python
+        try:
+            import ensurepip
+            ensurepip.bootstrap(upgrade=True)
+        except Exception:
+            pass
+        # Intento 2: apt-get (solo funciona si hay terminal con sudo disponible)
+        if not _pip_disponible():
+            os.system('sudo apt-get install -y python3-pip -qq 2>/dev/null')
+    if _pip_disponible():
+        ret = subprocess.run(
+            [sys.executable, '-m', 'pip', 'install',
+             '--user', '--break-system-packages', '-q'] + paquete.split(),
+        ).returncode
+    else:
+        # Último recurso: pip3 del sistema
+        ret = os.system(f'pip3 install --user --break-system-packages -q {paquete}')
     if ret != 0:
-        # Fallback: usar pip3 del sistema directamente
-        os.system(f'pip3 install --user --break-system-packages {paquete} -q')
+        print(f"\n  [!] No se pudo instalar '{paquete}' automáticamente.")
+        print(f"  Ejecuta manualmente en una terminal:")
+        print(f"    sudo apt install python3-pip")
+        print(f"    pip3 install --break-system-packages {paquete}\n")
     importlib.invalidate_caches()
+
 
 try:
     import socketio as sio_module
 except ImportError:
     _instalar("python-socketio[client] websocket-client")
-    import socketio as sio_module
+    try:
+        import socketio as sio_module
+    except ImportError:
+        print("\n  [!] No se pudo cargar 'socketio'. Instálalo manualmente:")
+        print("      sudo apt install python3-pip")
+        print("      pip3 install --break-system-packages 'python-socketio[client]' websocket-client\n")
+        input("Pulsa Enter para cerrar...")
+        sys.exit(1)
 
 try:
     import mss

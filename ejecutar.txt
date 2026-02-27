@@ -1,20 +1,21 @@
  
-Al instalar en el cliente salta este error, corrígelo:
+Al instalar en el cliente sigue saltando este error:
   
   
-  Instalando python-socketio[client] websocket-client...
+Instalando python-socketio[client] websocket-client...
 /usr/bin/python3: No module named pip
 Traceback (most recent call last):
-  File "/home/maia/Escritorio/vigia-master/client.py", line 31, in <module>
+  File "/home/maia/.local/share/Trash/files/vigia-master/client.py", line 31, in <module>
     import socketio as sio_module
 ModuleNotFoundError: No module named 'socketio'
 
 During handling of the above exception, another exception occurred:
 
 Traceback (most recent call last):
-  File "/home/maia/Escritorio/vigia-master/client.py", line 34, in <module>
+  File "/home/maia/.local/share/Trash/files/vigia-master/client.py", line 34, in <module>
     import socketio as sio_module
 ModuleNotFoundError: No module named 'socketio'
-Pulsa Enter para cerrar...^C
 
 
+
+Corrígelo
