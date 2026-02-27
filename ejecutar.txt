@@ -1,46 +1,5 @@
- 
-Al instalar en el cliente sigue saltando este error:
-  
-maia@E02-12:~/Escritorio/vigia-master$ sh ./instalar_cliente.sh 192.168.202.2
-
-âââââââââââââââââââââââââââââââââââââââââââââââ
-  VIGIA â Instalando cliente del alumno
-âââââââââââââââââââââââââââââââââââââââââââââââ
-
-[â] Python: python3  (Python 3.12.3)
-[*] pip no encontrado. Descargando get-pip.py...
-./instalar_cliente.sh: 56: curl: not found
-python3: can't open file '/tmp/_vigia_getpip.py': [Errno 2] No such file or directory
-[â] pip: /home/maia/.local/bin/pip
-[*] Instalando dependencias Python...
-/usr/bin/python3: No module named pip
-./instalar_cliente.sh: 67: /home/maia/.local/bin/pip: not found
-[â] tkinter disponible
-[*] Instalando xdotool y python3-pynput (control remoto)...
-[sudo] contraseÃ±a para maia: 
-[â] xdotool disponible (control remoto habilitado)
-[â] IP del servidor guardada: 192.168.202.2
-
-[â] InstalaciÃ³n completada.
-
-  Acceso directo creado en el Escritorio: 'VIGIA (Alumno)'
-  
-
-
-  Instalando python-socketio[client] websocket-client...
-/usr/bin/python3: No module named pip
-Traceback (most recent call last):
-  File "/home/maia/.local/share/Trash/files/vigia-master/client.py", line 31, in <module>
-    import socketio as sio_module
-ModuleNotFoundError: No module named 'socketio'
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/home/maia/.local/share/Trash/files/vigia-master/client.py", line 34, in <module>
-    import socketio as sio_module
-ModuleNotFoundError: No module named 'socketio'
-Pulsa Enter para cerrar...
-
-
-corrígelo
+Corrige este error al instalar en cliente:
+File "/home/profesor/Escritorio/vigia-master/client.py", line 115
+    global _XDO_CMD
+    ^^^^^^^^^^^^^^^
+SyntaxError: name '_XDO_CMD' is used prior to global declaration

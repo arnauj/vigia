@@ -95,7 +95,7 @@ _kbd_ctrl   = None
 _XDO_CMD    = shutil.which('xdotool')
 
 def _init_input():
-    global _mouse_ctrl, _kbd_ctrl
+    global _mouse_ctrl, _kbd_ctrl, _XDO_CMD
     try:
         from pynput.mouse import Controller as MouseController
         from pynput.keyboard import Controller as KbdController
@@ -112,7 +112,6 @@ def _init_input():
             print("  [*] Intentando instalar xdotool...")
             os.system('sudo apt-get install -y xdotool -qq 2>/dev/null')
             if shutil.which('xdotool'):
-                global _XDO_CMD
                 _XDO_CMD = shutil.which('xdotool')
                 print("  [✓] xdotool instalado con éxito.")
                 return True
