@@ -1,21 +1,20 @@
  
-  Al instalar en el cliente salta este error, corrígelo:
+Al instalar en el cliente salta este error, corrígelo:
   
   
-  Instalando pyautogui...
-  error: subprocess-exited-with-error
+  Instalando python-socketio[client] websocket-client...
+/usr/bin/python3: No module named pip
+Traceback (most recent call last):
+  File "/home/maia/Escritorio/vigia-master/client.py", line 31, in <module>
+    import socketio as sio_module
+ModuleNotFoundError: No module named 'socketio'
 
-  × installing build dependencies for python3-Xlib did not run successfully.
-  │ exit code: 1
-  ╰─> [7 lines of output]
-      WARNING: Retrying (Retry(total=4, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('<pip._vendor.urllib3.connection.HTTPSConnection object at 0x7de513fdf260>: Failed to establish a new connection: [Errno 101] La red es inaccesible')': /simple/setuptools/
-      WARNING: Retrying (Retry(total=3, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('<pip._vendor.urllib3.connection.HTTPSConnection object at 0x7de51409eff0>: Failed to establish a new connection: [Errno 101] La red es inaccesible')': /simple/setuptools/
-      WARNING: Retrying (Retry(total=2, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('<pip._vendor.urllib3.connection.HTTPSConnection object at 0x7de513fdf3b0>: Failed to establish a new connection: [Errno 101] La red es inaccesible')': /simple/setuptools/
-      WARNING: Retrying (Retry(total=1, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('<pip._vendor.urllib3.connection.HTTPSConnection object at 0x7de513fdf5c0>: Failed to establish a new connection: [Errno 101] La red es inaccesible')': /simple/setuptools/
-      WARNING: Retrying (Retry(total=0, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('<pip._vendor.urllib3.connection.HTTPSConnection object at 0x7de513fdf7d0>: Failed to establish a new connection: [Errno 101] La red es inaccesible')': /simple/setuptools/
-      ERROR: Could not find a version that satisfies the requirement setuptools>=40.8.0 (from versions: none)
-      ERROR: No matching distribution found for setuptools>=40.8.0
-      [end of output]
+During handling of the above exception, another exception occurred:
 
-  note: This error originates from a subprocess, and is likely not a problem with pip.
-ERROR: Failed to build 'python3-Xlib' when installing build dependencies for python3-xlib
+Traceback (most recent call last):
+  File "/home/maia/Escritorio/vigia-master/client.py", line 34, in <module>
+    import socketio as sio_module
+ModuleNotFoundError: No module named 'socketio'
+Pulsa Enter para cerrar...^C
+
+

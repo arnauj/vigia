@@ -23,8 +23,20 @@ from html.parser import HTMLParser as _HTMLParser
 
 def _instalar(paquete):
     print(f"  Instalando {paquete}...")
-    os.system(f'"{sys.executable}" -m pip install --user --break-system-packages {paquete} -q')
     import importlib
+    # Verificar si pip está disponible como módulo
+    pip_disponible = subprocess.run(
+        [sys.executable, '-m', 'pip', '--version'],
+        capture_output=True,
+    ).returncode == 0
+    if not pip_disponible:
+        print("  [*] pip no disponible, instalando python3-pip...")
+        os.system('sudo apt-get install -y python3-pip -qq 2>/dev/null')
+    # Intentar instalación con python -m pip
+    ret = os.system(f'"{sys.executable}" -m pip install --user --break-system-packages {paquete} -q')
+    if ret != 0:
+        # Fallback: usar pip3 del sistema directamente
+        os.system(f'pip3 install --user --break-system-packages {paquete} -q')
     importlib.invalidate_caches()
 
 try:
