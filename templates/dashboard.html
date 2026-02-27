@@ -1130,7 +1130,8 @@ function _traducirCoords(e) {
 
 // ── Compartir pantalla del profesor ───────────────────────────────────────
 let _shareStream   = null;
-let _shareInterval = null;
+let _shareRunning  = false;
+let _shareTimeout  = null;
 const _shareVideo  = document.createElement('video');
 const _shareCanvas = document.createElement('canvas');
 const _shareCtx    = _shareCanvas.getContext('2d');
@@ -1140,8 +1141,8 @@ _shareVideo.autoplay = true;
 _shareVideo.muted    = true;
 
 const FPS_SHARE    = 2;      // fotogramas por segundo enviados
-const CALIDAD_SHARE = 0.92;  // calidad JPEG 0-1
-const ANCHO_SHARE   = 1920;  // px máximos de ancho
+const CALIDAD_SHARE = 0.85;  // calidad JPEG 0-1
+const ANCHO_SHARE   = 1280;  // px máximos de ancho (bajado para mayor fluidez)
 
 async function toggleCompartir() {
   if (_shareStream) {
@@ -1156,52 +1157,57 @@ async function toggleCompartir() {
 
   try {
     _shareStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { cursor: 'always' },
+      video: { cursor: 'always', frameRate: { ideal: 5, max: 10 } },
       audio: false,
     });
 
     _shareVideo.srcObject = _shareStream;
-
-    // Cuando el usuario pulsa "Dejar de compartir" en el navegador
     _shareStream.getVideoTracks()[0].addEventListener('ended', detenerCompartir);
 
     const _iniciarCaptura = () => {
-      const vw = _shareVideo.videoWidth  || ANCHO_SHARE;
-      const vh = _shareVideo.videoHeight || Math.round(ANCHO_SHARE * 9 / 16);
-      _shareCanvas.width  = Math.min(vw, ANCHO_SHARE);
-      _shareCanvas.height = Math.round(_shareCanvas.width * vh / vw);
-      _shareInterval = setInterval(_enviarFrame, 1000 / FPS_SHARE);
+      _shareRunning = true;
+      _loopCompartir();
       _actualizarBoton(true);
     };
 
-    // Si los metadatos ya están disponibles (race condition), arrancar directo;
-    // si no, esperar el evento (once para no duplicar).
-    if (_shareVideo.readyState >= 1) {
+    if (_shareVideo.readyState >= 2) {
       _iniciarCaptura();
     } else {
-      _shareVideo.addEventListener('loadedmetadata', _iniciarCaptura, { once: true });
+      _shareVideo.onloadeddata = _iniciarCaptura;
     }
-
-    // Forzar reproducción: necesario en elementos de video fuera del DOM.
-    _shareVideo.play().catch(() => {});
+    _shareVideo.play().catch(e => console.warn("Video play failed:", e));
 
   } catch (err) {
-    if (err.name !== 'NotAllowedError') {
-      console.error('Error al compartir pantalla:', err);
-      alert('No se pudo compartir la pantalla: ' + err.message);
-    }
+    console.error('Error al compartir pantalla:', err);
+    if (err.name !== 'NotAllowedError') alert('No se pudo compartir la pantalla: ' + err.message);
     _shareStream = null;
+    _shareRunning = false;
   }
+}
+
+function _loopCompartir() {
+  if (!_shareRunning || !_shareStream) return;
+  
+  _enviarFrame();
+  
+  // Controlar FPS manualmente con setTimeout dentro del loop
+  _shareTimeout = setTimeout(() => {
+    if (_shareRunning) requestAnimationFrame(_loopCompartir);
+  }, 1000 / FPS_SHARE);
 }
 
 function _enviarFrame() {
   if (!_shareStream || !_shareVideo.videoWidth) return;
   try {
+    const vw = _shareVideo.videoWidth;
+    const vh = _shareVideo.videoHeight;
+    _shareCanvas.width  = Math.min(vw, ANCHO_SHARE);
+    _shareCanvas.height = Math.round(_shareCanvas.width * vh / vw);
+    
     _shareCtx.drawImage(_shareVideo, 0, 0, _shareCanvas.width, _shareCanvas.height);
     const imgData = _shareCanvas.toDataURL('image/jpeg', CALIDAD_SHARE);
     socket.emit('teacher_screenshot', { image: imgData, activa: true });
 
-    // Miniatura de previsualización
     const prev = document.getElementById('share-preview');
     prev.src = imgData;
     if (!prev.classList.contains('show')) prev.classList.add('show');
@@ -1211,15 +1217,15 @@ function _enviarFrame() {
 }
 
 function detenerCompartir() {
-  clearInterval(_shareInterval);
-  _shareInterval = null;
+  _shareRunning = false;
+  clearTimeout(_shareTimeout);
   if (_shareStream) {
     _shareStream.getTracks().forEach(t => t.stop());
     _shareStream = null;
   }
+  _shareVideo.srcObject = null;
   socket.emit('teacher_screenshot', { activa: false });
   _actualizarBoton(false);
-
   const prev = document.getElementById('share-preview');
   prev.src = '';
   prev.classList.remove('show');

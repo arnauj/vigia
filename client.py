@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-VIGIA - Cliente del Alumno (v1.3 - Control Remoto Fijo)
+VIGIA - Cliente del Alumno (v1.4 - Estabilidad Total)
 Captura la pantalla y la envía al servidor del profesor.
 Uso: python client.py [ip_servidor] [puerto]
 """
@@ -21,7 +21,6 @@ from html.parser import HTMLParser as _HTMLParser
 # ── Importaciones con autoinstalación amigable ───────────────────────────────
 
 def _pip_disponible():
-    """Detecta el comando pip que funciona para el intérprete actual."""
     try:
         if subprocess.run([sys.executable, '-m', 'pip', '--version'], 
                           capture_output=True, timeout=2).returncode == 0:
@@ -34,12 +33,10 @@ def _pip_disponible():
     return None
 
 def _instalar(paquete):
-    """Intenta instalar un paquete Python de forma automática y robusta."""
     print(f"  [VIGIA] Instalando {paquete}...")
     import importlib
     pip_cmd = _pip_disponible()
     if not pip_cmd:
-        print("  [*] pip no encontrado. Intentando instalar con apt...")
         os.system('sudo apt-get update -qq 2>/dev/null && sudo apt-get install -y python3-pip -qq 2>/dev/null')
         pip_cmd = _pip_disponible()
     if pip_cmd:
@@ -49,11 +46,10 @@ def _instalar(paquete):
                 importlib.invalidate_caches()
                 return True
         except Exception: pass
-    else:
-        os.system(f'pip3 install --user --break-system-packages -q {paquete}')
     importlib.invalidate_caches()
     return False
 
+# Cargar dependencias críticas
 try:
     import socketio as sio_module
 except ImportError:
@@ -70,6 +66,7 @@ try:
 except ImportError:
     _instalar("Pillow"); from PIL import Image
 
+# tkinter para UI
 try:
     import tkinter as tk
     TK_OK = True
@@ -82,25 +79,25 @@ if TK_OK:
         IMGTK_OK = True
     except ImportError:
         _instalar("--force-reinstall Pillow")
-        for _k in list(sys.modules.keys()):
-            if _k == 'PIL' or _k.startswith('PIL.'): del sys.modules[_k]
         from PIL import Image, ImageTk
         IMGTK_OK = True
 else:
     ImageTk = None; IMGTK_OK = False
 
-# ── Control remoto (Preferir pynput, fallback xdotool) ─────────────────────────
+# ── Control remoto (pynput + xdotool fallback) ───────────────────────────────
 _mouse_ctrl = None
 _kbd_ctrl   = None
 _XDO_CMD    = shutil.which('xdotool')
+_PBtn       = None
 
 def _init_input():
-    global _mouse_ctrl, _kbd_ctrl, _XDO_CMD
+    global _mouse_ctrl, _kbd_ctrl, _XDO_CMD, _PBtn
     try:
-        from pynput.mouse import Controller as MouseController
+        from pynput.mouse import Controller as MouseController, Button
         from pynput.keyboard import Controller as KbdController
         _mouse_ctrl = MouseController()
         _kbd_ctrl = KbdController()
+        _PBtn = Button
         print("  [✓] Control remoto vía pynput habilitado.")
         return True
     except Exception as e:
@@ -108,62 +105,48 @@ def _init_input():
             print("  [✓] Control remoto vía xdotool habilitado.")
             return True
         else:
-            print(f"  [!] Fallo inicializando pynput: {e}")
             print("  [*] Intentando instalar xdotool...")
             os.system('sudo apt-get install -y xdotool -qq 2>/dev/null')
-            if shutil.which('xdotool'):
-                _XDO_CMD = shutil.which('xdotool')
-                print("  [✓] xdotool instalado con éxito.")
-                return True
+            _XDO_CMD = shutil.which('xdotool')
+            if _XDO_CMD: return True
     return False
 
 INPUT_OK = _init_input()
 
-# Mapeo para xdotool
 _XDO_KEY_MAP = {
     'space': 'space', 'enter': 'Return', 'esc': 'Escape', 'tab': 'Tab',
     'backspace': 'BackSpace', 'delete': 'Delete', 'insert': 'Insert',
     'home': 'Home', 'end': 'End', 'pageup': 'Page_Up', 'pagedown': 'Page_Down',
     'left': 'Left', 'right': 'Right', 'up': 'Up', 'down': 'Down',
-    'f1': 'F1', 'f2': 'F2', 'f3': 'F3', 'f4': 'F4', 'f5': 'F5', 'f6': 'F6',
-    'f7': 'F7', 'f8': 'F8', 'f9': 'F9', 'f10': 'F10', 'f11': 'F11', 'f12': 'F12',
-    'ctrl': 'Control_L', 'alt': 'Alt_L', 'shift': 'Shift_L', 'win': 'Super_L',
-    'capslock': 'Caps_Lock', 'numlock': 'Num_Lock'
+    'ctrl': 'Control_L', 'alt': 'Alt_L', 'shift': 'Shift_L', 'win': 'Super_L'
 }
 
-# Mapeo para pynput
 def _get_pynput_key(key):
-    from pynput.keyboard import Key
-    m = {
-        'enter': Key.enter, 'esc': Key.esc, 'tab': Key.tab, 'space': Key.space,
-        'backspace': Key.backspace, 'delete': Key.delete, 'insert': Key.insert,
-        'home': Key.home, 'end': Key.end, 'pageup': Key.page_up, 'pagedown': Key.page_down,
-        'left': Key.left, 'right': Key.right, 'up': Key.up, 'down': Key.down,
-        'f1': Key.f1, 'f2': Key.f2, 'f3': Key.f3, 'f4': Key.f4, 'f5': Key.f5, 'f6': Key.f6,
-        'f7': Key.f7, 'f8': Key.f8, 'f9': Key.f9, 'f10': Key.f10, 'f11': Key.f11, 'f12': Key.f12,
-        'ctrl': Key.ctrl, 'alt': Key.alt, 'shift': Key.shift, 'win': Key.cmd,
-        'capslock': Key.caps_lock, 'numlock': Key.num_lock
-    }
-    return m.get(key.lower(), key)
+    try:
+        from pynput.keyboard import Key
+        m = {
+            'enter': Key.enter, 'esc': Key.esc, 'tab': Key.tab, 'space': Key.space,
+            'backspace': Key.backspace, 'delete': Key.delete, 'insert': Key.insert,
+            'home': Key.home, 'end': Key.end, 'pageup': Key.page_up, 'pagedown': Key.page_down,
+            'left': Key.left, 'right': Key.right, 'up': Key.up, 'down': Key.down,
+            'ctrl': Key.ctrl, 'alt': Key.alt, 'shift': Key.shift, 'win': Key.cmd
+        }
+        return m.get(key.lower(), key)
+    except: return key
 
 # ── Configuración ────────────────────────────────────────────────────────────
 ANCHO_IMAGEN      = 1280
 CALIDAD_JPEG      = 55
 INTERVALO_SEG     = 2.5
-INTERVALO_REMOTO  = 0.4
 REINTENTOS_ESPERA = 5
 
-# ── Estado global ─────────────────────────────────────────────────────────────
-conectado         = False
-_en_observacion   = False
-_modo_observacion = 'view'
-sio = sio_module.Client(reconnection=True, reconnection_attempts=0, reconnection_delay=REINTENTOS_ESPERA)
+# ── Estado ───────────────────────────────────────────────────────────────────
+sio = sio_module.Client(reconnection=True, reconnection_attempts=0)
+_cola_profesor = queue.Queue(maxsize=3)
+_cola_bloqueo  = queue.Queue(maxsize=10)
+_cola_mensajes = queue.Queue(maxsize=20)
+_en_observacion = False
 
-_cola_profesor:  queue.Queue = queue.Queue(maxsize=3)
-_cola_bloqueo:   queue.Queue = queue.Queue(maxsize=10)
-_cola_mensajes:  queue.Queue = queue.Queue(maxsize=20)
-
-# ── Bucle de capturas ─────────────────────────────────────────────────────────
 def _b64(jpeg: bytes) -> str:
     return 'data:image/jpeg;base64,' + base64.b64encode(jpeg).decode()
 
@@ -171,164 +154,126 @@ def bucle_capturas():
     _ultimo_screenshot = 0.0
     sct = None
     while True:
-        if not conectado:
+        if not sio.connected:
             time.sleep(0.5); continue
         if sct is None:
             try: sct = mss.mss()
             except: time.sleep(2); continue
-        en_obs = _en_observacion
-        now    = time.monotonic()
-        if not en_obs and (now - _ultimo_screenshot) < INTERVALO_SEG:
-            time.sleep(0.2); continue
+        
+        now = time.monotonic()
         try:
             monitor = sct.monitors[1]
             orig_w, orig_h = monitor['width'], monitor['height']
-            captura = sct.grab(monitor)
-            img = Image.frombytes('RGB', captura.size, captura.bgra, 'raw', 'BGRX')
+            
+            # Screenshot normal cada INTERVALO_SEG
+            if (now - _ultimo_screenshot) >= INTERVALO_SEG:
+                captura = sct.grab(monitor)
+                img = Image.frombytes('RGB', captura.size, captura.bgra, 'raw', 'BGRX')
+                if img.width > ANCHO_IMAGEN:
+                    img = img.resize((ANCHO_IMAGEN, int(img.height * ANCHO_IMAGEN / img.width)), Image.LANCZOS)
+                buf = io.BytesIO(); img.save(buf, format='JPEG', quality=CALIDAD_JPEG)
+                sio.emit('screenshot', {'image': _b64(buf.getvalue())})
+                _ultimo_screenshot = now
+            
+            # Frame remoto si el profesor está mirando
+            if _en_observacion:
+                captura = sct.grab(monitor)
+                img = Image.frombytes('RGB', captura.size, captura.bgra, 'raw', 'BGRX')
+                ancho_r = min(orig_w, 1920)
+                if img.width > ancho_r:
+                    img = img.resize((ancho_r, int(img.height * ancho_r / img.width)), Image.LANCZOS)
+                buf = io.BytesIO(); img.save(buf, format='JPEG', quality=75)
+                sio.emit('remote_frame', {'image': _b64(buf.getvalue()), 'orig_w': orig_w, 'orig_h': orig_h})
+                time.sleep(0.3)
+            else:
+                time.sleep(0.5)
         except:
             try: sct.close()
             except: pass
-            sct = None; time.sleep(1); continue
+            sct = None; time.sleep(1)
 
-        if en_obs:
-            ancho_r = min(orig_w, 1920)
-            img_r = img.resize((ancho_r, int(img.height * ancho_r / img.width)), Image.LANCZOS) if img.width > ancho_r else img
-            buf = io.BytesIO(); img_r.save(buf, format='JPEG', quality=75, optimize=True)
-            try: sio.emit('remote_frame', {'image': _b64(buf.getvalue()), 'orig_w': orig_w, 'orig_h': orig_h})
-            except: pass
+# ── Eventos ──────────────────────────────────────────────────────────────────
+@sio.event
+def connect():
+    print(f"[✓] Conectado al servidor.")
+    sio.emit('register', {'name': f"{os.environ.get('USER','alumno')} - {socket.gethostname()}"})
 
-        if (now - _ultimo_screenshot) >= INTERVALO_SEG:
-            img_n = img.resize((ANCHO_IMAGEN, int(img.height * ANCHO_IMAGEN / img.width)), Image.LANCZOS) if img.width > ANCHO_IMAGEN else img
-            buf2 = io.BytesIO(); img_n.save(buf2, format='JPEG', quality=CALIDAD_JPEG, optimize=True)
-            try:
-                sio.emit('screenshot', {'image': _b64(buf2.getvalue())})
-                _ultimo_screenshot = now
-            except: pass
-        time.sleep(INTERVALO_REMOTO if en_obs else 0.5)
-
-# ── Manejo de entrada remota ───────────────────────────────────────────────────
 @sio.on('do_input')
 def on_do_input(data):
     if not INPUT_OK: return
-    tipo = data.get('type', '')
-    x, y = data.get('x'), data.get('y')
+    tipo, x, y = data.get('type', ''), data.get('x'), data.get('y')
     
-    # Intentar con pynput primero
-    if _mouse_ctrl and _kbd_ctrl:
+    if _mouse_ctrl and _PBtn:
         try:
-            from pynput.mouse import Button
-            if tipo == 'mousemove' and x is not None:
+            if tipo == 'mousemove' and x is not None: _mouse_ctrl.position = (x, y)
+            elif tipo == 'mousedown':
                 _mouse_ctrl.position = (x, y)
-            elif tipo == 'mousedown' and x is not None:
-                _mouse_ctrl.position = (x, y)
-                btn = {'left': Button.left, 'middle': Button.middle, 'right': Button.right}.get(data.get('button'), Button.left)
+                btn = {'left': _PBtn.left, 'middle': _PBtn.middle, 'right': _PBtn.right}.get(data.get('button'), _PBtn.left)
                 _mouse_ctrl.press(btn)
-            elif tipo == 'mouseup' and x is not None:
-                btn = {'left': Button.left, 'middle': Button.middle, 'right': Button.right}.get(data.get('button'), Button.left)
+            elif tipo == 'mouseup':
+                btn = {'left': _PBtn.left, 'middle': _PBtn.middle, 'right': _PBtn.right}.get(data.get('button'), _PBtn.left)
                 _mouse_ctrl.release(btn)
-            elif tipo == 'scroll' and x is not None:
-                _mouse_ctrl.position = (x, y)
-                _mouse_ctrl.scroll(0, int(data.get('dy', 0)))
-            elif tipo == 'keydown':
-                _kbd_ctrl.press(_get_pynput_key(data.get('key')))
-            elif tipo == 'keyup':
-                _kbd_ctrl.release(_get_pynput_key(data.get('key')))
+            elif tipo == 'scroll':
+                _mouse_ctrl.position = (x, y); _mouse_ctrl.scroll(0, int(data.get('dy', 0)))
+            elif tipo == 'keydown': _kbd_ctrl.press(_get_pynput_key(data.get('key')))
+            elif tipo == 'keyup': _kbd_ctrl.release(_get_pynput_key(data.get('key')))
             return
-        except Exception as e:
-            print(f"  [!] Error pynput: {e}. Reintentando con xdotool...")
+        except: pass
 
-    # Fallback xdotool
     if _XDO_CMD:
         try:
             env = dict(os.environ); env.setdefault('DISPLAY', ':0')
             def _xdo(*args): subprocess.Popen([_XDO_CMD] + [str(a) for a in args], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            if tipo == 'mousemove' and x is not None:
-                _xdo('mousemove', '--sync', x, y)
-            elif tipo == 'mousedown' and x is not None:
+            if tipo == 'mousemove': _xdo('mousemove', '--sync', x, y)
+            elif tipo == 'mousedown':
                 btn = {'left': 1, 'middle': 2, 'right': 3}.get(data.get('button'), 1)
                 _xdo('mousemove', '--sync', x, y, 'mousedown', btn)
-            elif tipo == 'mouseup' and x is not None:
-                btn = {'left': 1, 'middle': 2, 'right': 3}.get(data.get('button'), 1)
-                _xdo('mouseup', btn)
-            elif tipo == 'scroll' and x is not None:
-                dy = int(data.get('dy', 0))
-                btn = 4 if dy > 0 else 5
-                for _ in range(min(abs(dy), 10)): _xdo('click', btn)
-            elif tipo == 'keydown':
-                k = _XDO_KEY_MAP.get(data.get('key', '').lower(), data.get('key'))
-                _xdo('keydown', k)
-            elif tipo == 'keyup':
-                k = _XDO_KEY_MAP.get(data.get('key', '').lower(), data.get('key'))
-                _xdo('keyup', k)
-        except Exception as e:
-            print(f"  [!] Fallo crítico xdotool: {e}")
-
-# ── Resto de eventos ──────────────────────────────────────────────────────────
-@sio.event
-def connect():
-    global conectado; conectado = True
-    user = os.environ.get('USER','alumno')
-    sio.emit('register', {'name': f"{user} - {socket.gethostname()}"})
-
-@sio.event
-def disconnect():
-    global conectado; conectado = False
-
-@sio.on('quit_app')
-def on_quit_app(_data): os._exit(0)
-
-@sio.on('show_message')
-def on_show_message(data):
-    if TK_OK: _cola_mensajes.put_nowait(data)
+            elif tipo == 'mouseup': _xdo('mouseup', {'left': 1, 'middle': 2, 'right': 3}.get(data.get('button'), 1))
+            elif tipo == 'scroll':
+                btn = 4 if int(data.get('dy', 0)) > 0 else 5
+                for _ in range(5): _xdo('click', btn)
+            elif tipo == 'keydown': _xdo('keydown', _XDO_KEY_MAP.get(data.get('key', '').lower(), data.get('key')))
+            elif tipo == 'keyup': _xdo('keyup', _XDO_KEY_MAP.get(data.get('key', '').lower(), data.get('key')))
+        except: pass
 
 @sio.on('viewer_start')
-def on_viewer_start(data):
-    global _en_observacion, _modo_observacion
-    _en_observacion = True; _modo_observacion = data.get('mode', 'view')
-
+def on_viewer_start(data): global _en_observacion; _en_observacion = True
 @sio.on('viewer_stop')
-def on_viewer_stop(_data):
-    global _en_observacion; _en_observacion = False
-
+def on_viewer_stop(_data): global _en_observacion; _en_observacion = False
+@sio.on('quit_app')
+def on_quit_app(_data): os._exit(0)
+@sio.on('show_message')
+def on_show_message(data): _cola_mensajes.put_nowait(data)
 @sio.on('lock_screen')
-def on_lock_screen(_data):
-    if TK_OK: _cola_bloqueo.put_nowait(True)
-
+def on_lock_screen(_data): _cola_bloqueo.put_nowait(True)
 @sio.on('unlock_screen')
-def on_unlock_screen(_data):
-    if TK_OK: _cola_bloqueo.put_nowait(False)
-
+def on_unlock_screen(_data): _cola_bloqueo.put_nowait(False)
 @sio.on('teacher_screen')
 def on_teacher_screen(data):
-    if IMGTK_OK:
-        try: _cola_profesor.put_nowait(data)
-        except queue.Full:
-            try: _cola_profesor.get_nowait(); _cola_profesor.put_nowait(data)
-            except: pass
+    try: _cola_profesor.put_nowait(data)
+    except queue.Full:
+        try: _cola_profesor.get_nowait(); _cola_profesor.put_nowait(data)
+        except: pass
 
 # ── Interfaz UI ──────────────────────────────────────────────────────────────
 class _VentanaProfesor:
     def __init__(self, root):
-        self.top = tk.Toplevel(root); self.top.title("📺 Pantalla del Profesor — VIGIA")
-        self.top.configure(bg='#0f1117'); self.top.geometry("960x560")
-        cab = tk.Frame(self.top, bg='#1a1d27'); cab.pack(fill='x')
-        tk.Label(cab, text="  El profesor está compartiendo su pantalla", bg='#1a1d27', fg='#4f8ef7', font=('Segoe UI', 9, 'bold')).pack(side='left', pady=5)
-        self._label = tk.Label(self.top, bg='#0f1117', text="⏳ Esperando imagen…", fg='#718096', font=('Segoe UI', 12)); self._label.pack(expand=True, fill='both')
-        self._foto = None; self.top.attributes('-topmost', True); self.top.protocol("WM_DELETE_WINDOW", self.destruir)
-    def actualizar(self, imagen_b64):
+        self.top = tk.Toplevel(root); self.top.title("📺 Pantalla del Profesor"); self.top.configure(bg='#0f1117')
+        self.top.geometry("960x560"); self.top.attributes('-topmost', True)
+        self._label = tk.Label(self.top, bg='#0f1117', text="⏳ Esperando imagen…", fg='#718096', font=('Segoe UI', 12))
+        self._label.pack(expand=True, fill='both'); self._foto = None
+        self.top.protocol("WM_DELETE_WINDOW", self.destruir)
+    def actualizar(self, b64):
         try:
-            img = Image.open(io.BytesIO(base64.b64decode(imagen_b64.split(',', 1)[1])))
-            img.thumbnail((max(self.top.winfo_width(), 960), max(self.top.winfo_height()-30, 530)), Image.LANCZOS)
+            img = Image.open(io.BytesIO(base64.b64decode(b64.split(',', 1)[1])))
+            img.thumbnail((self.top.winfo_width() or 960, self.top.winfo_height() or 560), Image.LANCZOS)
             self._foto = ImageTk.PhotoImage(img); self._label.config(image=self._foto, text='')
         except: pass
     def destruir(self): self.top.destroy()
 
 class _VentanaMensaje:
     def __init__(self, root, msg):
-        t = tk.Toplevel(root); t.title(msg.get('title', 'Mensaje'))
-        t.configure(bg='#1a1d27'); t.attributes('-topmost', True)
-        tk.Label(t, text=f"  ✉ {msg.get('title')}", bg='#4f8ef7', fg='white', font=('Segoe UI', 10, 'bold')).pack(fill='x', pady=0)
+        t = tk.Toplevel(root); t.title(msg.get('title', 'Mensaje')); t.configure(bg='#1a1d27'); t.attributes('-topmost', True)
         c = tk.Frame(t, bg='#1a1d27', padx=20, pady=20); c.pack()
         txt = tk.Text(c, bg='#1a1d27', fg='#e2e8f0', font=('Segoe UI', 12), wrap='word', height=6, width=40, relief='flat')
         txt.insert('end', re.sub(r'<[^>]+>', '', msg.get('body', ''))); txt.config(state='disabled'); txt.pack()
@@ -336,13 +281,11 @@ class _VentanaMensaje:
 
 class _VentanaBloqueo:
     def __init__(self, root):
-        self.top = tk.Toplevel(root); self.top.attributes('-fullscreen', True, '-topmost', True)
-        self.top.configure(bg='#0a0c14'); self.top.overrideredirect(True)
+        self.top = tk.Toplevel(root); self.top.attributes('-fullscreen', True, '-topmost', True); self.top.configure(bg='#0a0c14'); self.top.overrideredirect(True)
         m = tk.Frame(self.top, bg='#0a0c14'); m.place(relx=0.5, rely=0.5, anchor='center')
         tk.Label(m, text='🔒', bg='#0a0c14', fg='#fc8181', font=('Segoe UI', 80)).pack()
         tk.Label(m, text='Pantalla bloqueada', bg='#0a0c14', fg='#e2e8f0', font=('Segoe UI', 24, 'bold')).pack()
-        self.top.update(); self.top.focus_force()
-        try: self.top.grab_set_global()
+        self.top.update(); self.top.focus_force(); try: self.top.grab_set_global()
         except: self.top.grab_set()
         self._activa = True; self._mantener()
     def _mantener(self):
@@ -352,8 +295,7 @@ class _VentanaBloqueo:
     def desbloquear(self): self._activa = False; self.top.destroy()
 
 def ejecutar_interfaz():
-    root = tk.Tk(); root.withdraw()
-    v_prof = None; v_bloq = None
+    root = tk.Tk(); root.withdraw(); v_prof = None; v_bloq = None
     def check():
         nonlocal v_prof, v_bloq
         try:
