@@ -54,10 +54,46 @@ elif command -v pip3 >/dev/null 2>&1; then
 fi
 
 if [ -z "$PIP" ]; then
+  echo "[*] pip no encontrado. Intentando activarlo con ensurepip..."
+  "$PYTHON3" -c "import ensurepip; ensurepip.bootstrap(upgrade=True)" 2>/dev/null
+  if "$PYTHON3" -m pip --version >/dev/null 2>&1; then
+    PIP="$PYTHON3 -m pip"
+  fi
+fi
+
+if [ -z "$PIP" ]; then
+  echo "[*] ensurepip no disponible. Intentando instalar python3-pip con apt..."
+  sudo apt-get install -y python3-pip -qq 2>/dev/null
+  if "$PYTHON3" -m pip --version >/dev/null 2>&1; then
+    PIP="$PYTHON3 -m pip"
+  fi
+fi
+
+if [ -z "$PIP" ]; then
   echo "[*] pip no encontrado. Descargando get-pip.py..."
-  curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/_vigia_getpip.py
-  "$PYTHON3" /tmp/_vigia_getpip.py --user --break-system-packages -q
-  PIP="$HOME/.local/bin/pip"
+  if command -v curl >/dev/null 2>&1; then
+    curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/_vigia_getpip.py
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q https://bootstrap.pypa.io/get-pip.py -O /tmp/_vigia_getpip.py
+  fi
+  if [ -f /tmp/_vigia_getpip.py ]; then
+    "$PYTHON3" /tmp/_vigia_getpip.py --user --break-system-packages -q
+    if "$PYTHON3" -m pip --version >/dev/null 2>&1; then
+      PIP="$PYTHON3 -m pip"
+    elif [ -x "$HOME/.local/bin/pip" ]; then
+      PIP="$HOME/.local/bin/pip"
+    fi
+  fi
+fi
+
+if [ -z "$PIP" ]; then
+  echo ""
+  echo "[!] No se pudo instalar pip automáticamente."
+  echo "    Instálalo manualmente y vuelve a ejecutar este script:"
+  echo "      sudo apt install python3-pip"
+  echo ""
+  read -rp "Pulsa Enter para cerrar..."
+  exit 1
 fi
 
 echo "[✓] pip: $PIP"
