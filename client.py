@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-VIGIA - Cliente del Alumno (v1.2)
+VIGIA - Cliente del Alumno (v1.3 - Control Remoto Fijo)
 Captura la pantalla y la envía al servidor del profesor.
-Muestra la pantalla del profesor cuando este la comparte.
 Uso: python client.py [ip_servidor] [puerto]
 """
 
@@ -90,16 +89,39 @@ if TK_OK:
 else:
     ImageTk = None; IMGTK_OK = False
 
-# Control remoto
-INPUT_OK = False
-if shutil.which('xdotool'):
-    INPUT_OK = True
-else:
-    os.system('sudo apt-get install -y xdotool -qq 2>/dev/null')
-    if shutil.which('xdotool'): INPUT_OK = True
+# ── Control remoto (Preferir pynput, fallback xdotool) ─────────────────────────
+_mouse_ctrl = None
+_kbd_ctrl   = None
+_XDO_CMD    = shutil.which('xdotool')
 
-# ── Mapeo de teclas xdotool ──────────────────────────────────────────────────
-_XDO_MAP = {
+def _init_input():
+    global _mouse_ctrl, _kbd_ctrl
+    try:
+        from pynput.mouse import Controller as MouseController
+        from pynput.keyboard import Controller as KbdController
+        _mouse_ctrl = MouseController()
+        _kbd_ctrl = KbdController()
+        print("  [✓] Control remoto vía pynput habilitado.")
+        return True
+    except Exception as e:
+        if _XDO_CMD:
+            print("  [✓] Control remoto vía xdotool habilitado.")
+            return True
+        else:
+            print(f"  [!] Fallo inicializando pynput: {e}")
+            print("  [*] Intentando instalar xdotool...")
+            os.system('sudo apt-get install -y xdotool -qq 2>/dev/null')
+            if shutil.which('xdotool'):
+                global _XDO_CMD
+                _XDO_CMD = shutil.which('xdotool')
+                print("  [✓] xdotool instalado con éxito.")
+                return True
+    return False
+
+INPUT_OK = _init_input()
+
+# Mapeo para xdotool
+_XDO_KEY_MAP = {
     'space': 'space', 'enter': 'Return', 'esc': 'Escape', 'tab': 'Tab',
     'backspace': 'BackSpace', 'delete': 'Delete', 'insert': 'Insert',
     'home': 'Home', 'end': 'End', 'pageup': 'Page_Up', 'pagedown': 'Page_Down',
@@ -109,7 +131,21 @@ _XDO_MAP = {
     'ctrl': 'Control_L', 'alt': 'Alt_L', 'shift': 'Shift_L', 'win': 'Super_L',
     'capslock': 'Caps_Lock', 'numlock': 'Num_Lock'
 }
-_MODS_HELD = set()
+
+# Mapeo para pynput
+def _get_pynput_key(key):
+    from pynput.keyboard import Key
+    m = {
+        'enter': Key.enter, 'esc': Key.esc, 'tab': Key.tab, 'space': Key.space,
+        'backspace': Key.backspace, 'delete': Key.delete, 'insert': Key.insert,
+        'home': Key.home, 'end': Key.end, 'pageup': Key.page_up, 'pagedown': Key.page_down,
+        'left': Key.left, 'right': Key.right, 'up': Key.up, 'down': Key.down,
+        'f1': Key.f1, 'f2': Key.f2, 'f3': Key.f3, 'f4': Key.f4, 'f5': Key.f5, 'f6': Key.f6,
+        'f7': Key.f7, 'f8': Key.f8, 'f9': Key.f9, 'f10': Key.f10, 'f11': Key.f11, 'f12': Key.f12,
+        'ctrl': Key.ctrl, 'alt': Key.alt, 'shift': Key.shift, 'win': Key.cmd,
+        'capslock': Key.caps_lock, 'numlock': Key.num_lock
+    }
+    return m.get(key.lower(), key)
 
 # ── Configuración ────────────────────────────────────────────────────────────
 ANCHO_IMAGEN      = 1280
@@ -128,7 +164,7 @@ _cola_profesor:  queue.Queue = queue.Queue(maxsize=3)
 _cola_bloqueo:   queue.Queue = queue.Queue(maxsize=10)
 _cola_mensajes:  queue.Queue = queue.Queue(maxsize=20)
 
-# ── Funciones de captura ──────────────────────────────────────────────────────
+# ── Bucle de capturas ─────────────────────────────────────────────────────────
 def _b64(jpeg: bytes) -> str:
     return 'data:image/jpeg;base64,' + base64.b64encode(jpeg).decode()
 
@@ -171,7 +207,65 @@ def bucle_capturas():
             except: pass
         time.sleep(INTERVALO_REMOTO if en_obs else 0.5)
 
-# ── Eventos Socket.IO ────────────────────────────────────────────────────────
+# ── Manejo de entrada remota ───────────────────────────────────────────────────
+@sio.on('do_input')
+def on_do_input(data):
+    if not INPUT_OK: return
+    tipo = data.get('type', '')
+    x, y = data.get('x'), data.get('y')
+    
+    # Intentar con pynput primero
+    if _mouse_ctrl and _kbd_ctrl:
+        try:
+            from pynput.mouse import Button
+            if tipo == 'mousemove' and x is not None:
+                _mouse_ctrl.position = (x, y)
+            elif tipo == 'mousedown' and x is not None:
+                _mouse_ctrl.position = (x, y)
+                btn = {'left': Button.left, 'middle': Button.middle, 'right': Button.right}.get(data.get('button'), Button.left)
+                _mouse_ctrl.press(btn)
+            elif tipo == 'mouseup' and x is not None:
+                btn = {'left': Button.left, 'middle': Button.middle, 'right': Button.right}.get(data.get('button'), Button.left)
+                _mouse_ctrl.release(btn)
+            elif tipo == 'scroll' and x is not None:
+                _mouse_ctrl.position = (x, y)
+                _mouse_ctrl.scroll(0, int(data.get('dy', 0)))
+            elif tipo == 'keydown':
+                _kbd_ctrl.press(_get_pynput_key(data.get('key')))
+            elif tipo == 'keyup':
+                _kbd_ctrl.release(_get_pynput_key(data.get('key')))
+            return
+        except Exception as e:
+            print(f"  [!] Error pynput: {e}. Reintentando con xdotool...")
+
+    # Fallback xdotool
+    if _XDO_CMD:
+        try:
+            env = dict(os.environ); env.setdefault('DISPLAY', ':0')
+            def _xdo(*args): subprocess.Popen([_XDO_CMD] + [str(a) for a in args], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            if tipo == 'mousemove' and x is not None:
+                _xdo('mousemove', '--sync', x, y)
+            elif tipo == 'mousedown' and x is not None:
+                btn = {'left': 1, 'middle': 2, 'right': 3}.get(data.get('button'), 1)
+                _xdo('mousemove', '--sync', x, y, 'mousedown', btn)
+            elif tipo == 'mouseup' and x is not None:
+                btn = {'left': 1, 'middle': 2, 'right': 3}.get(data.get('button'), 1)
+                _xdo('mouseup', btn)
+            elif tipo == 'scroll' and x is not None:
+                dy = int(data.get('dy', 0))
+                btn = 4 if dy > 0 else 5
+                for _ in range(min(abs(dy), 10)): _xdo('click', btn)
+            elif tipo == 'keydown':
+                k = _XDO_KEY_MAP.get(data.get('key', '').lower(), data.get('key'))
+                _xdo('keydown', k)
+            elif tipo == 'keyup':
+                k = _XDO_KEY_MAP.get(data.get('key', '').lower(), data.get('key'))
+                _xdo('keyup', k)
+        except Exception as e:
+            print(f"  [!] Fallo crítico xdotool: {e}")
+
+# ── Resto de eventos ──────────────────────────────────────────────────────────
 @sio.event
 def connect():
     global conectado; conectado = True
@@ -197,41 +291,6 @@ def on_viewer_start(data):
 @sio.on('viewer_stop')
 def on_viewer_stop(_data):
     global _en_observacion; _en_observacion = False
-
-@sio.on('do_input')
-def on_do_input(data):
-    if not INPUT_OK: return
-    tipo = data.get('type', '')
-    x, y = data.get('x'), data.get('y')
-    try:
-        env = dict(os.environ); env.setdefault('DISPLAY', ':0')
-        def _xdo(*args): subprocess.Popen(['xdotool'] + [str(a) for a in args], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        
-        if tipo == 'mousemove' and x is not None:
-            _xdo('mousemove', '--sync', x, y)
-        elif tipo == 'mousedown' and x is not None:
-            btn = {'left': 1, 'middle': 2, 'right': 3}.get(data.get('button'), 1)
-            _xdo('mousemove', '--sync', x, y, 'mousedown', btn)
-        elif tipo == 'mouseup' and x is not None:
-            btn = {'left': 1, 'middle': 2, 'right': 3}.get(data.get('button'), 1)
-            _xdo('mouseup', btn)
-        elif tipo == 'scroll' and x is not None:
-            dy = int(data.get('dy', 0))
-            btn = 4 if dy > 0 else 5
-            for _ in range(min(abs(dy), 10)): _xdo('click', btn)
-        elif tipo == 'keydown':
-            key = data.get('key', '')
-            if key in ('ctrl', 'alt', 'shift', 'win'):
-                _MODS_HELD.add(_XDO_MAP[key]); _xdo('keydown', _XDO_MAP[key])
-            else:
-                k = _XDO_MAP.get(key, key)
-                _xdo('key', k)
-        elif tipo == 'keyup':
-            key = data.get('key', '')
-            if key in ('ctrl', 'alt', 'shift', 'win'):
-                k = _XDO_MAP[key]
-                if k in _MODS_HELD: _MODS_HELD.remove(k); _xdo('keyup', k)
-    except: pass
 
 @sio.on('lock_screen')
 def on_lock_screen(_data):
