@@ -22,39 +22,56 @@ from html.parser import HTMLParser as _HTMLParser
 # ── Importaciones con autoinstalación amigable ───────────────────────────────
 
 def _pip_disponible():
-    return subprocess.run(
-        [sys.executable, '-m', 'pip', '--version'],
-        capture_output=True,
-    ).returncode == 0
+    # Intenta varias formas de detectar pip funcionando
+    if subprocess.run([sys.executable, '-m', 'pip', '--version'],
+                      capture_output=True).returncode == 0:
+        return f"{sys.executable} -m pip"
+    if shutil.which('pip3'):
+        return "pip3"
+    if os.path.exists(os.path.expanduser('~/.local/bin/pip3')):
+        return os.path.expanduser('~/.local/bin/pip3')
+    return None
 
 
 def _instalar(paquete):
     print(f"  Instalando {paquete}...")
     import importlib
-    if not _pip_disponible():
-        print("  [*] pip no disponible. Intentando activarlo con ensurepip...")
-        # Intento 1: ensurepip — sin internet ni sudo, usa wheels del propio Python
+    pip_cmd = _pip_disponible()
+
+    if not pip_cmd:
+        print("  [*] pip no disponible. Intentando activarlo/instalarlo...")
+        # Intento 1: ensurepip
         try:
             import ensurepip
             ensurepip.bootstrap(upgrade=True)
+            pip_cmd = _pip_disponible()
         except Exception:
             pass
-        # Intento 2: apt-get (solo funciona si hay terminal con sudo disponible)
-        if not _pip_disponible():
-            os.system('sudo apt-get install -y python3-pip -qq 2>/dev/null')
-    if _pip_disponible():
+        
+        # Intento 2: apt-get
+        if not pip_cmd:
+            print("  [*] Instalando python3-pip desde repositorios...")
+            os.system('sudo apt-get update -qq && sudo apt-get install -y python3-pip -qq 2>/dev/null')
+            pip_cmd = _pip_disponible()
+    
+    if pip_cmd:
+        # Usar pip detectado
+        print(f"  [*] Usando: {pip_cmd}")
+        # Dividir el comando si es 'python3 -m pip'
+        cmd_parts = pip_cmd.split()
         ret = subprocess.run(
-            [sys.executable, '-m', 'pip', 'install',
-             '--user', '--break-system-packages', '-q'] + paquete.split(),
+            cmd_parts + ['install', '--user', '--break-system-packages', '-q'] + paquete.split(),
         ).returncode
     else:
-        # Último recurso: pip3 del sistema
+        # Último recurso desesperado
+        print("  [!] pip no detectado, intentando comando directo 'pip3'...")
         ret = os.system(f'pip3 install --user --break-system-packages -q {paquete}')
+    
     if ret != 0:
         print(f"\n  [!] No se pudo instalar '{paquete}' automáticamente.")
         print(f"  Ejecuta manualmente en una terminal:")
-        print(f"    sudo apt install python3-pip")
-        print(f"    pip3 install --break-system-packages {paquete}\n")
+        print(f"    sudo apt update && sudo apt install python3-pip")
+        print(f"    pip3 install --user --break-system-packages {paquete}\n")
     importlib.invalidate_caches()
 
 

@@ -1,6 +1,29 @@
  
 Al instalar en el cliente sigue saltando este error:
   
+???????????????????????????????????????????????
+  VIGIA ? Instalando cliente del alumno
+???????????????????????????????????????????????
+
+[?] Python: python3  (Python 3.12.3)
+[*] pip no encontrado. Descargando get-pip.py...
+./instalar_cliente.sh: 56: curl: not found
+python3: can't open file '/tmp/_vigia_getpip.py': [Errno 2] No such file or directory
+[?] pip: /home/maia/.local/bin/pip
+[*] Instalando dependencias Python...
+/usr/bin/python3: No module named pip
+./instalar_cliente.sh: 67: /home/maia/.local/bin/pip: not found
+[?] tkinter disponible
+[*] Instalando xdotool y python3-pynput (control remoto)...
+[?] xdotool disponible (control remoto habilitado)
+[?] IP del servidor guardada: 192.168.202.2
+
+[?] Instalación completada.
+
+  Acceso directo creado en el Escritorio: 'VIGIA (Alumno)'
+
+
+Luego al ejecutar el instalar_cliente.sh con la ip:
   
 Instalando python-socketio[client] websocket-client...
 /usr/bin/python3: No module named pip
