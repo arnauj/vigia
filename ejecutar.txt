@@ -1,14 +1,43 @@
-Corrige este error al ejecutar el vigia en el cliente:
 
-   [VIGIA] Instalando --force-reinstall Pillow...
+Se lanzan estos errores:
+
+
+/home/juanra/Escritorio/EpoProfe/server.py:12: DeprecationWarning: 
+Eventlet is deprecated. It is currently being maintained in bugfix mode, and
+we strongly recommend against using it for new projects.
+
+If you are already using Eventlet, we recommend migrating to a different
+framework.  For more detail see
+https://eventlet.readthedocs.io/en/latest/asyncio/migration.html
+
+  import eventlet
+[*] Iniciando servidor VIGIA (modo: eventlet)
+
+====================================================
+  VIGIA — Servidor del Profesor
+====================================================
+  Dashboard: http://192.168.0.119:5000
+  Alumnos se conectan a IP: 192.168.0.119  puerto: 5000
+====================================================
+
+[+] Conexión: CER6eIsYnEG6x_d5AAAB  IP: 127.0.0.1
+Exception in thread Thread-1 (_abrir_navegador):
 Traceback (most recent call last):
-  File "/home/profesor/Escritorio/vigia/client.py", line 75, in <module>
-    from PIL import ImageTk
-ImportError: cannot import name 'ImageTk' from 'PIL' (/usr/lib/python3/dist-packages/PIL/__init__.py). Did you mean: 'Image'?
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/home/profesor/Escritorio/vigia/client.py", line 79, in <module>
-    from PIL import Image, ImageTk
-ImportError: cannot import name 'ImageTk' from 'PIL' (/usr/lib/python3/dist-packages/PIL/__init__.py). Did you mean: 'Image'?
+  File "/usr/lib/python3.12/threading.py", line 1073, in _bootstrap_inner
+    self.run()
+  File "/usr/lib/python3.12/threading.py", line 1010, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/juanra/Escritorio/EpoProfe/server.py", line 243, in _abrir_navegador
+    webbrowser.open(f"http://localhost:{port}")
+  File "/usr/lib/python3.12/webbrowser.py", line 87, in open
+    if browser.open(url, new, autoraise):
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/webbrowser.py", line 276, in open
+    success = self._invoke(args, True, autoraise, url)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/webbrowser.py", line 245, in _invoke
+    rc = p.wait(5)
+         ^^^^^^^^^
+  File "/home/juanra/.local/lib/python3.12/site-packages/eventlet/green/subprocess.py", line 88, in wait
+    raise TimeoutExpired(self.args, timeout)
+subprocess.TimeoutExpired: Command '['google-chrome', 'http://localhost:5000']' timed out after 5 seconds

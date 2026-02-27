@@ -6,6 +6,10 @@ Uso: python server.py [puerto]
 """
 
 import sys
+import warnings
+
+# Silenciar avisos de deprecación de eventlet (Python 3.12+)
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="eventlet")
 
 # Eventlet monkey patching debe hacerse ANTES de cualquier otra importación
 try:
@@ -239,10 +243,17 @@ if __name__ == '__main__':
 
     def _abrir_navegador():
         import time
-        time.sleep(1.2)
-        webbrowser.open(f"http://localhost:{port}")
+        time.sleep(1.5)
+        try:
+            webbrowser.open(f"http://localhost:{port}")
+        except Exception:
+            # Silenciar errores de lanzamiento de navegador (timeout, etc)
+            pass
 
-    threading.Thread(target=_abrir_navegador, daemon=True).start()
+    if async_mode == 'eventlet':
+        eventlet.spawn_after(1.5, _abrir_navegador)
+    else:
+        threading.Thread(target=_abrir_navegador, daemon=True).start()
     
     if async_mode == 'eventlet':
         socketio.run(app, host='0.0.0.0', port=port, debug=False)
