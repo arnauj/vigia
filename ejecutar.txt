@@ -1,31 +1,33 @@
  
 Al instalar en el cliente sigue saltando este error:
   
-???????????????????????????????????????????????
-  VIGIA ? Instalando cliente del alumno
-???????????????????????????????????????????????
+maia@E02-12:~/Escritorio/vigia-master$ sh ./instalar_cliente.sh 192.168.202.2
 
-[?] Python: python3  (Python 3.12.3)
+âââââââââââââââââââââââââââââââââââââââââââââââ
+  VIGIA â Instalando cliente del alumno
+âââââââââââââââââââââââââââââââââââââââââââââââ
+
+[â] Python: python3  (Python 3.12.3)
 [*] pip no encontrado. Descargando get-pip.py...
 ./instalar_cliente.sh: 56: curl: not found
 python3: can't open file '/tmp/_vigia_getpip.py': [Errno 2] No such file or directory
-[?] pip: /home/maia/.local/bin/pip
+[â] pip: /home/maia/.local/bin/pip
 [*] Instalando dependencias Python...
 /usr/bin/python3: No module named pip
 ./instalar_cliente.sh: 67: /home/maia/.local/bin/pip: not found
-[?] tkinter disponible
+[â] tkinter disponible
 [*] Instalando xdotool y python3-pynput (control remoto)...
-[?] xdotool disponible (control remoto habilitado)
-[?] IP del servidor guardada: 192.168.202.2
+[sudo] contraseÃ±a para maia: 
+[â] xdotool disponible (control remoto habilitado)
+[â] IP del servidor guardada: 192.168.202.2
 
-[?] Instalación completada.
+[â] InstalaciÃ³n completada.
 
   Acceso directo creado en el Escritorio: 'VIGIA (Alumno)'
-
-
-Luego al ejecutar el instalar_cliente.sh con la ip:
   
-Instalando python-socketio[client] websocket-client...
+
+
+  Instalando python-socketio[client] websocket-client...
 /usr/bin/python3: No module named pip
 Traceback (most recent call last):
   File "/home/maia/.local/share/Trash/files/vigia-master/client.py", line 31, in <module>
@@ -38,7 +40,7 @@ Traceback (most recent call last):
   File "/home/maia/.local/share/Trash/files/vigia-master/client.py", line 34, in <module>
     import socketio as sio_module
 ModuleNotFoundError: No module named 'socketio'
+Pulsa Enter para cerrar...
 
 
-
-Corrígelo
+corrígelo
