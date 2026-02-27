@@ -1,16 +1,6 @@
-Al compartir pantalla me da este error:
+Corrige este error al ejecutar el vigia en el cliente:
 
-
-
-127.0.0.1 - - [27/Feb/2026 11:49:23] "GET /socket.io/?EIO=4&transport=websocket HTTP/1.1" 500 -
-Error on request:
-Traceback (most recent call last):
-  File "/home/juanra/.local/lib/python3.12/site-packages/werkzeug/serving.py", line 370, in run_wsgi
-    execute(self.server.app)
-  File "/home/juanra/.local/lib/python3.12/site-packages/werkzeug/serving.py", line 336, in execute
-    write(b"")
-  File "/home/juanra/.local/lib/python3.12/site-packages/werkzeug/serving.py", line 261, in write
-    assert status_set is not None, "write() before start_response"
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-AssertionError: write() before start_response
-[+] Conexión: 10rFEQ8DyaFhZvqYAAAP  IP: 127.0.0.1
+  File "/home/profesor/Escritorio/vigia-master/client.py", line 288
+    self.top.update(); self.top.focus_force(); try: self.top.grab_set_global()
+                                               ^^^
+SyntaxError: invalid syntax

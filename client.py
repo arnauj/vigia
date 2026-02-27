@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-VIGIA - Cliente del Alumno (v1.4 - Estabilidad Total)
+VIGIA - Cliente del Alumno (v1.6)
 Captura la pantalla y la envía al servidor del profesor.
 Uso: python client.py [ip_servidor] [puerto]
 """
@@ -18,7 +18,7 @@ import shutil
 import subprocess
 from html.parser import HTMLParser as _HTMLParser
 
-# ── Importaciones con autoinstalación amigable ───────────────────────────────
+# ── Importaciones ────────────────────────────────────────────────────────────
 
 def _pip_disponible():
     try:
@@ -28,8 +28,6 @@ def _pip_disponible():
     except Exception: pass
     if shutil.which('pip3'): return ['pip3']
     if shutil.which('pip'): return ['pip']
-    p = os.path.expanduser('~/.local/bin/pip3')
-    if os.path.exists(p) and os.access(p, os.X_OK): return [p]
     return None
 
 def _instalar(paquete):
@@ -49,7 +47,7 @@ def _instalar(paquete):
     importlib.invalidate_caches()
     return False
 
-# Cargar dependencias críticas
+# Cargar dependencias
 try:
     import socketio as sio_module
 except ImportError:
@@ -66,7 +64,6 @@ try:
 except ImportError:
     _instalar("Pillow"); from PIL import Image
 
-# tkinter para UI
 try:
     import tkinter as tk
     TK_OK = True
@@ -84,32 +81,33 @@ if TK_OK:
 else:
     ImageTk = None; IMGTK_OK = False
 
-# ── Control remoto (pynput + xdotool fallback) ───────────────────────────────
+# ── Control remoto (Pynput + Xdotool) ─────────────────────────────────────────
 _mouse_ctrl = None
 _kbd_ctrl   = None
-_XDO_CMD    = shutil.which('xdotool')
 _PBtn       = None
+_XDO_CMD    = shutil.which('xdotool')
 
 def _init_input():
-    global _mouse_ctrl, _kbd_ctrl, _XDO_CMD, _PBtn
+    global _mouse_ctrl, _kbd_ctrl, _PBtn, _XDO_CMD
+    # 1. pynput
     try:
         from pynput.mouse import Controller as MouseController, Button
         from pynput.keyboard import Controller as KbdController
         _mouse_ctrl = MouseController()
         _kbd_ctrl = KbdController()
         _PBtn = Button
-        print("  [✓] Control remoto vía pynput habilitado.")
-        return True
+        print("  [✓] pynput inicializado.")
     except Exception as e:
-        if _XDO_CMD:
-            print("  [✓] Control remoto vía xdotool habilitado.")
-            return True
-        else:
-            print("  [*] Intentando instalar xdotool...")
-            os.system('sudo apt-get install -y xdotool -qq 2>/dev/null')
-            _XDO_CMD = shutil.which('xdotool')
-            if _XDO_CMD: return True
-    return False
+        print(f"  [!] pynput no disponible: {e}")
+
+    # 2. xdotool
+    if not _XDO_CMD:
+        _XDO_CMD = shutil.which('xdotool')
+    
+    if _XDO_CMD:
+        print(f"  [✓] xdotool detectado en {_XDO_CMD}.")
+    
+    return (_mouse_ctrl is not None) or (_XDO_CMD is not None)
 
 INPUT_OK = _init_input()
 
@@ -165,7 +163,6 @@ def bucle_capturas():
             monitor = sct.monitors[1]
             orig_w, orig_h = monitor['width'], monitor['height']
             
-            # Screenshot normal cada INTERVALO_SEG
             if (now - _ultimo_screenshot) >= INTERVALO_SEG:
                 captura = sct.grab(monitor)
                 img = Image.frombytes('RGB', captura.size, captura.bgra, 'raw', 'BGRX')
@@ -175,7 +172,6 @@ def bucle_capturas():
                 sio.emit('screenshot', {'image': _b64(buf.getvalue())})
                 _ultimo_screenshot = now
             
-            # Frame remoto si el profesor está mirando
             if _en_observacion:
                 captura = sct.grab(monitor)
                 img = Image.frombytes('RGB', captura.size, captura.bgra, 'raw', 'BGRX')
@@ -192,65 +188,95 @@ def bucle_capturas():
             except: pass
             sct = None; time.sleep(1)
 
-# ── Eventos ──────────────────────────────────────────────────────────────────
-@sio.event
-def connect():
-    print(f"[✓] Conectado al servidor.")
-    sio.emit('register', {'name': f"{os.environ.get('USER','alumno')} - {socket.gethostname()}"})
-
+# ── Manejo de entrada ─────────────────────────────────────────────────────────
 @sio.on('do_input')
 def on_do_input(data):
     if not INPUT_OK: return
-    tipo, x, y = data.get('type', ''), data.get('x'), data.get('y')
-    
+    tipo = data.get('type', '')
+    try:
+        x = int(data.get('x', 0))
+        y = int(data.get('y', 0))
+    except: return
+
+    pynput_done = False
     if _mouse_ctrl and _PBtn:
         try:
-            if tipo == 'mousemove' and x is not None: _mouse_ctrl.position = (x, y)
+            if tipo == 'mousemove':
+                _mouse_ctrl.position = (x, y)
             elif tipo == 'mousedown':
                 _mouse_ctrl.position = (x, y)
                 btn = {'left': _PBtn.left, 'middle': _PBtn.middle, 'right': _PBtn.right}.get(data.get('button'), _PBtn.left)
                 _mouse_ctrl.press(btn)
             elif tipo == 'mouseup':
+                _mouse_ctrl.position = (x, y)
                 btn = {'left': _PBtn.left, 'middle': _PBtn.middle, 'right': _PBtn.right}.get(data.get('button'), _PBtn.left)
                 _mouse_ctrl.release(btn)
             elif tipo == 'scroll':
                 _mouse_ctrl.position = (x, y); _mouse_ctrl.scroll(0, int(data.get('dy', 0)))
-            elif tipo == 'keydown': _kbd_ctrl.press(_get_pynput_key(data.get('key')))
-            elif tipo == 'keyup': _kbd_ctrl.release(_get_pynput_key(data.get('key')))
-            return
+            elif tipo == 'keydown':
+                _kbd_ctrl.press(_get_pynput_key(data.get('key')))
+            elif tipo == 'keyup':
+                _kbd_ctrl.release(_get_pynput_key(data.get('key')))
+            pynput_done = True
         except: pass
 
-    if _XDO_CMD:
+    if not pynput_done and _XDO_CMD:
         try:
             env = dict(os.environ); env.setdefault('DISPLAY', ':0')
             def _xdo(*args): subprocess.Popen([_XDO_CMD] + [str(a) for a in args], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if tipo == 'mousemove': _xdo('mousemove', '--sync', x, y)
+            
+            if tipo == 'mousemove':
+                _xdo('mousemove', '--sync', x, y)
             elif tipo == 'mousedown':
                 btn = {'left': 1, 'middle': 2, 'right': 3}.get(data.get('button'), 1)
                 _xdo('mousemove', '--sync', x, y, 'mousedown', btn)
-            elif tipo == 'mouseup': _xdo('mouseup', {'left': 1, 'middle': 2, 'right': 3}.get(data.get('button'), 1))
+            elif tipo == 'mouseup':
+                btn = {'left': 1, 'middle': 2, 'right': 3}.get(data.get('button'), 1)
+                _xdo('mousemove', '--sync', x, y, 'mouseup', btn)
             elif tipo == 'scroll':
                 btn = 4 if int(data.get('dy', 0)) > 0 else 5
-                for _ in range(5): _xdo('click', btn)
-            elif tipo == 'keydown': _xdo('keydown', _XDO_KEY_MAP.get(data.get('key', '').lower(), data.get('key')))
-            elif tipo == 'keyup': _xdo('keyup', _XDO_KEY_MAP.get(data.get('key', '').lower(), data.get('key')))
+                _xdo('mousemove', '--sync', x, y)
+                for _ in range(3): _xdo('click', btn)
+            elif tipo == 'keydown':
+                k = _XDO_KEY_MAP.get(data.get('key', '').lower(), data.get('key'))
+                _xdo('keydown', k)
+            elif tipo == 'keyup':
+                k = _XDO_KEY_MAP.get(data.get('key', '').lower(), data.get('key'))
+                _xdo('keyup', k)
         except: pass
 
+# ── Eventos Socket.IO ─────────────────────────────────────────────────────────
+@sio.event
+def connect():
+    print(f"[✓] Conectado al servidor.")
+    sio.emit('register', {'name': f"{os.environ.get('USER','alumno')} - {socket.gethostname()}"})
+
 @sio.on('viewer_start')
-def on_viewer_start(data): global _en_observacion; _en_observacion = True
+def on_viewer_start(data):
+    global _en_observacion; _en_observacion = True
+    print(f"[*] El profesor está observando/controlando.")
+
 @sio.on('viewer_stop')
-def on_viewer_stop(_data): global _en_observacion; _en_observacion = False
+def on_viewer_stop(_data):
+    global _en_observacion; _en_observacion = False
+    print(f"[*] Fin de observación.")
+
 @sio.on('quit_app')
 def on_quit_app(_data): os._exit(0)
+
 @sio.on('show_message')
 def on_show_message(data): _cola_mensajes.put_nowait(data)
+
 @sio.on('lock_screen')
 def on_lock_screen(_data): _cola_bloqueo.put_nowait(True)
+
 @sio.on('unlock_screen')
 def on_unlock_screen(_data): _cola_bloqueo.put_nowait(False)
+
 @sio.on('teacher_screen')
 def on_teacher_screen(data):
-    try: _cola_profesor.put_nowait(data)
+    try:
+        _cola_profesor.put_nowait(data)
     except queue.Full:
         try: _cola_profesor.get_nowait(); _cola_profesor.put_nowait(data)
         except: pass
@@ -285,7 +311,8 @@ class _VentanaBloqueo:
         m = tk.Frame(self.top, bg='#0a0c14'); m.place(relx=0.5, rely=0.5, anchor='center')
         tk.Label(m, text='🔒', bg='#0a0c14', fg='#fc8181', font=('Segoe UI', 80)).pack()
         tk.Label(m, text='Pantalla bloqueada', bg='#0a0c14', fg='#e2e8f0', font=('Segoe UI', 24, 'bold')).pack()
-        self.top.update(); self.top.focus_force(); try: self.top.grab_set_global()
+        self.top.update(); self.top.focus_force()
+        try: self.top.grab_set_global()
         except: self.top.grab_set()
         self._activa = True; self._mantener()
     def _mantener(self):
