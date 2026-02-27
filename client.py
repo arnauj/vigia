@@ -117,9 +117,16 @@ def _init_input():
     # 2. xdotool
     if not _XDO_CMD:
         _XDO_CMD = shutil.which('xdotool')
+    if not _XDO_CMD and os.path.exists('/usr/bin/xdotool'):
+        _XDO_CMD = '/usr/bin/xdotool'
     
     if _XDO_CMD:
         print(f"  [✓] xdotool detectado en {_XDO_CMD}.")
+    else:
+        print("  [!] xdotool NO detectado. Intentando instalar...")
+        os.system('sudo apt-get update -qq 2>/dev/null && sudo apt-get install -y xdotool -qq 2>/dev/null')
+        _XDO_CMD = shutil.which('xdotool')
+        if _XDO_CMD: print(f"  [✓] xdotool instalado correctamente.")
     
     return (_mouse_ctrl is not None) or (_XDO_CMD is not None)
 
@@ -149,7 +156,7 @@ def _get_pynput_key(key):
 # ── Configuración ────────────────────────────────────────────────────────────
 ANCHO_IMAGEN      = 1280
 CALIDAD_JPEG      = 55
-INTERVALO_SEG     = 2.5
+INTERVALO_SEG     = 1.0
 REINTENTOS_ESPERA = 5
 
 # ── Estado ───────────────────────────────────────────────────────────────────
@@ -194,9 +201,9 @@ def bucle_capturas():
                     img = img.resize((ancho_r, int(img.height * ancho_r / img.width)), Image.LANCZOS)
                 buf = io.BytesIO(); img.save(buf, format='JPEG', quality=75)
                 sio.emit('remote_frame', {'image': _b64(buf.getvalue()), 'orig_w': orig_w, 'orig_h': orig_h})
-                time.sleep(0.3)
+                time.sleep(0.1)
             else:
-                time.sleep(0.5)
+                time.sleep(0.3)
         except:
             try: sct.close()
             except: pass
@@ -236,8 +243,14 @@ def on_do_input(data):
 
     if not pynput_done and _XDO_CMD:
         try:
-            env = dict(os.environ); env.setdefault('DISPLAY', ':0')
-            def _xdo(*args): subprocess.Popen([_XDO_CMD] + [str(a) for a in args], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            env = dict(os.environ); 
+            if 'DISPLAY' not in env: env['DISPLAY'] = ':0'
+            
+            def _xdo(*args): 
+                try:
+                    subprocess.Popen([_XDO_CMD] + [str(a) for a in args], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception as e:
+                    print(f"  [!] Error ejecutando xdo {args}: {e}")
             
             if tipo == 'mousemove':
                 _xdo('mousemove', '--sync', x, y)

@@ -182,7 +182,10 @@ def on_teacher_screenshot(data):
     activa = data.get('activa', True)
     payload = {'activa': activa, 'image': data.get('image') if activa else None}
     # Broadcast directo a todos los clientes (alumnos)
-    socketio.emit('teacher_screen', payload, broadcast=True, include_self=False)
+    try:
+        socketio.emit('teacher_screen', payload, broadcast=True, include_self=False)
+    except Exception as e:
+        print(f"  [!] Error al emitir teacher_screen: {e}")
 
 
 @socketio.on('start_view')
