@@ -1,6 +1,14 @@
 Corrige este error al ejecutar el vigia en el cliente:
 
-  File "/home/profesor/Escritorio/vigia-master/client.py", line 288
-    self.top.update(); self.top.focus_force(); try: self.top.grab_set_global()
-                                               ^^^
-SyntaxError: invalid syntax
+   [VIGIA] Instalando --force-reinstall Pillow...
+Traceback (most recent call last):
+  File "/home/profesor/Escritorio/vigia/client.py", line 75, in <module>
+    from PIL import ImageTk
+ImportError: cannot import name 'ImageTk' from 'PIL' (/usr/lib/python3/dist-packages/PIL/__init__.py). Did you mean: 'Image'?
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/profesor/Escritorio/vigia/client.py", line 79, in <module>
+    from PIL import Image, ImageTk
+ImportError: cannot import name 'ImageTk' from 'PIL' (/usr/lib/python3/dist-packages/PIL/__init__.py). Did you mean: 'Image'?

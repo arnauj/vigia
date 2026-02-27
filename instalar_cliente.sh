@@ -32,7 +32,7 @@ echo "[✓] Python: $PYTHON3"
 # ── Actualizar e instalar dependencias de sistema ──────────────
 echo "[*] Instalando dependencias del sistema (xdotool, tk, pip)..."
 sudo apt-get update -qq 2>/dev/null || true
-sudo apt-get install -y python3-pip python3-tk python3-pynput xdotool curl wget scrot -qq 2>/dev/null || true
+sudo apt-get install -y python3-pip python3-tk python3-pil.imagetk python3-pynput xdotool curl wget scrot -qq 2>/dev/null || true
 
 # ── Detectar o instalar pip ───────────────────────────────────
 PIP=""

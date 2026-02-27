@@ -75,9 +75,23 @@ if TK_OK:
         from PIL import ImageTk
         IMGTK_OK = True
     except ImportError:
-        _instalar("--force-reinstall Pillow")
-        from PIL import Image, ImageTk
-        IMGTK_OK = True
+        print("  [*] Falta ImageTk (PIL). Intentando instalar dependencias de sistema...")
+        os.system('sudo apt-get update -qq 2>/dev/null && sudo apt-get install -y python3-pil.imagetk -qq 2>/dev/null')
+        try:
+            from PIL import ImageTk
+            IMGTK_OK = True
+        except ImportError:
+            print("  [*] No se pudo cargar ImageTk vía apt. Reinstalando Pillow...")
+            _instalar("--force-reinstall Pillow")
+            try:
+                # Forzar relectura de PIL
+                for _k in list(sys.modules.keys()):
+                    if _k == 'PIL' or _k.startswith('PIL.'): del sys.modules[_k]
+                from PIL import Image, ImageTk
+                IMGTK_OK = True
+            except ImportError:
+                print("  [!] Error crítico: No se pudo cargar ImageTk.")
+                IMGTK_OK = False
 else:
     ImageTk = None; IMGTK_OK = False
 
