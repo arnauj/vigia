@@ -1,0 +1,21 @@
+ 
+  Al instalar en el cliente salta este error, corrígelo:
+  
+  
+  Instalando pyautogui...
+  error: subprocess-exited-with-error
+
+  × installing build dependencies for python3-Xlib did not run successfully.
+  │ exit code: 1
+  ╰─> [7 lines of output]
+      WARNING: Retrying (Retry(total=4, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('<pip._vendor.urllib3.connection.HTTPSConnection object at 0x7de513fdf260>: Failed to establish a new connection: [Errno 101] La red es inaccesible')': /simple/setuptools/
+      WARNING: Retrying (Retry(total=3, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('<pip._vendor.urllib3.connection.HTTPSConnection object at 0x7de51409eff0>: Failed to establish a new connection: [Errno 101] La red es inaccesible')': /simple/setuptools/
+      WARNING: Retrying (Retry(total=2, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('<pip._vendor.urllib3.connection.HTTPSConnection object at 0x7de513fdf3b0>: Failed to establish a new connection: [Errno 101] La red es inaccesible')': /simple/setuptools/
+      WARNING: Retrying (Retry(total=1, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('<pip._vendor.urllib3.connection.HTTPSConnection object at 0x7de513fdf5c0>: Failed to establish a new connection: [Errno 101] La red es inaccesible')': /simple/setuptools/
+      WARNING: Retrying (Retry(total=0, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('<pip._vendor.urllib3.connection.HTTPSConnection object at 0x7de513fdf7d0>: Failed to establish a new connection: [Errno 101] La red es inaccesible')': /simple/setuptools/
+      ERROR: Could not find a version that satisfies the requirement setuptools>=40.8.0 (from versions: none)
+      ERROR: No matching distribution found for setuptools>=40.8.0
+      [end of output]
+
+  note: This error originates from a subprocess, and is likely not a problem with pip.
+ERROR: Failed to build 'python3-Xlib' when installing build dependencies for python3-xlib
