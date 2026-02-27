@@ -11,14 +11,21 @@ from datetime import datetime
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO, emit
 
+try:
+    import eventlet
+    eventlet.monkey_patch()
+    async_mode = 'eventlet'
+except ImportError:
+    async_mode = 'threading'
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'vigia-aula-2024'
 
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
-    max_http_buffer_size=8 * 1024 * 1024,  # 8 MB max por mensaje
-    async_mode='threading',
+    max_http_buffer_size=10 * 1024 * 1024,  # Aumentado a 10 MB para compartir pantalla
+    async_mode=async_mode,
     ping_timeout=30,
     ping_interval=10,
 )
@@ -295,4 +302,7 @@ if __name__ == '__main__':
         webbrowser.open(f"http://localhost:{port}")
 
     threading.Thread(target=_abrir_navegador, daemon=True).start()
-    socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)
+    if async_mode == 'eventlet':
+        socketio.run(app, host='0.0.0.0', port=port, debug=False)
+    else:
+        socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)
