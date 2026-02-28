@@ -24,7 +24,7 @@ Software de monitoreo de aula para ver en tiempo real las pantallas de los alumn
 - **Cuadrícula de pantallas** — vista en tiempo real de todos los alumnos conectados.
 - **Observación remota** — el profesor puede ver la pantalla de un alumno en alta resolución.
 - **Control remoto** — el profesor puede manejar el ratón y teclado del alumno.
-- **Control remoto WebRTC** — stream de vídeo H.264/VP9 directo P2P (UDP, sin pasar por el servidor) con latencia < 150 ms en LAN. Fallback automático a JPEG si WebRTC no está disponible.
+- **Control remoto WebRTC** — stream de vídeo H.264/VP9 directo P2P (UDP) con latencia < 150 ms en LAN. Los eventos de ratón y teclado se envían por un DataChannel WebRTC (también UDP, sin pasar por el servidor). Fallback automático a JPEG+Socket.IO si WebRTC no está disponible.
 - **Bloqueo de pantalla** — bloquea el teclado y ratón del alumno con un overlay.
 - **Mensajes** — el profesor puede enviar mensajes emergentes a uno o todos los alumnos.
 - **Pantalla del profesor** — comparte la pantalla del profesor en una ventana flotante en todos los alumnos.
@@ -160,11 +160,11 @@ T=120ms Vídeo H.264/VP9 en tiempo real, DataChannel abierto para el input
 
 **Ventajas frente al modo JPEG:**
 - Vídeo codificado (H.264/VP9) con adaptación automática de bitrate
-- Transporte UDP directo entre alumno y profesor (sin pasar por el servidor)
+- Stream de vídeo por UDP directo alumno→profesor (sin pasar por el servidor)
+- Eventos de ratón/teclado por DataChannel WebRTC (UDP, `maxRetransmits:0`) en modo 🖱, también sin pasar por el servidor
 - Latencia típica < 150 ms en LAN frente a 500–1000 ms con JPEG
-- El DataChannel para input usa UDP sin reordenación (`maxRetransmits:0`)
 
-**Fallback automático:** si WebRTC no se establece en 8 segundos (o si `aiortc` no está instalado), el visor cambia automáticamente a JPEG sin intervención del usuario.
+**Fallback automático:** si WebRTC no se establece en 8 segundos (o si `aiortc` no está instalado), el visor cambia automáticamente a JPEG+Socket.IO sin intervención del usuario.
 
 ---
 
