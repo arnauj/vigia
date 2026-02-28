@@ -991,6 +991,9 @@ let _liveviewSid   = null;
 let _liveviewMode  = 'view';
 let _liveOrigW = 1280, _liveOrigH = 720;
 let _lastMouseSend = 0, _liveFps = 0, _liveFpsTs = 0;
+let _pc = null, _dc = null, _webrtcActivo = false;
+const _STUN = [{ urls:'stun:stun.l.google.com:19302' },
+               { urls:'stun:stun1.l.google.com:19302' }];
 
 socket.on('live_frame', (data) => {
   if (data.sid !== _liveviewSid) return;
@@ -1034,6 +1037,7 @@ function abrirLiveView(sid, mode) {
   const ov = document.getElementById('liveview-overlay');
   ov.classList.add('show');
   ov.focus();
+  _iniciarWebRTC(sid, mode);
 }
 
 function cerrarLiveView() {
@@ -1042,6 +1046,98 @@ function cerrarLiveView() {
   document.getElementById('liveview-overlay').classList.remove('show');
   document.getElementById('liveview-body').classList.remove('control-mode');
   document.getElementById('liveview-img').src = '';
+  if (_pc) { _pc.close(); _pc = null; }
+  _dc = null; _webrtcActivo = false;
+  const vid = document.getElementById('liveview-video');
+  vid.srcObject = null; vid.style.display = 'none';
+  document.getElementById('liveview-img').style.display = 'block';
+  document.getElementById('liveview-transport').textContent = 'JPEG';
+  document.getElementById('liveview-transport').style.color = 'var(--muted)';
+}
+
+// ── WebRTC ────────────────────────────────────────────────────────────────
+
+async function _iniciarWebRTC(sid, mode) {
+  if (typeof RTCPeerConnection === 'undefined') return;
+  try {
+    if (_pc) { _pc.close(); _pc = null; _dc = null; }
+    _pc = new RTCPeerConnection({ iceServers: _STUN });
+
+    if (mode === 'control') {
+      _dc = _pc.createDataChannel('vigia-input', { ordered:false, maxRetransmits:0 });
+      _dc.onopen  = () => { _webrtcActivo = true; };
+      _dc.onclose = () => { _webrtcActivo = false; };
+    }
+
+    _pc.ontrack = (ev) => {
+      if (ev.track.kind !== 'video') return;
+      const vid = document.getElementById('liveview-video');
+      vid.srcObject = ev.streams[0];
+      vid.onloadedmetadata = () => {
+        const s = ev.streams[0].getVideoTracks()[0].getSettings();
+        _liveOrigW = s.width  || _liveOrigW;
+        _liveOrigH = s.height || _liveOrigH;
+      };
+      vid.style.display = 'block';
+      document.getElementById('liveview-img').style.display = 'none';
+      if (mode !== 'control') _webrtcActivo = true;  // solo-ver: no hay DataChannel
+      document.getElementById('liveview-transport').textContent = 'WebRTC P2P';
+      document.getElementById('liveview-transport').style.color = 'var(--green)';
+    };
+
+    _pc.onicecandidate = (ev) => {
+      if (ev.candidate)
+        socket.emit('webrtc_ice', { sid, candidate: {
+          candidate:     ev.candidate.candidate,
+          sdpMid:        ev.candidate.sdpMid,
+          sdpMLineIndex: ev.candidate.sdpMLineIndex
+        }});
+    };
+
+    _pc.oniceconnectionstatechange = () => {
+      if (['failed','disconnected'].includes(_pc?.iceConnectionState))
+        _fallbackJPEG('ICE ' + _pc.iceConnectionState);
+    };
+
+    const offer = await _pc.createOffer({ offerToReceiveVideo:true, offerToReceiveAudio:false });
+    await _pc.setLocalDescription(offer);
+    socket.emit('webrtc_offer', { sid, sdp: { sdp:_pc.localDescription.sdp, type:_pc.localDescription.type } });
+
+    // Fallback si en 8s no hay vídeo
+    setTimeout(() => { if (!_webrtcActivo && _liveviewSid === sid) _fallbackJPEG('timeout'); }, 8000);
+  } catch(e) {
+    _fallbackJPEG(e.message);
+  }
+}
+
+socket.on('webrtc_answer', async (data) => {
+  if (data.sid !== _liveviewSid || !_pc) return;
+  try { await _pc.setRemoteDescription(new RTCSessionDescription(data.sdp)); }
+  catch(e) { _fallbackJPEG(e.message); }
+});
+
+socket.on('webrtc_ice', async (data) => {
+  if (data.sid !== _liveviewSid || !_pc) return;
+  try { if (data.candidate?.candidate) await _pc.addIceCandidate(new RTCIceCandidate(data.candidate)); }
+  catch(e) { /* ignorar candidatos tardíos */ }
+});
+
+function _fallbackJPEG(razon) {
+  if (_webrtcActivo) return;
+  console.log('[WebRTC] Fallback JPEG:', razon);
+  const vid = document.getElementById('liveview-video');
+  vid.style.display = 'none'; vid.srcObject = null;
+  document.getElementById('liveview-img').style.display = 'block';
+  document.getElementById('liveview-transport').textContent = 'JPEG';
+  document.getElementById('liveview-transport').style.color = 'var(--muted)';
+  if (_pc) { _pc.close(); _pc = null; _dc = null; }
+}
+
+function _enviarInput(payload) {
+  if (_webrtcActivo && _dc?.readyState === 'open')
+    _dc.send(JSON.stringify(payload));
+  else
+    socket.emit('remote_input', payload);
 }
 
 // Traducción de teclas del navegador a nombres de pyautogui
@@ -1060,8 +1156,10 @@ function _mapKey(key) {
 }
 
 function _traducirCoords(e) {
-  const img  = document.getElementById('liveview-img');
-  const rect = img.getBoundingClientRect();
+  const el   = _webrtcActivo
+    ? document.getElementById('liveview-video')
+    : document.getElementById('liveview-img');
+  const rect = el.getBoundingClientRect();
   return {
     x: Math.round((e.clientX - rect.left) / rect.width  * _liveOrigW),
     y: Math.round((e.clientY - rect.top)  / rect.height * _liveOrigH),
@@ -1069,9 +1167,10 @@ function _traducirCoords(e) {
 }
 
 // Listeners del overlay de live view
-(function () {
-  const ov  = document.getElementById('liveview-overlay');
-  const img = document.getElementById('liveview-img');
+// (el div #liveview-overlay está después del <\/script>, se registra al estar listo el DOM)
+document.addEventListener('DOMContentLoaded', function () {
+  const ov   = document.getElementById('liveview-overlay');
+  const body = document.getElementById('liveview-body');
 
   ov.addEventListener('keydown', (e) => {
     if (!_liveviewSid) return;
@@ -1079,54 +1178,54 @@ function _traducirCoords(e) {
     if (_liveviewMode !== 'control') return;
     e.preventDefault();
     const key = _mapKey(e.key);
-    if (key) socket.emit('remote_input', { sid: _liveviewSid, type: 'keydown', key });
+    if (key) _enviarInput({ sid: _liveviewSid, type: 'keydown', key });
   });
 
   ov.addEventListener('keyup', (e) => {
     if (!_liveviewSid || _liveviewMode !== 'control' || e.key === 'Escape') return;
     e.preventDefault();
     const key = _mapKey(e.key);
-    if (key) socket.emit('remote_input', { sid: _liveviewSid, type: 'keyup', key });
+    if (key) _enviarInput({ sid: _liveviewSid, type: 'keyup', key });
   });
 
-  img.addEventListener('mousemove', (e) => {
+  body.addEventListener('mousemove', (e) => {
     if (_liveviewMode !== 'control' || !_liveviewSid) return;
     const now = Date.now();
     if (now - _lastMouseSend < 50) return;   // throttle ≈ 20 eventos/s
     _lastMouseSend = now;
     const { x, y } = _traducirCoords(e);
-    socket.emit('remote_input', { sid: _liveviewSid, type: 'mousemove', x, y });
+    _enviarInput({ sid: _liveviewSid, type: 'mousemove', x, y });
   });
 
-  img.addEventListener('mousedown', (e) => {
+  body.addEventListener('mousedown', (e) => {
     if (_liveviewMode !== 'control' || !_liveviewSid) return;
     e.preventDefault();
     const { x, y } = _traducirCoords(e);
     const btn = ['left','middle','right'][e.button] || 'left';
-    socket.emit('remote_input', { sid: _liveviewSid, type: 'mousedown', x, y, button: btn });
+    _enviarInput({ sid: _liveviewSid, type: 'mousedown', x, y, button: btn });
   });
 
-  img.addEventListener('mouseup', (e) => {
+  body.addEventListener('mouseup', (e) => {
     if (_liveviewMode !== 'control' || !_liveviewSid) return;
     const { x, y } = _traducirCoords(e);
     const btn = ['left','middle','right'][e.button] || 'left';
-    socket.emit('remote_input', { sid: _liveviewSid, type: 'mouseup', x, y, button: btn });
+    _enviarInput({ sid: _liveviewSid, type: 'mouseup', x, y, button: btn });
   });
 
-  img.addEventListener('contextmenu', (e) => {
+  body.addEventListener('contextmenu', (e) => {
     if (_liveviewMode === 'control') e.preventDefault();
   });
 
-  img.addEventListener('wheel', (e) => {
+  body.addEventListener('wheel', (e) => {
     if (_liveviewMode !== 'control' || !_liveviewSid) return;
     e.preventDefault();
     const { x, y } = _traducirCoords(e);
-    socket.emit('remote_input', {
+    _enviarInput({
       sid: _liveviewSid, type: 'scroll', x, y,
       dy: Math.round(-e.deltaY / 100),
     });
   }, { passive: false });
-})();
+});
 
 // ── Compartir pantalla del profesor ───────────────────────────────────────
 let _shareStream   = null;
@@ -1137,8 +1236,9 @@ const _shareCanvas = document.createElement('canvas');
 const _shareCtx    = _shareCanvas.getContext('2d');
 _shareCtx.imageSmoothingEnabled = true;
 _shareCtx.imageSmoothingQuality = 'high';
-_shareVideo.autoplay = true;
-_shareVideo.muted    = true;
+_shareVideo.autoplay    = true;
+_shareVideo.muted       = true;
+_shareVideo.playsInline = true;
 
 const FPS_SHARE    = 2;      // fotogramas por segundo enviados
 const CALIDAD_SHARE = 0.85;  // calidad JPEG 0-1
@@ -1151,37 +1251,37 @@ async function toggleCompartir() {
   }
 
   if (!navigator.mediaDevices?.getDisplayMedia) {
-    alert('Tu navegador no soporta compartir pantalla.\nUsa Chrome, Edge o Firefox recientes.');
+    const esSeguro = location.protocol === 'https:' ||
+                     ['localhost', '127.0.0.1'].includes(location.hostname);
+    alert(esSeguro
+      ? 'Tu navegador no soporta compartir pantalla.\nUsa Chrome, Edge o Firefox recientes.'
+      : 'Para compartir pantalla accede desde esta misma máquina:\nhttp://localhost:5000\n(Chrome bloquea esta función en conexiones HTTP externas)');
     return;
   }
 
   try {
+    // getDisplayMedia abre el selector nativo de Chrome (pantalla, ventana o pestaña)
     _shareStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { cursor: 'always', frameRate: { ideal: 5, max: 10 } },
+      video: { frameRate: { ideal: 5, max: 10 } },
       audio: false,
     });
 
     _shareVideo.srcObject = _shareStream;
     _shareStream.getVideoTracks()[0].addEventListener('ended', detenerCompartir);
 
-    const _iniciarCaptura = () => {
-      _shareRunning = true;
-      _loopCompartir();
-      _actualizarBoton(true);
-    };
+    // Esperar a que el vídeo esté realmente reproduciendo antes de capturar frames
+    await _shareVideo.play();
 
-    if (_shareVideo.readyState >= 2) {
-      _iniciarCaptura();
-    } else {
-      _shareVideo.onloadeddata = _iniciarCaptura;
-    }
-    _shareVideo.play().catch(e => console.warn("Video play failed:", e));
+    _shareRunning = true;
+    _loopCompartir();
+    _actualizarBoton(true);
 
   } catch (err) {
     console.error('Error al compartir pantalla:', err);
-    if (err.name !== 'NotAllowedError') alert('No se pudo compartir la pantalla: ' + err.message);
-    _shareStream = null;
+    // Limpiar el stream si se obtuvo antes de que fallara play()
+    if (_shareStream) { _shareStream.getTracks().forEach(t => t.stop()); _shareStream = null; }
     _shareRunning = false;
+    if (err.name !== 'NotAllowedError') alert('No se pudo compartir la pantalla: ' + err.message);
   }
 }
 
@@ -1319,12 +1419,15 @@ document.getElementById('compose-overlay').addEventListener('click', (e) => {
     <div id="liveview-header-left">
       <span id="liveview-name">—</span>
       <span id="liveview-badge" class="lv-badge view">👁 Solo ver</span>
+      <span id="liveview-transport" style="font-size:0.75rem;color:var(--muted);margin-left:8px;">JPEG</span>
     </div>
     <span id="liveview-fps">…</span>
     <button onclick="cerrarLiveView()">✕ Cerrar (Esc)</button>
   </div>
   <div id="liveview-body">
     <img id="liveview-img" draggable="false" alt="Pantalla del alumno" />
+    <video id="liveview-video" autoplay playsinline muted
+           style="display:none;width:100%;height:100%;object-fit:contain;"></video>
   </div>
 </div>
 

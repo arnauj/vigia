@@ -9,6 +9,7 @@ import sys
 import os
 import io
 import re
+import json
 import time
 import socket
 import threading
@@ -95,6 +96,18 @@ if TK_OK:
 else:
     ImageTk = None; IMGTK_OK = False
 
+# ── WebRTC con aiortc (opcional, instalado via apt en instalar_cliente.sh) ───
+WEBRTC_OK = False
+try:
+    import asyncio, fractions
+    import numpy as np
+    from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
+    import av
+    WEBRTC_OK = True
+    print("  [✓] aiortc disponible — WebRTC habilitado.")
+except ImportError:
+    print("  [!] aiortc no instalado — usando fallback JPEG.")
+
 # ── Control remoto (Pynput + Xdotool) ─────────────────────────────────────────
 _mouse_ctrl = None
 _kbd_ctrl   = None
@@ -165,9 +178,75 @@ _cola_profesor = queue.Queue(maxsize=3)
 _cola_bloqueo  = queue.Queue(maxsize=10)
 _cola_mensajes = queue.Queue(maxsize=20)
 _en_observacion = False
+_webrtc_loop   = None   # event loop asyncio dedicado
+_webrtc_pc     = None   # RTCPeerConnection activa
+_webrtc_prof   = None   # prof_sid del profesor conectado
+_webrtc_activo = False  # True cuando P2P establecido
+_pending_ice   = []     # ICE candidates recibidos antes del offer
 
 def _b64(jpeg: bytes) -> str:
     return 'data:image/jpeg;base64,' + base64.b64encode(jpeg).decode()
+
+if WEBRTC_OK:
+    class ScreenStreamTrack(VideoStreamTrack):
+        kind = "video"
+        _CLOCK_RATE = 90000
+        _TARGET_FPS = 15
+
+        def __init__(self):
+            super().__init__()
+            self._sct = None
+            self._ts  = 0
+            self._t0  = None
+
+        async def recv(self):
+            if self._t0 is None:
+                self._t0 = asyncio.get_event_loop().time()
+            self._ts += int(self._CLOCK_RATE / self._TARGET_FPS)
+            drift = self._ts / self._CLOCK_RATE - (asyncio.get_event_loop().time() - self._t0)
+            if drift > 0:
+                await asyncio.sleep(drift)
+
+            loop = asyncio.get_event_loop()
+            rgb = await loop.run_in_executor(None, self._capturar)
+
+            frame = av.VideoFrame.from_ndarray(rgb, format='rgb24')
+            frame.pts       = self._ts
+            frame.time_base = fractions.Fraction(1, self._CLOCK_RATE)
+            return frame
+
+        def _capturar(self):
+            try:
+                if self._sct is None:
+                    self._sct = mss.mss()
+                mon = self._sct.monitors[1]
+                cap = self._sct.grab(mon)
+                bgra = np.frombuffer(cap.bgra, np.uint8).reshape(cap.height, cap.width, 4)
+                rgb  = bgra[:, :, [2, 1, 0]]   # BGRA → RGB
+                h, w = rgb.shape[:2]
+                if w > 1920:
+                    new_w, new_h = 1920, int(h * 1920 / w)
+                    img = Image.fromarray(rgb).resize((new_w, new_h), Image.LANCZOS)
+                    rgb = np.array(img)
+                return rgb
+            except Exception as e:
+                print(f"  [WebRTC] Captura: {e}")
+                if self._sct:
+                    try: self._sct.close()
+                    except: pass
+                    self._sct = None
+                return np.zeros((720, 1280, 3), dtype=np.uint8)
+
+def _asyncio_runner():
+    global _webrtc_loop
+    _webrtc_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(_webrtc_loop)
+    _webrtc_loop.run_forever()
+
+def _wrtc(coro):
+    """Encola una coroutine en el loop asyncio desde threads síncronos."""
+    if _webrtc_loop and _webrtc_loop.is_running():
+        asyncio.run_coroutine_threadsafe(coro, _webrtc_loop)
 
 def bucle_capturas():
     _ultimo_screenshot = 0.0
@@ -193,7 +272,7 @@ def bucle_capturas():
                 sio.emit('screenshot', {'image': _b64(buf.getvalue())})
                 _ultimo_screenshot = now
             
-            if _en_observacion:
+            if _en_observacion and not _webrtc_activo:
                 captura = sct.grab(monitor)
                 img = Image.frombytes('RGB', captura.size, captura.bgra, 'raw', 'BGRX')
                 ancho_r = min(orig_w, 1920)
@@ -287,6 +366,8 @@ def on_viewer_start(data):
 def on_viewer_stop(_data):
     global _en_observacion; _en_observacion = False
     print(f"[*] Fin de observación.")
+    if WEBRTC_OK:
+        _wrtc(_cerrar_webrtc())
 
 @sio.on('quit_app')
 def on_quit_app(_data): os._exit(0)
@@ -307,6 +388,93 @@ def on_teacher_screen(data):
     except queue.Full:
         try: _cola_profesor.get_nowait(); _cola_profesor.put_nowait(data)
         except: pass
+
+# ── WebRTC Socket.IO handlers ─────────────────────────────────────────────────
+if WEBRTC_OK:
+    @sio.on('webrtc_offer')
+    def on_webrtc_offer(data):
+        _wrtc(_procesar_offer(data))
+
+    async def _procesar_offer(data):
+        global _webrtc_pc, _webrtc_prof, _webrtc_activo, _pending_ice
+        if _webrtc_pc:
+            await _webrtc_pc.close()
+        _webrtc_pc = None; _webrtc_activo = False
+
+        prof_sid = data.get('prof_sid')
+        _webrtc_prof = prof_sid
+
+        pc = RTCPeerConnection()
+        _webrtc_pc = pc
+        pc.addTrack(ScreenStreamTrack())
+
+        @pc.on("datachannel")
+        def on_dc(channel):
+            @channel.on("message")
+            def on_msg(msg):
+                try: on_do_input(json.loads(msg))
+                except Exception: pass
+
+        @pc.on("icecandidate")
+        def on_ice(cand):
+            if cand:
+                sio.emit('webrtc_ice', {
+                    'prof_sid': prof_sid,
+                    'candidate': {
+                        'candidate':     cand.candidate,
+                        'sdpMid':        cand.sdpMid,
+                        'sdpMLineIndex': cand.sdpMLineIndex,
+                    }
+                })
+
+        @pc.on("iceconnectionstatechange")
+        async def on_ice_state():
+            global _webrtc_activo
+            state = pc.iceConnectionState
+            if state == "connected":
+                _webrtc_activo = True
+            elif state in ("failed", "closed", "disconnected"):
+                _webrtc_activo = False
+
+        await pc.setRemoteDescription(RTCSessionDescription(**data['sdp']))
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+        sio.emit('webrtc_answer', {
+            'prof_sid': prof_sid,
+            'sdp': {'sdp': pc.localDescription.sdp, 'type': pc.localDescription.type}
+        })
+        for c in _pending_ice:
+            await _add_ice(c)
+        _pending_ice.clear()
+
+    @sio.on('webrtc_ice')
+    def on_webrtc_ice(data):
+        c = data.get('candidate')
+        if not c: return
+        if _webrtc_pc: _wrtc(_add_ice(c))
+        else: _pending_ice.append(c)
+
+    async def _add_ice(c):
+        from aioice.candidate import Candidate as AioiceCand
+        try:
+            raw = c.get('candidate', '').replace('candidate:', '', 1)
+            if not raw: return
+            ac = AioiceCand.from_sdp(raw)
+            from aiortc import RTCIceCandidate
+            rtc_c = RTCIceCandidate(
+                component=ac.component, foundation=ac.foundation,
+                ip=ac.host, port=ac.port, priority=ac.priority,
+                protocol=ac.transport.lower(), type=ac.type,
+                sdpMid=c.get('sdpMid'), sdpMLineIndex=c.get('sdpMLineIndex'),
+            )
+            if _webrtc_pc: await _webrtc_pc.addIceCandidate(rtc_c)
+        except Exception:
+            pass  # Candidatos inválidos/tardíos: ignorar silenciosamente
+
+    async def _cerrar_webrtc():
+        global _webrtc_pc, _webrtc_activo, _webrtc_prof
+        if _webrtc_pc: await _webrtc_pc.close()
+        _webrtc_pc = None; _webrtc_activo = False; _webrtc_prof = None
 
 # ── Interfaz UI ──────────────────────────────────────────────────────────────
 class _VentanaProfesor:
@@ -370,6 +538,9 @@ def ejecutar_interfaz():
 
 if __name__ == '__main__':
     ip = sys.argv[1] if len(sys.argv) > 1 else input("IP Servidor: ")
+    if WEBRTC_OK:
+        threading.Thread(target=_asyncio_runner, name='WebRTC-Loop', daemon=True).start()
+        time.sleep(0.1)   # Dar tiempo al loop a arrancar
     threading.Thread(target=lambda: sio.connect(f"http://{ip}:5000", transports=['websocket']), daemon=True).start()
     threading.Thread(target=bucle_capturas, daemon=True).start()
     if TK_OK: ejecutar_interfaz()

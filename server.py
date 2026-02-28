@@ -228,6 +228,45 @@ def on_remote_input(data):
         socketio.emit('do_input', data, to=student_sid)
 
 
+# ── Señalización WebRTC ───────────────────────────────────────────────────────
+
+@socketio.on('webrtc_offer')
+def on_webrtc_offer(data):
+    student_sid = data.get('sid')
+    if student_sid not in students:
+        return
+    socketio.emit('webrtc_offer', {
+        'sdp': data.get('sdp'),
+        'prof_sid': request.sid,
+    }, to=student_sid)
+
+@socketio.on('webrtc_answer')
+def on_webrtc_answer(data):
+    prof_sid = data.get('prof_sid')
+    v_data = viewers.get(request.sid)
+    if not v_data or v_data['prof_sid'] != prof_sid:
+        return
+    socketio.emit('webrtc_answer', {
+        'sid': request.sid,
+        'sdp': data.get('sdp'),
+    }, to=prof_sid)
+
+@socketio.on('webrtc_ice')
+def on_webrtc_ice(data):
+    if 'sid' in data:  # Dashboard → Cliente
+        student_sid = data['sid']
+        if student_sid in students:
+            socketio.emit('webrtc_ice', {'candidate': data.get('candidate')}, to=student_sid)
+    elif 'prof_sid' in data:  # Cliente → Dashboard
+        prof_sid = data['prof_sid']
+        v_data = viewers.get(request.sid)
+        if v_data and v_data['prof_sid'] == prof_sid:
+            socketio.emit('webrtc_ice', {
+                'sid': request.sid,
+                'candidate': data.get('candidate'),
+            }, to=prof_sid)
+
+
 # ── Arranque ─────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
