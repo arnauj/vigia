@@ -6,18 +6,8 @@ Uso: python server.py [puerto]
 """
 
 import sys
-import warnings
 
-# Silenciar avisos de deprecación de eventlet (Python 3.12+)
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="eventlet")
-
-# Eventlet monkey patching debe hacerse ANTES de cualquier otra importación
-try:
-    import eventlet
-    eventlet.monkey_patch()
-    async_mode = 'eventlet'
-except ImportError:
-    async_mode = 'threading'
+async_mode = 'threading'
 
 import socket
 from datetime import datetime
@@ -303,12 +293,5 @@ if __name__ == '__main__':
             # Silenciar errores de lanzamiento de navegador (timeout, etc)
             pass
 
-    if async_mode == 'eventlet':
-        eventlet.spawn_after(1.5, _abrir_navegador)
-    else:
-        threading.Thread(target=_abrir_navegador, daemon=True).start()
-    
-    if async_mode == 'eventlet':
-        socketio.run(app, host='0.0.0.0', port=port, debug=False)
-    else:
-        socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)
+    threading.Thread(target=_abrir_navegador, daemon=True).start()
+    socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)

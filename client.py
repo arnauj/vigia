@@ -174,9 +174,11 @@ REINTENTOS_ESPERA = 5
 
 # ── Estado ───────────────────────────────────────────────────────────────────
 sio = sio_module.Client(reconnection=True, reconnection_attempts=0)
-_cola_profesor = queue.Queue(maxsize=3)
-_cola_bloqueo  = queue.Queue(maxsize=10)
-_cola_mensajes = queue.Queue(maxsize=20)
+_cola_profesor      = queue.Queue(maxsize=3)
+_cola_bloqueo       = queue.Queue(maxsize=10)
+_cola_mensajes      = queue.Queue(maxsize=20)
+_cola_clipboard_req = queue.Queue(maxsize=1)
+_cola_clipboard_res = queue.Queue(maxsize=1)
 _en_observacion = False
 _webrtc_loop   = None   # event loop asyncio dedicado
 _webrtc_pc     = None   # RTCPeerConnection activa
@@ -392,6 +394,7 @@ def on_teacher_screen(data):
 @sio.on('get_clipboard')
 def on_get_clipboard(_data):
     text = ''
+    # Intentar con xclip / xsel (requieren DISPLAY)
     for cmd in [
         ['xclip', '-o', '-selection', 'clipboard'],
         ['xsel',  '--clipboard', '--output'],
@@ -403,6 +406,16 @@ def on_get_clipboard(_data):
                 break
         except Exception:
             continue
+    # Fallback: portapapeles X11 vía tkinter (hilo principal)
+    if not text and TK_OK:
+        try:
+            # Vaciar respuesta anterior
+            while not _cola_clipboard_res.empty():
+                _cola_clipboard_res.get_nowait()
+            _cola_clipboard_req.put_nowait(True)
+            text = _cola_clipboard_res.get(timeout=2)
+        except Exception:
+            pass
     sio.emit('clipboard_data', {'text': text})
 
 # ── WebRTC Socket.IO handlers ─────────────────────────────────────────────────
@@ -570,6 +583,14 @@ def ejecutar_interfaz():
                     if not v_bloq: v_bloq = _VentanaBloqueo(root)
                 elif v_bloq: v_bloq.desbloquear(); v_bloq = None
             while not _cola_mensajes.empty(): _VentanaMensaje(root, _cola_mensajes.get_nowait())
+            while not _cola_clipboard_req.empty():
+                _cola_clipboard_req.get_nowait()
+                try:
+                    cb = root.selection_get(selection='CLIPBOARD')
+                except Exception:
+                    cb = ''
+                try: _cola_clipboard_res.put_nowait(cb)
+                except Exception: pass
         except: pass
         root.after(100, check)
     check(); root.mainloop()
