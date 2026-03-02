@@ -1254,7 +1254,7 @@ document.addEventListener('DOMContentLoaded', function () {
   body.addEventListener('mousemove', (e) => {
     if (_liveviewMode !== 'control' || !_liveviewSid) return;
     const now = Date.now();
-    if (now - _lastMouseSend < 50) return;   // throttle ≈ 20 eventos/s
+    if (now - _lastMouseSend < 16) return;   // throttle ≈ 60 eventos/s
     _lastMouseSend = now;
     const { x, y } = _traducirCoords(e);
     _enviarInput({ sid: _liveviewSid, type: 'mousemove', x, y });

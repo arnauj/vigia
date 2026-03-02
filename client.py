@@ -113,9 +113,18 @@ _mouse_ctrl = None
 _kbd_ctrl   = None
 _PBtn       = None
 _XDO_CMD    = shutil.which('xdotool')
+_xdo_env    = None   # entorno precalculado para xdotool (evita copiar os.environ en cada evento)
+
+def _xdo(*args):
+    """Lanza xdotool sin bloquear ni esperar confirmación del servidor X11."""
+    try:
+        subprocess.Popen([_XDO_CMD] + [str(a) for a in args],
+                         env=_xdo_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        print(f"  [!] xdotool {args}: {e}")
 
 def _init_input():
-    global _mouse_ctrl, _kbd_ctrl, _PBtn, _XDO_CMD
+    global _mouse_ctrl, _kbd_ctrl, _PBtn, _XDO_CMD, _xdo_env
     # 1. pynput
     try:
         from pynput.mouse import Controller as MouseController, Button
@@ -132,7 +141,7 @@ def _init_input():
         _XDO_CMD = shutil.which('xdotool')
     if not _XDO_CMD and os.path.exists('/usr/bin/xdotool'):
         _XDO_CMD = '/usr/bin/xdotool'
-    
+
     if _XDO_CMD:
         print(f"  [✓] xdotool detectado en {_XDO_CMD}.")
     else:
@@ -140,7 +149,12 @@ def _init_input():
         os.system('sudo apt-get update -qq 2>/dev/null && sudo apt-get install -y xdotool -qq 2>/dev/null')
         _XDO_CMD = shutil.which('xdotool')
         if _XDO_CMD: print(f"  [✓] xdotool instalado correctamente.")
-    
+
+    # Precalcular entorno para xdotool (se reutiliza en cada evento)
+    _xdo_env = dict(os.environ)
+    if 'DISPLAY' not in _xdo_env:
+        _xdo_env['DISPLAY'] = ':0'
+
     return (_mouse_ctrl is not None) or (_XDO_CMD is not None)
 
 INPUT_OK = _init_input()
@@ -300,58 +314,65 @@ def on_do_input(data):
         y = int(data.get('y', 0))
     except: return
 
-    xdo_done = False
-    if _XDO_CMD:
-        try:
-            env = dict(os.environ)
-            if 'DISPLAY' not in env: env['DISPLAY'] = ':0'
+    # ── mousemove: pynput es instantáneo (sin fork/exec) ──────────────────────
+    if tipo == 'mousemove':
+        if _mouse_ctrl:
+            try: _mouse_ctrl.position = (x, y); return
+            except: pass
+        if _XDO_CMD:
+            _xdo('mousemove', x, y)   # sin --sync para no bloquear el hilo
+        return
 
-            def _xdo(*args):
-                try:
-                    subprocess.Popen([_XDO_CMD] + [str(a) for a in args], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                except Exception as e:
-                    print(f"  [!] Error ejecutando xdo {args}: {e}")
+    # ── scroll: pynput primero (sin fork) ──────────────────────────────────────
+    if tipo == 'scroll':
+        dy = int(data.get('dy', 0))
+        if _mouse_ctrl:
+            try: _mouse_ctrl.position = (x, y); _mouse_ctrl.scroll(0, dy); return
+            except: pass
+        if _XDO_CMD:
+            btn = 4 if dy > 0 else 5
+            _xdo('mousemove', x, y)
+            for _ in range(abs(dy) or 1): _xdo('click', btn)
+        return
 
-            if tipo == 'mousemove':
-                _xdo('mousemove', '--sync', x, y)
-            elif tipo == 'mousedown':
-                btn = {'left': 1, 'middle': 2, 'right': 3}.get(data.get('button'), 1)
-                _xdo('mousemove', '--sync', x, y, 'mousedown', btn)
-            elif tipo == 'mouseup':
-                btn = {'left': 1, 'middle': 2, 'right': 3}.get(data.get('button'), 1)
-                _xdo('mousemove', '--sync', x, y, 'mouseup', btn)
-            elif tipo == 'scroll':
-                btn = 4 if int(data.get('dy', 0)) > 0 else 5
-                _xdo('mousemove', '--sync', x, y)
-                for _ in range(3): _xdo('click', btn)
-            elif tipo == 'keydown':
-                k = _XDO_KEY_MAP.get(data.get('key', '').lower(), data.get('key'))
-                _xdo('keydown', k)
-            elif tipo == 'keyup':
-                k = _XDO_KEY_MAP.get(data.get('key', '').lower(), data.get('key'))
-                _xdo('keyup', k)
-            xdo_done = True
-        except: pass
+    # ── clicks: xdotool primero (más fiable en X11 para todas las apps) ───────
+    _btn_map_xdo = {'left': 1, 'middle': 2, 'right': 3}
+    _btn_map_pyn = {'left': _PBtn.left, 'middle': _PBtn.middle, 'right': _PBtn.right} if _PBtn else {}
+    button = data.get('button', 'left')
 
-    if not xdo_done and _mouse_ctrl and _PBtn:
-        try:
-            if tipo == 'mousemove':
-                _mouse_ctrl.position = (x, y)
-            elif tipo == 'mousedown':
-                _mouse_ctrl.position = (x, y)
-                btn = {'left': _PBtn.left, 'middle': _PBtn.middle, 'right': _PBtn.right}.get(data.get('button'), _PBtn.left)
-                _mouse_ctrl.press(btn)
-            elif tipo == 'mouseup':
-                _mouse_ctrl.position = (x, y)
-                btn = {'left': _PBtn.left, 'middle': _PBtn.middle, 'right': _PBtn.right}.get(data.get('button'), _PBtn.left)
-                _mouse_ctrl.release(btn)
-            elif tipo == 'scroll':
-                _mouse_ctrl.position = (x, y); _mouse_ctrl.scroll(0, int(data.get('dy', 0)))
-            elif tipo == 'keydown':
-                _kbd_ctrl.press(_get_pynput_key(data.get('key')))
-            elif tipo == 'keyup':
-                _kbd_ctrl.release(_get_pynput_key(data.get('key')))
-        except: pass
+    if tipo == 'mousedown':
+        if _XDO_CMD:
+            _xdo('mousemove', x, y, 'mousedown', _btn_map_xdo.get(button, 1)); return
+        if _mouse_ctrl and _PBtn:
+            try: _mouse_ctrl.position = (x, y); _mouse_ctrl.press(_btn_map_pyn.get(button, _PBtn.left))
+            except: pass
+        return
+
+    if tipo == 'mouseup':
+        if _XDO_CMD:
+            _xdo('mousemove', x, y, 'mouseup', _btn_map_xdo.get(button, 1)); return
+        if _mouse_ctrl and _PBtn:
+            try: _mouse_ctrl.position = (x, y); _mouse_ctrl.release(_btn_map_pyn.get(button, _PBtn.left))
+            except: pass
+        return
+
+    # ── teclado: xdotool primero (mejor soporte para combinaciones) ───────────
+    if tipo == 'keydown':
+        k = _XDO_KEY_MAP.get(data.get('key', '').lower(), data.get('key'))
+        if _XDO_CMD:
+            _xdo('keydown', k); return
+        if _kbd_ctrl:
+            try: _kbd_ctrl.press(_get_pynput_key(data.get('key')))
+            except: pass
+        return
+
+    if tipo == 'keyup':
+        k = _XDO_KEY_MAP.get(data.get('key', '').lower(), data.get('key'))
+        if _XDO_CMD:
+            _xdo('keyup', k); return
+        if _kbd_ctrl:
+            try: _kbd_ctrl.release(_get_pynput_key(data.get('key')))
+            except: pass
 
 # ── Eventos Socket.IO ─────────────────────────────────────────────────────────
 @sio.event
