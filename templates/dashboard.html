@@ -123,6 +123,9 @@
       border-color: var(--accent);
       box-shadow: 0 4px 20px rgba(79,142,247,.25);
     }
+    .student-card:hover .card-header {
+      background: rgba(255,255,255,0.05);
+    }
 
     .card-screen {
       width: 100%;
@@ -148,12 +151,20 @@
     }
     .card-screen .placeholder .icon { font-size: 2rem; }
 
+    .card-header {
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255,255,255,0.02);
+      border-bottom: 1px solid var(--card-border);
+    }
     .card-info {
       padding: 8px 12px;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 8px;
+      justify-content: flex-end;
+      gap: 6px;
     }
     .card-name {
       font-size: 0.85rem;
@@ -728,6 +739,11 @@ function renderCard(sid) {
   div.id = `card-${sid}`;
   div.dataset.name = s.name.toLowerCase();
   div.innerHTML = `
+    <div class="card-header">
+      <span class="status-dot"></span>
+      <span class="card-name" title="${escHtml(s.name)}">${escHtml(s.name)}</span>
+      <span class="card-meta" id="meta-${sid}">${escHtml(s.ip)}</span>
+    </div>
     <div class="card-screen" id="screen-${sid}">
       <div class="placeholder"><span class="icon">⏳</span>Esperando captura…</div>
       <div class="lock-overlay" id="lock-overlay-${sid}">
@@ -735,9 +751,6 @@ function renderCard(sid) {
       </div>
     </div>
     <div class="card-info">
-      <span class="status-dot"></span>
-      <span class="card-name" title="${escHtml(s.name)}">${escHtml(s.name)}</span>
-      <span class="card-meta" id="meta-${sid}">${escHtml(s.ip)}</span>
       <button class="msg-ind-btn"
               title="Enviar mensaje a este alumno"
               onclick="event.stopPropagation(); abrirMsgInd('${sid}')">✉</button>
@@ -764,12 +777,14 @@ function renderCard(sid) {
 function updateCardImage(sid, image, last_seen) {
   const screen = document.getElementById(`screen-${sid}`);
   if (!screen) return;
+  const placeholder = screen.querySelector('.placeholder');
+  if (placeholder) placeholder.remove();
+
   let img = screen.querySelector('img');
   if (!img) {
-    screen.innerHTML = '';
     img = document.createElement('img');
     img.alt = 'Pantalla';
-    screen.appendChild(img);
+    screen.prepend(img);
   }
   img.src = image;
   const meta = document.getElementById(`meta-${sid}`);
