@@ -389,6 +389,22 @@ def on_teacher_screen(data):
         try: _cola_profesor.get_nowait(); _cola_profesor.put_nowait(data)
         except: pass
 
+@sio.on('get_clipboard')
+def on_get_clipboard(_data):
+    text = ''
+    for cmd in [
+        ['xclip', '-o', '-selection', 'clipboard'],
+        ['xsel',  '--clipboard', '--output'],
+    ]:
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+            if r.returncode == 0:
+                text = r.stdout
+                break
+        except Exception:
+            continue
+    sio.emit('clipboard_data', {'text': text})
+
 # ── WebRTC Socket.IO handlers ─────────────────────────────────────────────────
 if WEBRTC_OK:
     @sio.on('webrtc_offer')
@@ -482,14 +498,36 @@ class _VentanaProfesor:
         self.top = tk.Toplevel(root); self.top.title("📺 Pantalla del Profesor"); self.top.configure(bg='#0f1117')
         self.top.geometry("960x560"); self.top.attributes('-topmost', True)
         self._label = tk.Label(self.top, bg='#0f1117', text="⏳ Esperando imagen…", fg='#718096', font=('Segoe UI', 12))
-        self._label.pack(expand=True, fill='both'); self._foto = None
+        self._label.pack(expand=True, fill='both')
+        self._foto = None
+        self._img_raw = None   # PIL Image original sin redimensionar
+        self._after_id = None  # ID del after de redibujado pendiente
         self.top.protocol("WM_DELETE_WINDOW", self.destruir)
+        self.top.bind('<Configure>', self._on_resize)
+
+    def _on_resize(self, event):
+        if self._img_raw is None: return
+        if self._after_id: self.top.after_cancel(self._after_id)
+        self._after_id = self.top.after(120, self._render)
+
+    def _render(self):
+        self._after_id = None
+        if self._img_raw is None: return
+        try:
+            w = max(self.top.winfo_width(), 1)
+            h = max(self.top.winfo_height(), 1)
+            img = self._img_raw.copy()
+            img.thumbnail((w, h), Image.LANCZOS)
+            self._foto = ImageTk.PhotoImage(img)
+            self._label.config(image=self._foto, text='')
+        except: pass
+
     def actualizar(self, b64):
         try:
-            img = Image.open(io.BytesIO(base64.b64decode(b64.split(',', 1)[1])))
-            img.thumbnail((max(self.top.winfo_width(), 960), max(self.top.winfo_height(), 560)), Image.LANCZOS)
-            self._foto = ImageTk.PhotoImage(img); self._label.config(image=self._foto, text='')
+            self._img_raw = Image.open(io.BytesIO(base64.b64decode(b64.split(',', 1)[1])))
+            self._render()
         except: pass
+
     def destruir(self): self.top.destroy()
 
 class _VentanaMensaje:

@@ -224,6 +224,21 @@ def on_remote_input(data):
         socketio.emit('do_input', data, to=student_sid)
 
 
+@socketio.on('get_clipboard')
+def on_get_clipboard(data):
+    student_sid = data.get('sid')
+    v_data = viewers.get(student_sid)
+    if v_data and v_data['prof_sid'] == request.sid and v_data['mode'] == 'control':
+        socketio.emit('get_clipboard', {}, to=student_sid)
+
+
+@socketio.on('clipboard_data')
+def on_clipboard_data(data):
+    v_data = viewers.get(request.sid)
+    if v_data:
+        socketio.emit('clipboard_data', {'text': data.get('text', '')}, to=v_data['prof_sid'])
+
+
 # ── Señalización WebRTC ───────────────────────────────────────────────────────
 
 @socketio.on('webrtc_offer')

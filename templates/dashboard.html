@@ -467,6 +467,30 @@
       transition: border-color .15s, color .15s;
     }
     #liveview-header button:hover { border-color: var(--text); color: var(--text); }
+    #clipboard-overlay {
+      display: none; position: fixed; inset: 0; z-index: 1200;
+      background: rgba(0,0,0,.65); align-items: center; justify-content: center;
+    }
+    #clipboard-overlay.show { display: flex; }
+    #clipboard-box {
+      background: var(--card-bg); border: 1px solid var(--card-border);
+      border-radius: 12px; padding: 22px 24px; width: 480px; max-width: 92vw;
+    }
+    #clipboard-box h3 { margin: 0 0 14px; font-size: 1rem; color: var(--text); }
+    #clipboard-textarea {
+      width: 100%; height: 130px; box-sizing: border-box;
+      background: #0a0c14; color: #e2e8f0; border: 1px solid var(--card-border);
+      border-radius: 8px; padding: 10px 12px; font-family: monospace;
+      font-size: 0.88rem; resize: vertical;
+    }
+    #clipboard-box .cb-footer { display:flex; gap:8px; justify-content:flex-end; margin-top:12px; }
+    #clipboard-box .cb-footer button {
+      background: none; border: 1px solid var(--card-border); color: var(--muted);
+      border-radius: 8px; padding: 5px 14px; cursor: pointer; font-size: 0.83rem;
+      transition: border-color .15s, color .15s;
+    }
+    #clipboard-box .cb-footer button:hover { border-color: var(--text); color: var(--text); }
+    #clipboard-copy-btn { color: var(--accent) !important; border-color: var(--accent) !important; }
     #liveview-body {
       flex: 1; min-height: 0; overflow: hidden;
       display: flex; align-items: center; justify-content: center;
@@ -1033,6 +1057,7 @@ function abrirLiveView(sid, mode) {
   document.getElementById('liveview-fps').textContent = '…';
   document.getElementById('liveview-img').src = students[sid]?.image || '';
 
+  document.getElementById('lv-clipboard-btn').style.display = mode === 'control' ? '' : 'none';
   socket.emit('start_view', { sid, mode });
   const ov = document.getElementById('liveview-overlay');
   ov.classList.add('show');
@@ -1043,6 +1068,8 @@ function abrirLiveView(sid, mode) {
 function cerrarLiveView() {
   if (_liveviewSid) socket.emit('stop_view', { sid: _liveviewSid });
   _liveviewSid = null;
+  document.getElementById('lv-clipboard-btn').style.display = 'none';
+  cerrarPortapapeles();
   document.getElementById('liveview-overlay').classList.remove('show');
   document.getElementById('liveview-body').classList.remove('control-mode');
   document.getElementById('liveview-img').src = '';
@@ -1140,6 +1167,33 @@ function _fallbackJPEG(razon) {
   }
 }
 
+// ── Portapapeles remoto ────────────────────────────────────────────────────
+function pedirPortapapeles() {
+  if (!_liveviewSid) return;
+  socket.emit('get_clipboard', { sid: _liveviewSid });
+}
+
+socket.on('clipboard_data', (data) => {
+  const text = data.text ?? '';
+  document.getElementById('clipboard-textarea').value = text;
+  document.getElementById('clipboard-overlay').classList.add('show');
+  document.getElementById('clipboard-textarea').select();
+  // Intentar escribir directamente al portapapeles del servidor (funciona en localhost)
+  navigator.clipboard?.writeText(text).catch(() => {});
+});
+
+function copiarPortapapeles() {
+  const ta = document.getElementById('clipboard-textarea');
+  ta.select();
+  navigator.clipboard?.writeText(ta.value)
+    .then(() => { toast('📋 Copiado al portapapeles', 'connect'); cerrarPortapapeles(); })
+    .catch(() => { document.execCommand('copy'); toast('📋 Copiado al portapapeles', 'connect'); cerrarPortapapeles(); });
+}
+
+function cerrarPortapapeles() {
+  document.getElementById('clipboard-overlay').classList.remove('show');
+}
+
 function _enviarInput(payload) {
   if (_webrtcActivo && _dc?.readyState === 'open')
     _dc.send(JSON.stringify(payload));
@@ -1183,6 +1237,8 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!_liveviewSid) return;
     if (e.key === 'Escape') { cerrarLiveView(); return; }
     if (_liveviewMode !== 'control') return;
+    // Ctrl+Shift+C → pedir portapapeles del alumno (no reenviar al cliente)
+    if (e.ctrlKey && e.shiftKey && e.key === 'C') { e.preventDefault(); pedirPortapapeles(); return; }
     e.preventDefault();
     const key = _mapKey(e.key);
     if (key) _enviarInput({ sid: _liveviewSid, type: 'keydown', key });
@@ -1433,12 +1489,26 @@ document.getElementById('compose-overlay').addEventListener('click', (e) => {
       <span id="liveview-transport" style="font-size:0.75rem;color:var(--muted);margin-left:8px;">JPEG</span>
     </div>
     <span id="liveview-fps">…</span>
+    <button id="lv-clipboard-btn" onclick="pedirPortapapeles()" style="display:none"
+            title="Obtener portapapeles del alumno (Ctrl+Shift+C)">📋 Portapapeles</button>
     <button onclick="cerrarLiveView()">✕ Cerrar (Esc)</button>
   </div>
   <div id="liveview-body">
     <img id="liveview-img" draggable="false" alt="Pantalla del alumno" />
     <video id="liveview-video" autoplay playsinline muted
            style="display:none;max-width:100%;max-height:100%;"></video>
+  </div>
+</div>
+
+<!-- ── Popup portapapeles remoto ── -->
+<div id="clipboard-overlay">
+  <div id="clipboard-box">
+    <h3>📋 Portapapeles del alumno</h3>
+    <textarea id="clipboard-textarea" readonly placeholder="Esperando contenido…"></textarea>
+    <div class="cb-footer">
+      <button id="clipboard-copy-btn" onclick="copiarPortapapeles()">Copiar al servidor</button>
+      <button onclick="cerrarPortapapeles()">Cerrar</button>
+    </div>
   </div>
 </div>
 
