@@ -814,7 +814,24 @@ document.getElementById('modal-close').addEventListener('click', closeModal);
 document.getElementById('modal-overlay').addEventListener('click', (e) => {
   if (e.target === document.getElementById('modal-overlay')) closeModal();
 });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (document.getElementById('clipboard-overlay').classList.contains('show')) {
+      cerrarPortapapeles();
+    } else if (document.getElementById('link-overlay').classList.contains('show')) {
+      cerrarLink();
+    } else if (document.getElementById('compose-overlay').classList.contains('show')) {
+      cerrarCompose();
+    } else if (document.getElementById('modal-overlay').classList.contains('show')) {
+      closeModal();
+    } else if (document.getElementById('liveview-overlay').classList.contains('show')) {
+      cerrarLiveView();
+    }
+  }
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    if (document.getElementById('compose-overlay').classList.contains('show')) enviarCompose();
+  }
+});
 
 // ── Controles ─────────────────────────────────────────────────────────────
 document.getElementById('size-slider').addEventListener('input', (e) => {
@@ -1192,6 +1209,7 @@ function copiarPortapapeles() {
 
 function cerrarPortapapeles() {
   document.getElementById('clipboard-overlay').classList.remove('show');
+  if (_liveviewSid) document.getElementById('liveview-overlay').focus();
 }
 
 function _enviarInput(payload) {
@@ -1273,6 +1291,14 @@ document.addEventListener('DOMContentLoaded', function () {
       _enviarInput({ sid: _liveviewSid, type: 'keyup', key: _MOD_KEYS[e.key] });
   });
 
+  ov.addEventListener('blur', () => {
+    if (!_liveviewSid || _liveviewMode !== 'control') return;
+    // Liberar todas las modificadoras para evitar que se queden pegadas si se cambia de ventana/foco
+    Object.values(_MOD_KEYS).forEach(k => {
+      _enviarInput({ sid: _liveviewSid, type: 'keyup', key: k });
+    });
+  });
+
   body.addEventListener('mousemove', (e) => {
     if (_liveviewMode !== 'control' || !_liveviewSid) return;
     const now = Date.now();
@@ -1285,6 +1311,7 @@ document.addEventListener('DOMContentLoaded', function () {
   body.addEventListener('mousedown', (e) => {
     if (_liveviewMode !== 'control' || !_liveviewSid) return;
     e.preventDefault();
+    ov.focus();
     const { x, y } = _traducirCoords(e);
     const btn = ['left','middle','right'][e.button] || 'left';
     _enviarInput({ sid: _liveviewSid, type: 'mousedown', x, y, button: btn });
@@ -1440,11 +1467,8 @@ window.addEventListener('beforeunload', () => {
 });
 
 // Cerrar compose con Escape; Ctrl+Enter envía
-document.addEventListener('keydown', (e) => {
-  if (!document.getElementById('compose-overlay').classList.contains('show')) return;
-  if (e.key === 'Escape') cerrarCompose();
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) enviarCompose();
-});
+// (Manejado en el listener global de Escape arriba)
+// Unificado con el listener global en la línea 817.
 
 // Listeners modal hipervínculo
 document.getElementById('link-url').addEventListener('keydown', (e) => {
