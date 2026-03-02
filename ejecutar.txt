@@ -1,43 +1,47 @@
+Al lanzar el instalar_cliente.sh en el equipo cliente salta este error, corrígelo:
 
-Se lanzan estos errores:
 
+Exception in thread Thread-1 (<lambda>):
+Traceback (most recent call last):
+  File "/home/profesor/.local/lib/python3.12/site-packages/engineio/client.py", line 347, in _connect_websocket
+    ws = websocket.create_connection(
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/profesor/.local/lib/python3.12/site-packages/websocket/_core.py", line 664, in create_connection
+    websock.connect(url, **options)
+  File "/home/profesor/.local/lib/python3.12/site-packages/websocket/_core.py", line 263, in connect
+    self.sock, addrs = connect(
+                       ^^^^^^^^
+  File "/home/profesor/.local/lib/python3.12/site-packages/websocket/_http.py", line 146, in connect
+    sock = _open_socket(addrinfo_list, options.sockopt, options.timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/profesor/.local/lib/python3.12/site-packages/websocket/_http.py", line 223, in _open_socket
+    raise error
+  File "/home/profesor/.local/lib/python3.12/site-packages/websocket/_http.py", line 210, in _open_socket
+    sock.connect(address)
+OSError: [Errno 113] No route to host
 
-/home/juanra/Escritorio/EpoProfe/server.py:12: DeprecationWarning: 
-Eventlet is deprecated. It is currently being maintained in bugfix mode, and
-we strongly recommend against using it for new projects.
+During handling of the above exception, another exception occurred:
 
-If you are already using Eventlet, we recommend migrating to a different
-framework.  For more detail see
-https://eventlet.readthedocs.io/en/latest/asyncio/migration.html
+Traceback (most recent call last):
+  File "/home/profesor/.local/lib/python3.12/site-packages/socketio/client.py", line 149, in connect
+    self.eio.connect(real_url, headers=real_headers,
+  File "/home/profesor/.local/lib/python3.12/site-packages/engineio/client.py", line 96, in connect
+    return getattr(self, '_connect_' + self.transports[0])(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/profesor/.local/lib/python3.12/site-packages/engineio/client.py", line 355, in _connect_websocket
+    raise exceptions.ConnectionError('Connection error')
+engineio.exceptions.ConnectionError: Connection error
 
-  import eventlet
-[*] Iniciando servidor VIGIA (modo: eventlet)
+The above exception was the direct cause of the following exception:
 
-====================================================
-  VIGIA — Servidor del Profesor
-====================================================
-  Dashboard: http://192.168.0.119:5000
-  Alumnos se conectan a IP: 192.168.0.119  puerto: 5000
-====================================================
-
-[+] Conexión: CER6eIsYnEG6x_d5AAAB  IP: 127.0.0.1
-Exception in thread Thread-1 (_abrir_navegador):
 Traceback (most recent call last):
   File "/usr/lib/python3.12/threading.py", line 1073, in _bootstrap_inner
     self.run()
   File "/usr/lib/python3.12/threading.py", line 1010, in run
     self._target(*self._args, **self._kwargs)
-  File "/home/juanra/Escritorio/EpoProfe/server.py", line 243, in _abrir_navegador
-    webbrowser.open(f"http://localhost:{port}")
-  File "/usr/lib/python3.12/webbrowser.py", line 87, in open
-    if browser.open(url, new, autoraise):
-       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/lib/python3.12/webbrowser.py", line 276, in open
-    success = self._invoke(args, True, autoraise, url)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/lib/python3.12/webbrowser.py", line 245, in _invoke
-    rc = p.wait(5)
-         ^^^^^^^^^
-  File "/home/juanra/.local/lib/python3.12/site-packages/eventlet/green/subprocess.py", line 88, in wait
-    raise TimeoutExpired(self.args, timeout)
-subprocess.TimeoutExpired: Command '['google-chrome', 'http://localhost:5000']' timed out after 5 seconds
+  File "/home/profesor/Escritorio/Vigia/client.py", line 544, in <lambda>
+    threading.Thread(target=lambda: sio.connect(f"http://{ip}:5000", transports=['websocket']), daemon=True).start()
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/profesor/.local/lib/python3.12/site-packages/socketio/client.py", line 161, in connect
+    raise exceptions.ConnectionError(exc.args[0]) from exc
+socketio.exceptions.ConnectionError: Connection error

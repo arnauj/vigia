@@ -541,7 +541,15 @@ if __name__ == '__main__':
     if WEBRTC_OK:
         threading.Thread(target=_asyncio_runner, name='WebRTC-Loop', daemon=True).start()
         time.sleep(0.1)   # Dar tiempo al loop a arrancar
-    threading.Thread(target=lambda: sio.connect(f"http://{ip}:5000", transports=['websocket']), daemon=True).start()
+    def _conectar(ip):
+        while True:
+            try:
+                sio.connect(f"http://{ip}:5000", transports=['websocket'])
+                return
+            except Exception as e:
+                print(f"[VIGIA] Sin conexión con {ip}:5000, reintentando en 5 s… ({e})")
+                time.sleep(5)
+    threading.Thread(target=lambda: _conectar(ip), daemon=True).start()
     threading.Thread(target=bucle_capturas, daemon=True).start()
     if TK_OK: ejecutar_interfaz()
     else: 
