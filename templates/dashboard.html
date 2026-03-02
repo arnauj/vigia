@@ -1102,8 +1102,8 @@ async function _iniciarWebRTC(sid, mode) {
     await _pc.setLocalDescription(offer);
     socket.emit('webrtc_offer', { sid, sdp: { sdp:_pc.localDescription.sdp, type:_pc.localDescription.type } });
 
-    // Fallback si en 8s no hay vídeo
-    setTimeout(() => { if (!_webrtcActivo && _liveviewSid === sid) _fallbackJPEG('timeout'); }, 8000);
+    // Fallback si en 4s no hay vídeo
+    setTimeout(() => { if (!_webrtcActivo && _liveviewSid === sid) _fallbackJPEG('timeout'); }, 4000);
   } catch(e) {
     _fallbackJPEG(e.message);
   }
@@ -1130,6 +1130,14 @@ function _fallbackJPEG(razon) {
   document.getElementById('liveview-transport').textContent = 'JPEG';
   document.getElementById('liveview-transport').style.color = 'var(--muted)';
   if (_pc) { _pc.close(); _pc = null; _dc = null; }
+  // Resetear el estado WebRTC del cliente: si su ICE llegó a "connected"
+  // pero el dashboard no recibió video, el cliente dejó de enviar JPEG.
+  // stop_view → viewer_stop en cliente (_webrtc_activo=False, cierra PC)
+  // start_view → viewer_start en cliente (_en_observacion=True, reanuda JPEG)
+  if (_liveviewSid) {
+    socket.emit('stop_view',  { sid: _liveviewSid });
+    socket.emit('start_view', { sid: _liveviewSid, mode: _liveviewMode });
+  }
 }
 
 function _enviarInput(payload) {
