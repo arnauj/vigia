@@ -1268,7 +1268,11 @@ async function toggleCompartir() {
     _shareVideo.srcObject = _shareStream;
     _shareStream.getVideoTracks()[0].addEventListener('ended', detenerCompartir);
 
-    // Esperar a que el vídeo esté realmente reproduciendo antes de capturar frames
+    // Esperar dimensiones del vídeo antes de capturar (videoWidth puede ser 0 tras play())
+    await new Promise(resolve => {
+      if (_shareVideo.videoWidth) { resolve(); return; }
+      _shareVideo.addEventListener('loadedmetadata', resolve, { once: true });
+    });
     await _shareVideo.play();
 
     _shareRunning = true;

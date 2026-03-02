@@ -487,7 +487,7 @@ class _VentanaProfesor:
     def actualizar(self, b64):
         try:
             img = Image.open(io.BytesIO(base64.b64decode(b64.split(',', 1)[1])))
-            img.thumbnail((self.top.winfo_width() or 960, self.top.winfo_height() or 560), Image.LANCZOS)
+            img.thumbnail((max(self.top.winfo_width(), 960), max(self.top.winfo_height(), 560)), Image.LANCZOS)
             self._foto = ImageTk.PhotoImage(img); self._label.config(image=self._foto, text='')
         except: pass
     def destruir(self): self.top.destroy()
