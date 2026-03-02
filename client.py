@@ -356,7 +356,47 @@ def on_do_input(data):
             except: pass
         return
 
-    # ── teclado: xdotool primero (mejor soporte para combinaciones) ───────────
+    # ── teclado ───────────────────────────────────────────────────────────────
+
+    # Carácter imprimible: un solo proceso, respeta layout del cliente
+    if tipo == 'type':
+        char = data.get('char', '')
+        if not char: return
+        if _XDO_CMD:
+            _xdo('type', '--clearmodifiers', '--delay', '0', '--', char); return
+        if _kbd_ctrl:
+            try: _kbd_ctrl.type(char)
+            except: pass
+        return
+
+    # Tecla especial (Enter, Backspace, flechas…): press+release en un proceso
+    if tipo == 'keypress':
+        k = _XDO_KEY_MAP.get(data.get('key', '').lower(), data.get('key'))
+        if _XDO_CMD:
+            _xdo('key', '--clearmodifiers', k); return
+        if _kbd_ctrl:
+            pk = _get_pynput_key(data.get('key'))
+            try: _kbd_ctrl.press(pk); _kbd_ctrl.release(pk)
+            except: pass
+        return
+
+    # Combinación con modificadora (Ctrl+C, Alt+F4…): un proceso para el combo
+    if tipo == 'keycombo':
+        combo = data.get('combo', '')   # e.g. 'ctrl+c'
+        if not combo: return
+        if _XDO_CMD:
+            _xdo('key', '--clearmodifiers', combo); return
+        # fallback pynput: descomponer el combo
+        if _kbd_ctrl and _kbd_ctrl:
+            parts = combo.split('+')
+            keys  = [_get_pynput_key(p) for p in parts]
+            try:
+                for k in keys:   _kbd_ctrl.press(k)
+                for k in reversed(keys): _kbd_ctrl.release(k)
+            except: pass
+        return
+
+    # Modificadoras sueltas: keydown/keyup para mantener estado (Ctrl, Shift…)
     if tipo == 'keydown':
         k = _XDO_KEY_MAP.get(data.get('key', '').lower(), data.get('key'))
         if _XDO_CMD:
