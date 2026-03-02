@@ -113,7 +113,7 @@ def on_screenshot(data):
 
 
 @socketio.on('request_students')
-def on_request_students():
+def on_request_students(_data=None):
     payload = []
     for sid, data in students.items():
         payload.append({

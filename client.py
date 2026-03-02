@@ -300,39 +300,18 @@ def on_do_input(data):
         y = int(data.get('y', 0))
     except: return
 
-    pynput_done = False
-    if _mouse_ctrl and _PBtn:
+    xdo_done = False
+    if _XDO_CMD:
         try:
-            if tipo == 'mousemove':
-                _mouse_ctrl.position = (x, y)
-            elif tipo == 'mousedown':
-                _mouse_ctrl.position = (x, y)
-                btn = {'left': _PBtn.left, 'middle': _PBtn.middle, 'right': _PBtn.right}.get(data.get('button'), _PBtn.left)
-                _mouse_ctrl.press(btn)
-            elif tipo == 'mouseup':
-                _mouse_ctrl.position = (x, y)
-                btn = {'left': _PBtn.left, 'middle': _PBtn.middle, 'right': _PBtn.right}.get(data.get('button'), _PBtn.left)
-                _mouse_ctrl.release(btn)
-            elif tipo == 'scroll':
-                _mouse_ctrl.position = (x, y); _mouse_ctrl.scroll(0, int(data.get('dy', 0)))
-            elif tipo == 'keydown':
-                _kbd_ctrl.press(_get_pynput_key(data.get('key')))
-            elif tipo == 'keyup':
-                _kbd_ctrl.release(_get_pynput_key(data.get('key')))
-            pynput_done = True
-        except: pass
-
-    if not pynput_done and _XDO_CMD:
-        try:
-            env = dict(os.environ); 
+            env = dict(os.environ)
             if 'DISPLAY' not in env: env['DISPLAY'] = ':0'
-            
-            def _xdo(*args): 
+
+            def _xdo(*args):
                 try:
                     subprocess.Popen([_XDO_CMD] + [str(a) for a in args], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 except Exception as e:
                     print(f"  [!] Error ejecutando xdo {args}: {e}")
-            
+
             if tipo == 'mousemove':
                 _xdo('mousemove', '--sync', x, y)
             elif tipo == 'mousedown':
@@ -351,6 +330,27 @@ def on_do_input(data):
             elif tipo == 'keyup':
                 k = _XDO_KEY_MAP.get(data.get('key', '').lower(), data.get('key'))
                 _xdo('keyup', k)
+            xdo_done = True
+        except: pass
+
+    if not xdo_done and _mouse_ctrl and _PBtn:
+        try:
+            if tipo == 'mousemove':
+                _mouse_ctrl.position = (x, y)
+            elif tipo == 'mousedown':
+                _mouse_ctrl.position = (x, y)
+                btn = {'left': _PBtn.left, 'middle': _PBtn.middle, 'right': _PBtn.right}.get(data.get('button'), _PBtn.left)
+                _mouse_ctrl.press(btn)
+            elif tipo == 'mouseup':
+                _mouse_ctrl.position = (x, y)
+                btn = {'left': _PBtn.left, 'middle': _PBtn.middle, 'right': _PBtn.right}.get(data.get('button'), _PBtn.left)
+                _mouse_ctrl.release(btn)
+            elif tipo == 'scroll':
+                _mouse_ctrl.position = (x, y); _mouse_ctrl.scroll(0, int(data.get('dy', 0)))
+            elif tipo == 'keydown':
+                _kbd_ctrl.press(_get_pynput_key(data.get('key')))
+            elif tipo == 'keyup':
+                _kbd_ctrl.release(_get_pynput_key(data.get('key')))
         except: pass
 
 # ── Eventos Socket.IO ─────────────────────────────────────────────────────────
@@ -394,13 +394,15 @@ def on_teacher_screen(data):
 @sio.on('get_clipboard')
 def on_get_clipboard(_data):
     text = ''
+    _env = dict(os.environ)
+    if 'DISPLAY' not in _env: _env['DISPLAY'] = ':0'
     # Intentar con xclip / xsel (requieren DISPLAY)
     for cmd in [
         ['xclip', '-o', '-selection', 'clipboard'],
         ['xsel',  '--clipboard', '--output'],
     ]:
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=2, env=_env)
             if r.returncode == 0:
                 text = r.stdout
                 break
@@ -603,7 +605,7 @@ if __name__ == '__main__':
     def _conectar(ip):
         while True:
             try:
-                sio.connect(f"http://{ip}:5000", transports=['websocket'])
+                sio.connect(f"http://{ip}:5000", transports=['polling', 'websocket'])
                 return
             except Exception as e:
                 print(f"[VIGIA] Sin conexión con {ip}:5000, reintentando en 5 s… ({e})")
