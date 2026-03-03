@@ -1,14 +1,17 @@
-corrige este error:
+Los paquetes deben instalar las dependencias pertinentes solos, corrige esto:
 
-127.0.0.1 - - [03/Mar/2026 10:13:54] "GET /socket.io/?EIO=4&transport=websocket HTTP/1.1" 500 -
-Error on request:
-Traceback (most recent call last):
-  File "/home/juanra/.local/lib/python3.12/site-packages/werkzeug/serving.py", line 370, in run_wsgi
-    execute(self.server.app)
-  File "/home/juanra/.local/lib/python3.12/site-packages/werkzeug/serving.py", line 336, in execute
-    write(b"")
-  File "/home/juanra/.local/lib/python3.12/site-packages/werkzeug/serving.py", line 261, in write
-    assert status_set is not None, "write() before start_response"
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-AssertionError: write() before start_response
+juanra@E15-01:~/Escritorio/vigia-master$ sudo apt install ./dist/vigia-client_1.1_all.deb 
+[sudo] contraseña para juanra: 
+Leyendo lista de paquetes... Hecho
+Creando árbol de dependencias... Hecho
+Leyendo la información de estado... Hecho
+Nota, seleccionando «vigia-client» en lugar de «./dist/vigia-client_1.1_all.deb»
+No se pudieron instalar algunos paquetes. Esto puede significar que
+usted pidió una situación imposible o, si está usando la distribución
+inestable, que algunos paquetes necesarios aún no se han creado o se
+han sacado de «Incoming».
+La siguiente información puede ayudar a resolver la situación:
 
+Los siguientes paquetes tienen dependencias incumplidas:
+ vigia-client : Depende: python3-mss pero no es instalable
+E: No se pudieron corregir los problemas, usted ha retenido paquetes rotos.
