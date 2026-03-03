@@ -1462,10 +1462,9 @@ async function toggleCompartir() {
   }
 
   try {
-    // getDisplayMedia abre el selector nativo de Chrome (pantalla, ventana o pestaña)
+    // getDisplayMedia abre el selector nativo de Chrome/Firefox/Safari
     _shareStream = await navigator.mediaDevices.getDisplayMedia({
-      video: true,
-      audio: false,
+      video: true
     });
 
     _shareVideo.srcObject = _shareStream;
@@ -1487,7 +1486,14 @@ async function toggleCompartir() {
     // Limpiar el stream si se obtuvo antes de que fallara play()
     if (_shareStream) { _shareStream.getTracks().forEach(t => t.stop()); _shareStream = null; }
     _shareRunning = false;
-    if (err.name !== 'NotAllowedError') alert('No se pudo compartir la pantalla: ' + err.message);
+    
+    if (err.name !== 'NotAllowedError') {
+      let msg = 'No se pudo compartir la pantalla: ' + err.message;
+      if (err.name === 'OverconstrainedError' || err.name === 'TypeError' || err.message.includes('constraint')) {
+        msg += '\n\nSi estás usando la aplicación de escritorio, prueba a abrir el panel en tu navegador (Chrome o Firefox) accediendo a http://localhost:5000';
+      }
+      alert(msg);
+    }
   }
 }
 
