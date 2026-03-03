@@ -194,8 +194,10 @@ echo "VIGIA Client installed successfully. Server IP set to $SERVER_IP"
 REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
 if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
     echo "Iniciando VIGIA Alumno para $REAL_USER..."
-    # Ejecutar en segundo plano intentando conectar con la sesión X11
-    su - "$REAL_USER" -c "export DISPLAY=:0; python3 /opt/vigia-client/client.py $SERVER_IP >/dev/null 2>&1 &" || true
+    # setsid crea una nueva sesión, nohup ignora el cierre de terminal, y las redirecciones cierran los pipes
+    sudo -u "$REAL_USER" DISPLAY=:0 setsid nohup python3 /opt/vigia-client/client.py "$SERVER_IP" </dev/null >/dev/null 2>&1 &
+    # Pequeña pausa para asegurar que el proceso se desvincula
+    sleep 0.5
 fi
 EOF
 chmod 755 "$CLIENT_BUILD_DIR/DEBIAN/postinst"
