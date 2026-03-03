@@ -51,6 +51,14 @@ def run_webview(url: str, proc: subprocess.Popen) -> None:
         win.set_icon_from_file(icon_path)
 
     webview = WebKit2.WebView()
+    
+    # Configurar WebKit para permitir MediaStream y WebRTC
+    settings = webview.get_settings()
+    settings.set_enable_media_stream(True)
+    settings.set_enable_mediasource(True)
+    # Algunos WebKit requieren permitir gestos de usuario para media
+    settings.set_media_playback_requires_user_gesture(False)
+    
     webview.load_uri(url)
     win.add(webview)
 

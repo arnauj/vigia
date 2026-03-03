@@ -1462,10 +1462,26 @@ async function toggleCompartir() {
   }
 
   try {
-    // getDisplayMedia abre el selector nativo de Chrome/Firefox/Safari
-    _shareStream = await navigator.mediaDevices.getDisplayMedia({
-      video: true
-    });
+    // Intentar compartir con diferentes estrategias de constraints (algunos navegadores/WebKit son muy tiquismiquis)
+    const estrategias = [
+      { video: true },               // Estándar
+      { video: { width: 1280 } },    // Con ancho ideal
+      {}                             // Vacío (algunos WebKit lo prefieren)
+    ];
+    
+    let ultimoError = null;
+    for (const constraint de estrategias) {
+      try {
+        console.log('Intentando compartir con:', constraint);
+        _shareStream = await navigator.mediaDevices.getDisplayMedia(constraint);
+        if (_shareStream) break;
+      } catch (e) {
+        console.warn('Fallo estrategia:', constraint, e.name, e.message);
+        ultimoError = e;
+      }
+    }
+    
+    if (!_shareStream) throw ultimoError || new Error('No se pudo obtener el stream');
 
     _shareVideo.srcObject = _shareStream;
     _shareStream.getVideoTracks()[0].addEventListener('ended', detenerCompartir);
