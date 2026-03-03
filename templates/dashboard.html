@@ -567,8 +567,15 @@
       background: #0a0c1a; display: flex; align-items: center;
       justify-content: center; font-size: 2rem; color: var(--muted);
     }
+    .screen-option .s-footer {
+      display: flex; align-items: center; gap: 6px;
+      padding: 7px 10px; min-width: 0;
+    }
+    .screen-option .s-icon {
+      width: 16px; height: 16px; flex-shrink: 0; object-fit: contain;
+    }
     .screen-option .s-label {
-      padding: 7px 10px; font-size: 0.78rem; font-weight: 500;
+      font-size: 0.78rem; font-weight: 500; flex: 1; min-width: 0;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     #screen-cancel {
@@ -1550,9 +1557,17 @@ socket.on('screens_list', data => {
       ph.className = 's-thumb-placeholder'; ph.textContent = icon;
       b.appendChild(ph);
     }
+    const footer = document.createElement('div');
+    footer.className = 's-footer';
+    if (s.icon) {
+      const ico = document.createElement('img');
+      ico.className = 's-icon'; ico.src = s.icon; ico.alt = '';
+      footer.appendChild(ico);
+    }
     const lbl = document.createElement('span');
     lbl.className = 's-label'; lbl.textContent = s.label;
-    b.appendChild(lbl);
+    footer.appendChild(lbl);
+    b.appendChild(footer);
     b.onclick = () => { cerrarScreenModal(); _iniciarCapturaServidor(params); };
     return b;
   }

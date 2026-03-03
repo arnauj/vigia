@@ -335,6 +335,102 @@ def _capture_window_thumb(wid_hex, max_w=192):
         return None
 
 
+def _find_desktop_icon(classes):
+    """Devuelve el nombre de icono de la app buscando en archivos .desktop por WM_CLASS."""
+    lower = [c.lower() for c in classes]
+    dirs = [
+        '/usr/share/applications',
+        os.path.expanduser('~/.local/share/applications'),
+        '/usr/local/share/applications',
+        '/var/lib/snapd/desktop/applications',
+        '/var/lib/flatpak/exports/share/applications',
+    ]
+    second_pass = []  # coincidencias por nombre de archivo (menor prioridad)
+    for d in dirs:
+        if not os.path.isdir(d):
+            continue
+        for fname in os.listdir(d):
+            if not fname.endswith('.desktop'):
+                continue
+            try:
+                text = open(os.path.join(d, fname), encoding='utf-8', errors='ignore').read()
+                icon_m = re.search(r'^Icon=(.+)$', text, re.MULTILINE)
+                if not icon_m:
+                    continue
+                icon = icon_m.group(1).strip()
+                # 1ª prioridad: StartupWMClass exacto
+                swm = re.search(r'^StartupWMClass=(.+)$', text, re.MULTILINE)
+                if swm and swm.group(1).strip().lower() in lower:
+                    return icon
+                # 2ª prioridad: nombre del .desktop == clase (filezilla.desktop → filezilla)
+                stem = fname[:-8].lower()
+                if stem in lower:
+                    second_pass.append(icon)
+            except Exception:
+                pass
+    return second_pass[0] if second_pass else None
+
+
+def _find_icon_path(name, preferred_size=48):
+    """Resuelve un nombre de icono a la ruta del archivo usando GTK IconTheme."""
+    if not name:
+        return None
+    if os.path.isabs(name):
+        return name if os.path.exists(name) else None
+    base = os.path.splitext(os.path.basename(name))[0]
+    # GTK IconTheme maneja correctamente todos los temas (hicolor, breeze, etc.)
+    try:
+        import gi
+        gi.require_version('Gtk', '3.0')
+        from gi.repository import Gtk
+        info = Gtk.IconTheme.get_default().lookup_icon(base, preferred_size, 0)
+        if info:
+            return info.get_filename()
+    except Exception:
+        pass
+    # Fallback: búsqueda directa en pixmaps
+    for n in (name, base):
+        for ext in ('png', 'svg', 'xpm'):
+            p = f'/usr/share/pixmaps/{n}.{ext}'
+            if os.path.exists(p):
+                return p
+    return None
+
+
+def _icon_to_b64(path):
+    """Convierte un archivo de icono (PNG/SVG/XPM) a data URI base64."""
+    if not path:
+        return None
+    try:
+        if path.endswith('.svg'):
+            return 'data:image/svg+xml;base64,' + base64.b64encode(
+                open(path, 'rb').read()).decode()
+        from PIL import Image
+        img = Image.open(path).convert('RGBA')
+        bg = Image.new('RGBA', img.size, (26, 29, 42, 255))
+        bg.paste(img, mask=img.split()[3])
+        img = bg.convert('RGB').resize((48, 48), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, 'PNG')
+        return 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return None
+
+
+def _get_window_app_icon(wid_hex):
+    """Obtiene el icono de la aplicación de una ventana via WM_CLASS y .desktop."""
+    try:
+        r = subprocess.run(['xprop', '-id', wid_hex, '-notype', 'WM_CLASS'],
+                           capture_output=True, text=True, timeout=1)
+        classes = re.findall(r'"([^"]+)"', r.stdout)
+        if not classes:
+            return None
+        icon_name = _find_desktop_icon(classes) or classes[-1].lower()
+        return _icon_to_b64(_find_icon_path(icon_name))
+    except Exception:
+        return None
+
+
 @socketio.on('get_screens')
 def on_get_screens():
     try:
@@ -359,6 +455,7 @@ def on_get_screens():
                 screens.append({
                     'type': 'window', 'wid': win['wid'], 'label': win['title'],
                     'thumb': thumb,
+                    'icon': _get_window_app_icon(win['wid']),
                 })
         emit('screens_list', {'screens': screens})
     except Exception as e:
