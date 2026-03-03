@@ -1,0 +1,6 @@
+#!/bin/bash
+REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
+REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
+rm -f \
+  "$REAL_HOME/.local/share/applications/vigia-servidor.desktop" \
+  "$REAL_HOME/.local/share/applications/vigia-alumno.desktop" 2>/dev/null || true

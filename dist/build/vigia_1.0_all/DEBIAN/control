@@ -1,0 +1,13 @@
+Package: vigia
+Version: 1.0
+Architecture: all
+Maintainer: VIGIA
+Section: education
+Priority: optional
+Depends: python3 (>= 3.10), python3-tk
+Description: Sistema de supervisión de aula para Linux
+ VIGIA permite al profesor ver en tiempo real las pantallas de los
+ alumnos conectados en la misma red local. Incluye servidor (equipo
+ del profesor) y cliente (equipo del alumno).
+ .
+ Sólo compatible con sesiones X11.

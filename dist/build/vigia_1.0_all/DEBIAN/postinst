@@ -1,0 +1,29 @@
+#!/bin/bash
+set -e
+VIGIA_DIR=/opt/vigia
+
+# Detectar el usuario real (quien ejecutó sudo)
+REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
+REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
+
+chmod +x "$VIGIA_DIR"/*.sh "$VIGIA_DIR"/*.py 2>/dev/null || true
+
+echo ""
+echo "╔══════════════════════════════════════════╗"
+echo "║  VIGIA instalado en /opt/vigia           ║"
+echo "╚══════════════════════════════════════════╝"
+echo ""
+
+# Lanzar instalador gráfico como el usuario real
+_DISPLAY="${DISPLAY:-:0}"
+_XAUTH="${XAUTHORITY:-$REAL_HOME/.Xauthority}"
+
+if su - "$REAL_USER" -c \
+     "DISPLAY=$_DISPLAY XAUTHORITY=$_XAUTH python3 /opt/vigia/instalar.py" \
+     2>/dev/null; then
+  :
+else
+  echo "Para configurar VIGIA, ejecuta:"
+  echo "  python3 /opt/vigia/instalar.py"
+  echo ""
+fi
