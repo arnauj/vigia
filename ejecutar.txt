@@ -1,3 +1,14 @@
-Quiero empaquetar todo para que se instale con un instalador. 
-En el proceso de instalación, me preguntará si es cliente o servidor, en caso de ser cliente, pondrá la ip por defecto y me dejará modificarla.
-Utiliza los iconos logo2.png y logo2_mini.png de la carpeta ./img
+corrige este error:
+
+127.0.0.1 - - [03/Mar/2026 10:13:54] "GET /socket.io/?EIO=4&transport=websocket HTTP/1.1" 500 -
+Error on request:
+Traceback (most recent call last):
+  File "/home/juanra/.local/lib/python3.12/site-packages/werkzeug/serving.py", line 370, in run_wsgi
+    execute(self.server.app)
+  File "/home/juanra/.local/lib/python3.12/site-packages/werkzeug/serving.py", line 336, in execute
+    write(b"")
+  File "/home/juanra/.local/lib/python3.12/site-packages/werkzeug/serving.py", line 261, in write
+    assert status_set is not None, "write() before start_response"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: write() before start_response
+

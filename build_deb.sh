@@ -9,17 +9,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PKG_NAME="vigia"
 PKG_VER="1.0"
-PKG_ARCH="amd64"
-PKG_FULL="${PKG_NAME}_${PKG_VER}_${PKG_ARCH}"
-BUILD_DIR="$SCRIPT_DIR/dist/build/$PKG_FULL"
-VIGIA_DST="$BUILD_DIR/opt/vigia"
 TAURI_BINARY="$SCRIPT_DIR/vigia-dashboard/src-tauri/target/release/vigia"
-
-echo ""
-echo "═══════════════════════════════════════════════"
-echo "  Construyendo $PKG_FULL.deb"
-echo "═══════════════════════════════════════════════"
-echo ""
 
 # ── Comprobar dpkg-deb ────────────────────────────────────────
 if ! command -v dpkg-deb >/dev/null 2>&1; then
@@ -28,13 +18,30 @@ if ! command -v dpkg-deb >/dev/null 2>&1; then
   exit 1
 fi
 
-# ── Compilar binario Tauri si no existe ───────────────────────
-if [ ! -f "$TAURI_BINARY" ]; then
-  echo "[*] Binario Tauri no encontrado. Compilando…"
-  bash "$SCRIPT_DIR/vigia-dashboard/build.sh"
-else
+# ── Compilar binario Tauri si no existe (opcional) ────────────
+if [ -f "$TAURI_BINARY" ]; then
   echo "[✓] Binario Tauri: $TAURI_BINARY"
+elif bash "$SCRIPT_DIR/vigia-dashboard/build.sh" 2>/dev/null; then
+  echo "[✓] Binario Tauri compilado"
+else
+  echo "[i] Binario Tauri no disponible — el paquete usará vigia-launcher.py (GTK/WebKit2)"
 fi
+
+# ── Arquitectura: amd64 si hay binario Tauri, all si solo Python ──
+if [ -f "$TAURI_BINARY" ]; then
+  PKG_ARCH="amd64"
+else
+  PKG_ARCH="all"
+fi
+PKG_FULL="${PKG_NAME}_${PKG_VER}_${PKG_ARCH}"
+BUILD_DIR="$SCRIPT_DIR/dist/build/$PKG_FULL"
+VIGIA_DST="$BUILD_DIR/opt/vigia"
+
+echo ""
+echo "═══════════════════════════════════════════════"
+echo "  Construyendo $PKG_FULL.deb"
+echo "═══════════════════════════════════════════════"
+echo ""
 
 # ── Estructura de directorios ─────────────────────────────────
 rm -rf "$BUILD_DIR"
@@ -60,9 +67,14 @@ cp "$SCRIPT_DIR/img/logo2_mini.png"   "$BUILD_DIR/usr/share/pixmaps/vigia.png"
 [ -f "$SCRIPT_DIR/requirements_servidor.txt" ] && \
   cp "$SCRIPT_DIR/requirements_servidor.txt" "$VIGIA_DST/"
 
-# ── Copiar binario Tauri ──────────────────────────────────────
-cp "$TAURI_BINARY" "$VIGIA_DST/vigia"
-chmod +x "$VIGIA_DST/vigia"
+# ── Copiar lanzador Python nativo ────────────────────────────
+cp "$SCRIPT_DIR/vigia-launcher.py" "$VIGIA_DST/"
+
+# ── Copiar binario Tauri si existe (mejora opcional) ─────────
+if [ -f "$TAURI_BINARY" ]; then
+  cp "$TAURI_BINARY" "$VIGIA_DST/vigia"
+  chmod +x "$VIGIA_DST/vigia"
+fi
 chmod +x "$VIGIA_DST"/*.sh "$VIGIA_DST"/*.py
 
 # ── DEBIAN/control ────────────────────────────────────────────
@@ -73,7 +85,7 @@ Architecture: $PKG_ARCH
 Maintainer: VIGIA
 Section: education
 Priority: optional
-Depends: python3 (>= 3.10), python3-tk, libwebkit2gtk-4.1-0, libgtk-3-0
+Depends: python3 (>= 3.10), python3-pip, python3-gi, python3-tk, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, libwebkit2gtk-4.1-0, libgtk-3-0
 Description: Sistema de supervisión de aula para Linux
  VIGIA permite al profesor ver en tiempo real las pantallas de los
  alumnos conectados en la misma red local. Incluye servidor (equipo
@@ -102,19 +114,26 @@ echo "║  VIGIA instalado en /opt/vigia           ║"
 echo "╚══════════════════════════════════════════╝"
 echo ""
 
-# Lanzar instalador gráfico como el usuario real
-_DISPLAY="${DISPLAY:-:0}"
-_XAUTH="${XAUTHORITY:-$REAL_HOME/.Xauthority}"
-
+# ── Instalar dependencias Python del servidor ─────────────────
+echo "[*] Instalando dependencias Python del servidor..."
 if su - "$REAL_USER" -c \
-     "DISPLAY=$_DISPLAY XAUTHORITY=$_XAUTH python3 /opt/vigia/instalar.py" \
-     2>/dev/null; then
-  :
+     "pip3 install --break-system-packages --user -q flask flask-socketio eventlet 2>/dev/null"; then
+  echo "[✓] Dependencias Python instaladas"
 else
-  echo "Para configurar VIGIA, ejecuta:"
-  echo "  python3 /opt/vigia/instalar.py"
-  echo ""
+  # Fallback: instalar globalmente si el usuario no puede usar pip
+  pip3 install --break-system-packages -q flask flask-socketio eventlet 2>/dev/null || true
+  echo "[✓] Dependencias Python instaladas (modo sistema)"
 fi
+
+# ── Crear acceso directo en el menú inicio ────────────────────
+echo "[*] Creando acceso directo..."
+if su - "$REAL_USER" -c "bash $VIGIA_DIR/instalar_servidor.sh" 2>/dev/null; then
+  echo "[✓] Acceso directo creado"
+else
+  echo "[!] No se pudo crear el acceso directo automáticamente."
+  echo "    Ejecuta manualmente: bash /opt/vigia/instalar_servidor.sh"
+fi
+echo ""
 POSTINST
 chmod 755 "$BUILD_DIR/DEBIAN/postinst"
 
@@ -137,6 +156,6 @@ dpkg-deb --root-owner-group --build "$BUILD_DIR" "$OUT_DIR/$PKG_FULL.deb"
 echo ""
 echo "[✓] Paquete listo: dist/$PKG_FULL.deb"
 echo ""
-echo "  Instalar:    sudo dpkg -i dist/$PKG_FULL.deb"
+echo "  Instalar:    sudo apt install ./dist/$PKG_FULL.deb"
 echo "  Desinstalar: sudo dpkg -r vigia"
 echo ""

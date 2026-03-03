@@ -34,10 +34,11 @@ pub fn run() {
                 .unwrap_or(std::path::Path::new("."))
                 .to_path_buf();
 
-            // Arrancar Flask
+            // Arrancar Flask (VIGIA_TAURI suprime la apertura del navegador)
             let child = Command::new("python3")
                 .arg(&server_py)
                 .current_dir(&workdir)
+                .env("VIGIA_TAURI", "1")
                 .spawn()
                 .expect("No se pudo arrancar server.py — ¿está Python 3 instalado?");
 
@@ -48,7 +49,9 @@ pub fn run() {
             // Esperar a Flask en hilo secundario y luego abrir la ventana
             thread::spawn(move || {
                 if wait_for_port(5000, 30) {
-                    let _ = WebviewWindowBuilder::new(
+                    // Capturar el icono antes de mover handle al builder
+                    let icon = handle.default_window_icon().cloned();
+                    if let Ok(window) = WebviewWindowBuilder::new(
                         &handle,
                         "main",
                         WebviewUrl::External("http://localhost:5000".parse().unwrap()),
@@ -56,7 +59,13 @@ pub fn run() {
                     .title("VIGIA — Panel del Profesor")
                     .inner_size(1280.0, 800.0)
                     .center()
-                    .build();
+                    .build()
+                    {
+                        // Aplicar icono a la ventana para que aparezca en la barra de tareas
+                        if let Some(icon) = icon {
+                            let _ = window.set_icon(icon);
+                        }
+                    }
                 } else {
                     eprintln!("[VIGIA] Tiempo de espera agotado: Flask no respondió en 30 s");
                     handle.exit(1);

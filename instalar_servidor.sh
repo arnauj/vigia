@@ -109,8 +109,12 @@ elif [ -x "$SCRIPT_DIR/vigia-dashboard/src-tauri/target/release/vigia" ]; then
   # Compilación de desarrollo
   VIGIA_EXEC="$SCRIPT_DIR/vigia-dashboard/src-tauri/target/release/vigia"
   VIGIA_TERMINAL=false
+elif [ -f "$SCRIPT_DIR/vigia-launcher.py" ]; then
+  # Lanzador Python nativo (GTK + WebKit2GTK, sin necesidad de Rust)
+  VIGIA_EXEC="$PYTHON3 $SCRIPT_DIR/vigia-launcher.py"
+  VIGIA_TERMINAL=false
 else
-  # Sin Tauri: arrancar servidor Python en terminal
+  # Último recurso: servidor Python en terminal
   VIGIA_EXEC="bash -c '$PYTHON3 \"$SCRIPT_DIR/server.py\"; read -rp \"Pulsa Enter para cerrar...\"'"
   VIGIA_TERMINAL=true
 fi
@@ -124,6 +128,8 @@ Exec=$VIGIA_EXEC
 Icon=$SCRIPT_DIR/img/logo2_mini.png
 Terminal=$VIGIA_TERMINAL
 Categories=Education;
+StartupWMClass=vigia
+StartupNotify=true
 DESKTOP_EOF
 chmod +x "$DESKTOP" 2>/dev/null || true
 

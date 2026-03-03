@@ -5,9 +5,10 @@ Muestra en tiempo real las pantallas de los alumnos conectados.
 Uso: python server.py [puerto]
 """
 
+import os
 import sys
 
-async_mode = 'threading'
+async_mode = 'eventlet'
 
 import socket
 from datetime import datetime
@@ -294,14 +295,15 @@ if __name__ == '__main__':
     print(f"  Alumnos se conectan a IP: {ip}  puerto: {port}")
     print(f"{sep}\n")
 
-    def _abrir_navegador():
-        import time
-        time.sleep(1.5)
-        try:
-            webbrowser.open(f"http://localhost:{port}")
-        except Exception:
-            # Silenciar errores de lanzamiento de navegador (timeout, etc)
-            pass
+    # Solo abrir navegador cuando no está corriendo dentro de Tauri
+    if not os.environ.get('VIGIA_TAURI'):
+        def _abrir_navegador():
+            import time
+            time.sleep(1.5)
+            try:
+                webbrowser.open(f"http://localhost:{port}")
+            except Exception:
+                pass
 
-    threading.Thread(target=_abrir_navegador, daemon=True).start()
-    socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)
+        threading.Thread(target=_abrir_navegador, daemon=True).start()
+    socketio.run(app, host='0.0.0.0', port=port, debug=False)

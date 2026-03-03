@@ -6,7 +6,7 @@ VIGIA_DIR=/opt/vigia
 REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
 REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
 
-chmod +x "$VIGIA_DIR"/*.sh "$VIGIA_DIR"/*.py 2>/dev/null || true
+chmod +x "$VIGIA_DIR"/*.sh "$VIGIA_DIR"/*.py "$VIGIA_DIR/vigia" 2>/dev/null || true
 
 echo ""
 echo "╔══════════════════════════════════════════╗"
@@ -14,16 +14,23 @@ echo "║  VIGIA instalado en /opt/vigia           ║"
 echo "╚══════════════════════════════════════════╝"
 echo ""
 
-# Lanzar instalador gráfico como el usuario real
-_DISPLAY="${DISPLAY:-:0}"
-_XAUTH="${XAUTHORITY:-$REAL_HOME/.Xauthority}"
-
+# ── Instalar dependencias Python del servidor ─────────────────
+echo "[*] Instalando dependencias Python del servidor..."
 if su - "$REAL_USER" -c \
-     "DISPLAY=$_DISPLAY XAUTHORITY=$_XAUTH python3 /opt/vigia/instalar.py" \
-     2>/dev/null; then
-  :
+     "pip3 install --break-system-packages --user -q flask flask-socketio eventlet 2>/dev/null"; then
+  echo "[✓] Dependencias Python instaladas"
 else
-  echo "Para configurar VIGIA, ejecuta:"
-  echo "  python3 /opt/vigia/instalar.py"
-  echo ""
+  # Fallback: instalar globalmente si el usuario no puede usar pip
+  pip3 install --break-system-packages -q flask flask-socketio eventlet 2>/dev/null || true
+  echo "[✓] Dependencias Python instaladas (modo sistema)"
 fi
+
+# ── Crear acceso directo en el menú inicio ────────────────────
+echo "[*] Creando acceso directo..."
+if su - "$REAL_USER" -c "bash $VIGIA_DIR/instalar_servidor.sh" 2>/dev/null; then
+  echo "[✓] Acceso directo creado"
+else
+  echo "[!] No se pudo crear el acceso directo automáticamente."
+  echo "    Ejecuta manualmente: bash /opt/vigia/instalar_servidor.sh"
+fi
+echo ""

@@ -5,6 +5,20 @@ Software de monitoreo de aula para ver en tiempo real las pantallas de los alumn
 
 ---
 
+## Descarga
+
+> **[⬇ Descargar vigia_1.0_all.deb](https://github.com/arnauj/vigia/releases/latest/download/vigia_1.0_all.deb)**
+
+Instala en el equipo del profesor con:
+
+```bash
+sudo apt install ./vigia_1.0_all.deb
+```
+
+Durante la instalación se configura automáticamente el acceso directo en el menú de inicio y se instalan todas las dependencias.
+
+---
+
 ## Cómo funciona
 
 ```
@@ -13,7 +27,7 @@ Software de monitoreo de aula para ver en tiempo real las pantallas de los alumn
 [Alumno 3] ─┘
 ```
 
-- El **servidor** corre en el equipo del profesor y muestra el panel en una **ventana nativa** (Tauri/WebKit). Opcionalmente también es accesible desde el navegador en `http://localhost:5000`.
+- El **servidor** corre en el equipo del profesor y muestra el panel en una **ventana nativa** (GTK + WebKit2GTK). No abre el navegador.
 - El **cliente** corre en cada equipo de alumno y envía capturas de pantalla cada ~1 segundo.
 - Todo ocurre dentro de la red local (no necesita internet).
 
@@ -28,7 +42,7 @@ Software de monitoreo de aula para ver en tiempo real las pantallas de los alumn
 - **Bloqueo de pantalla** — bloquea el teclado y ratón del alumno con un overlay.
 - **Mensajes con adjuntos** — el profesor puede enviar mensajes emergentes (con texto enriquecido y archivos adjuntos) a uno o todos los alumnos. Los adjuntos se guardan automáticamente en `~/Descargas` del alumno.
 - **Pantalla del profesor** — comparte la pantalla del profesor en una ventana flotante en todos los alumnos.
-- **Ventana nativa** — el panel del profesor se muestra como aplicación independiente gracias a Tauri 2.0 (WebKit), sin necesidad de abrir el navegador.
+- **Ventana nativa** — el panel del profesor se muestra como aplicación independiente con icono en la barra de tareas, sin abrir el navegador.
 
 ---
 
@@ -60,16 +74,18 @@ Software de monitoreo de aula para ver en tiempo real las pantallas de los alumn
 
 ## Instalación rápida con .deb (recomendado)
 
+**[⬇ Descargar vigia_1.0_all.deb](https://github.com/arnauj/vigia/releases/latest/download/vigia_1.0_all.deb)**
+
 ```bash
-sudo dpkg -i vigia_1.0_amd64.deb
+sudo apt install ./vigia_1.0_all.deb
 ```
 
-Durante la instalación se abre el instalador gráfico, que pregunta si el equipo es **servidor (profesor)** o **cliente (alumno)** y configura el acceso directo en el menú de inicio.
+`apt` resuelve e instala automáticamente todas las dependencias. Al terminar, aparece **VIGIA Servidor** en el menú de inicio.
 
 Para generar el paquete desde el código fuente:
 
 ```bash
-bash build_deb.sh      # Requiere Rust; lo instala automáticamente si falta
+bash build_deb.sh
 ```
 
 ---
@@ -95,20 +111,9 @@ Instala las dependencias Python y crea un acceso directo en el **menú de inicio
 ### Opción 3: manual
 
 ```bash
-sudo apt install python3-pip
-pip3 install flask flask-socketio
+sudo apt install python3-pip python3-gi gir1.2-webkit2-4.1 libwebkit2gtk-4.1-0
+pip3 install flask flask-socketio eventlet
 ```
-
-### Compilar la ventana nativa (Tauri)
-
-Para que el panel se muestre como ventana independiente en lugar de abrirse en el navegador:
-
-```bash
-bash vigia-dashboard/build.sh   # Instala Rust y compila el binario (~5 min la primera vez)
-bash instalar_servidor.sh       # Actualiza el acceso directo para usar el binario
-```
-
-> Si Rust no está instalado, `build.sh` lo descarga e instala automáticamente vía `rustup`.
 
 ---
 
@@ -157,17 +162,13 @@ Anota la IP de tu red local, por ejemplo `192.168.0.119`.
 
 ### 2. Inicia el servidor (equipo del profesor)
 
-**Con ventana nativa (si está compilado):**
-```bash
-./vigia-dashboard/src-tauri/target/release/vigia
-```
-O desde el acceso directo **VIGIA Servidor** del menú de inicio.
+Haz doble clic en **VIGIA Servidor** del menú de inicio, o desde terminal:
 
-**Sin ventana nativa:**
 ```bash
-python3 server.py
+python3 vigia-launcher.py
 ```
-Se abre el navegador automáticamente con el panel en `http://localhost:5000`.
+
+Se abre una ventana nativa con el panel en `http://localhost:5000`. El icono aparece en la barra de tareas.
 
 ### 3. Inicia el cliente (cada equipo de alumno)
 
@@ -235,6 +236,10 @@ Todos los equipos deben estar en la **misma red local**. Si la WiFi del aula tie
 | `python3-pip` | Todos | `sudo apt install python3-pip` |
 | `flask` | Solo profesor | `pip3 install flask` |
 | `flask-socketio` | Solo profesor | `pip3 install flask-socketio` |
+| `eventlet` | Solo profesor | `pip3 install eventlet` |
+| `python3-gi` | Solo profesor (ventana nativa) | `sudo apt install python3-gi` |
+| `gir1.2-webkit2-4.1` | Solo profesor (ventana nativa) | `sudo apt install gir1.2-webkit2-4.1` |
+| `libwebkit2gtk-4.1-0` | Solo profesor (ventana nativa) | Incluido en el .deb |
 | `python3-tk` | Solo alumnos | `sudo apt install python3-tk` |
 | `xdotool` | Solo alumnos | `sudo apt install xdotool` |
 | `python-socketio[client]` | Solo alumnos | `pip3 install "python-socketio[client]"` |
@@ -243,8 +248,6 @@ Todos los equipos deben estar en la **misma red local**. Si la WiFi del aula tie
 | `Pillow` | Solo alumnos | `pip3 install Pillow` |
 | `python3-aiortc` | Solo alumnos (WebRTC) | `sudo apt install python3-aiortc` |
 | `python3-numpy` | Solo alumnos (WebRTC) | `sudo apt install python3-numpy` |
-| `libwebkit2gtk-4.1-0` | Solo profesor (ventana nativa) | Incluido en el .deb |
-| `rust / cargo` | Solo al compilar | `bash vigia-dashboard/build.sh` |
 
 ---
 
@@ -275,10 +278,10 @@ Ubuntu 24.04 protege los paquetes del sistema. Añade `--break-system-packages`:
 **El cliente se desconecta constantemente**
 Puede ser que la WiFi del aula tenga aislamiento de clientes (AP isolation). Habla con el administrador de red para desactivarlo, o usa cable ethernet.
 
-**La ventana nativa no se abre / error al compilar Tauri**
-- Ejecuta `bash vigia-dashboard/build.sh` y revisa los mensajes de error.
-- Asegúrate de tener conexión a internet para descargar Rust y las dependencias de Cargo.
-- Si el error es de dependencias del sistema, ejecuta: `sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev pkg-config`
+**La ventana nativa no se abre**
+- Asegúrate de tener instalado: `sudo apt install python3-gi gir1.2-webkit2-4.1 libwebkit2gtk-4.1-0`
+- Comprueba que la sesión es X11 (no Wayland): `echo $XDG_SESSION_TYPE`
+- Si el error persiste, el lanzador abre el navegador automáticamente como fallback.
 
 ---
 
@@ -288,17 +291,18 @@ Puede ser que la WiFi del aula tenga aislamiento de clientes (AP isolation). Hab
 VIGIA/
 ├── server.py                  ← Servidor del profesor (Flask + SocketIO)
 ├── client.py                  ← Cliente del alumno
+├── vigia-launcher.py          ← Lanzador con ventana nativa (GTK + WebKit2GTK)
 ├── instalar.py                ← Instalador gráfico (tkinter)
 ├── instalar.sh                ← Lanzador del instalador gráfico
 ├── instalar_servidor.sh       ← Instalación línea de comandos (profesor)
 ├── instalar_cliente.sh        ← Instalación línea de comandos (alumnos)
-├── build_deb.sh               ← Genera dist/vigia_1.0_amd64.deb
+├── build_deb.sh               ← Genera dist/vigia_1.0_all.deb
 ├── templates/
 │   └── dashboard.html         ← Panel SPA del profesor (JS vanilla)
 ├── img/
 │   ├── logo2.png
 │   └── logo2_mini.png
-├── vigia-dashboard/           ← Proyecto Tauri 2.0 (ventana nativa)
+├── vigia-dashboard/           ← Proyecto Tauri 2.0 (ventana nativa alternativa)
 │   ├── build.sh               ← Compila el binario (instala Rust si falta)
 │   └── src-tauri/
 │       ├── Cargo.toml
