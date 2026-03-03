@@ -5,6 +5,14 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 IP_SERVIDOR="${1:-}"
 
+# Si no se pasa IP, calcular X.X.X.2 a partir de la red local
+if [ -z "$IP_SERVIDOR" ]; then
+  _IP_LOCAL="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1); exit}')"
+  if [ -n "$_IP_LOCAL" ]; then
+    IP_SERVIDOR="$(echo "$_IP_LOCAL" | awk -F. '{print $1"."$2"."$3".2"}')"
+  fi
+fi
+
 echo ""
 echo "═══════════════════════════════════════════════"
 echo "  VIGIA v1.3 — Instalando cliente del alumno"

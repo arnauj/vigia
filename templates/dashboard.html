@@ -591,6 +591,61 @@
       animation: pulse 1s infinite;
     }
 
+    /* ── Adjuntos en compose ── */
+    #compose-attach-area {
+      border-top: 1px solid var(--card-border);
+    }
+    #compose-drop-zone {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 18px;
+      font-size: 0.83rem;
+      color: var(--muted);
+      border: 2px dashed transparent;
+      transition: border-color .2s, background .2s;
+      cursor: default;
+    }
+    #compose-drop-zone.dragover {
+      border-color: var(--accent);
+      background: rgba(79,142,247,.07);
+    }
+    #compose-drop-zone-btn {
+      background: none;
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      color: var(--muted);
+      padding: 3px 10px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: border-color .15s, color .15s;
+    }
+    #compose-drop-zone-btn:hover { border-color: var(--accent); color: var(--accent); }
+    #compose-file-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 0 18px 10px;
+    }
+    .attach-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: #252840;
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      padding: 3px 8px 3px 12px;
+      font-size: 0.78rem;
+      color: var(--text);
+    }
+    .attach-chip-remove {
+      background: none; border: none; color: var(--muted);
+      cursor: pointer; padding: 0; font-size: 0.9rem; line-height: 1;
+      transition: color .15s;
+    }
+    .attach-chip-remove:hover { color: var(--red); }
+
     /* Preview miniatura de lo que se comparte */
     #share-preview {
       display: none;
@@ -894,10 +949,13 @@ function quitAll() {
 }
 
 // ── Redactar mensaje (individual o a todos) ───────────────────────────────
-let _composeSid = null;   // null = todos los alumnos
+let _composeSid   = null;   // null = todos los alumnos
+let _composeFiles = [];     // [{name, type, size, data (base64 sin prefijo)}]
 
 function abrirCompose(sid = null) {
   _composeSid = sid || null;
+  _composeFiles = [];
+  _renderFileList();
   // Salir de modo fuente si estaba activo
   if (typeof _sourceMode !== 'undefined' && _sourceMode) toggleSource();
   document.getElementById('compose-para').textContent =
@@ -922,20 +980,21 @@ function enviarCompose() {
   const titulo = document.getElementById('compose-titulo').value.trim()
                  || 'Mensaje del profesor';
   const body   = document.getElementById('compose-body').innerHTML.trim();
-  // Ignorar si solo hay un <br> vacío
-  if (!body || body === '<br>') {
+  const attachments = _composeFiles.map(f => ({ name: f.name, type: f.type, data: f.data }));
+  // Requiere al menos texto o adjuntos
+  if ((!body || body === '<br>') && attachments.length === 0) {
     document.getElementById('compose-body').focus();
     return;
   }
   if (_composeSid) {
-    socket.emit('send_message_to', { sid: _composeSid, title: titulo, body });
+    socket.emit('send_message_to', { sid: _composeSid, title: titulo, body, attachments });
     toast(`✉ Mensaje enviado a ${students[_composeSid]?.name || _composeSid}`, 'connect');
   } else {
     if (Object.keys(students).length === 0) {
       toast('No hay alumnos conectados.', '');
       return;
     }
-    socket.emit('send_message', { title: titulo, body });
+    socket.emit('send_message', { title: titulo, body, attachments });
     toast(`✉ Mensaje enviado a ${Object.keys(students).length} alumno(s)`, 'connect');
   }
   cerrarCompose();
@@ -1352,6 +1411,22 @@ document.addEventListener('DOMContentLoaded', function () {
       dy: Math.round(-e.deltaY / 100),
     });
   }, { passive: false });
+
+  // ── Listeners adjuntos compose ────────────────────────────────────────────
+  const fileInput = document.getElementById('compose-file-input');
+  if (fileInput) {
+    fileInput.addEventListener('change', (e) => { _addFiles(e.target.files); e.target.value = ''; });
+  }
+  const dz = document.getElementById('compose-drop-zone');
+  if (dz) {
+    dz.addEventListener('dragover',  (e) => { e.preventDefault(); dz.classList.add('dragover'); });
+    dz.addEventListener('dragleave', ()  => dz.classList.remove('dragover'));
+    dz.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dz.classList.remove('dragover');
+      if (e.dataTransfer.files.length) _addFiles(e.dataTransfer.files);
+    });
+  }
 });
 
 // ── Compartir pantalla del profesor ───────────────────────────────────────
@@ -1499,6 +1574,46 @@ document.getElementById('link-overlay').addEventListener('click', (e) => {
 document.getElementById('compose-overlay').addEventListener('click', (e) => {
   if (e.target === document.getElementById('compose-overlay')) cerrarCompose();
 });
+
+// ── Adjuntos en compose ────────────────────────────────────────────────────
+
+function _renderFileList() {
+  const el = document.getElementById('compose-file-list');
+  if (!el) return;
+  el.innerHTML = '';
+  _composeFiles.forEach((f, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'attach-chip';
+    chip.innerHTML = `📄 ${escHtml(f.name)}\u00a0<button class="attach-chip-remove" onclick="_removeFile(${i})" title="Eliminar adjunto">✕</button>`;
+    el.appendChild(chip);
+  });
+}
+
+function _removeFile(idx) {
+  _composeFiles.splice(idx, 1);
+  _renderFileList();
+}
+
+async function _addFiles(fileList) {
+  const MAX_TOTAL = 10 * 1024 * 1024;  // 10 MB en total
+  let used = _composeFiles.reduce((s, f) => s + f.size, 0);
+  for (const file of Array.from(fileList)) {
+    if (used + file.size > MAX_TOTAL) {
+      toast(`⚠ Límite 10 MB superado, se omite: ${file.name}`, '');
+      continue;
+    }
+    const data = await new Promise(resolve => {
+      const r = new FileReader();
+      r.onload = e => resolve(e.target.result.split(',')[1]);
+      r.readAsDataURL(file);
+    });
+    _composeFiles.push({ name: file.name, type: file.type || 'application/octet-stream', size: file.size, data });
+    used += file.size;
+  }
+  _renderFileList();
+}
+
+// Los listeners de adjuntos se registran en DOMContentLoaded (elementos definidos tras este script)
 </script>
 
 <!-- ── Modal redactar mensaje ── -->
@@ -1534,6 +1649,15 @@ document.getElementById('compose-overlay').addEventListener('click', (e) => {
          data-placeholder="Escribe el cuerpo del mensaje aquí…"></div>
     <textarea id="compose-source" spellcheck="false"
               placeholder="<!-- HTML del mensaje -->"></textarea>
+    <div id="compose-attach-area">
+      <div id="compose-drop-zone">
+        <span>📎 Arrastra archivos aquí o</span>
+        <button id="compose-drop-zone-btn"
+                onclick="document.getElementById('compose-file-input').click()">Seleccionar archivos</button>
+        <input type="file" id="compose-file-input" multiple style="display:none">
+      </div>
+      <div id="compose-file-list"></div>
+    </div>
     <div id="compose-footer">
       <button class="compose-cancel" onclick="cerrarCompose()">Cancelar</button>
       <button class="compose-send"   onclick="enviarCompose()">Enviar  <small style="font-weight:400;opacity:.7">(Ctrl+↵)</small></button>

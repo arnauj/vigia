@@ -608,10 +608,54 @@ class _VentanaProfesor:
 
 class _VentanaMensaje:
     def __init__(self, root, msg):
-        t = tk.Toplevel(root); t.title(msg.get('title', 'Mensaje')); t.configure(bg='#1a1d27'); t.attributes('-topmost', True)
-        c = tk.Frame(t, bg='#1a1d27', padx=20, pady=20); c.pack()
-        txt = tk.Text(c, bg='#1a1d27', fg='#e2e8f0', font=('Segoe UI', 12), wrap='word', height=6, width=40, relief='flat')
-        txt.insert('end', re.sub(r'<[^>]+>', '', msg.get('body', ''))); txt.config(state='disabled'); txt.pack()
+        import pathlib
+        t = tk.Toplevel(root)
+        t.title(msg.get('title', 'Mensaje'))
+        t.configure(bg='#1a1d27')
+        t.attributes('-topmost', True)
+        c = tk.Frame(t, bg='#1a1d27', padx=20, pady=20)
+        c.pack()
+        body_text = re.sub(r'<[^>]+>', '', msg.get('body', '')).strip()
+        if body_text:
+            txt = tk.Text(c, bg='#1a1d27', fg='#e2e8f0', font=('Segoe UI', 12),
+                          wrap='word', height=6, width=44, relief='flat')
+            txt.insert('end', body_text)
+            txt.config(state='disabled')
+            txt.pack()
+        adjuntos = msg.get('attachments', [])
+        if adjuntos:
+            descargas = pathlib.Path.home() / 'Descargas'
+            if not descargas.exists():
+                descargas = pathlib.Path.home() / 'Downloads'
+            if not descargas.exists():
+                descargas = pathlib.Path.home()
+            tk.Label(c, text='📎 Archivos adjuntos recibidos:', bg='#1a1d27',
+                     fg='#718096', font=('Segoe UI', 9)).pack(
+                         anchor='w', pady=(10 if body_text else 0, 4))
+            for att in adjuntos:
+                try:
+                    dest = descargas / att['name']
+                    counter = 1
+                    while dest.exists():
+                        p = pathlib.Path(att['name'])
+                        dest = descargas / f"{p.stem}_{counter}{p.suffix}"
+                        counter += 1
+                    dest.write_bytes(base64.b64decode(att['data']))
+                    def _abrir(p=dest):
+                        try:
+                            subprocess.Popen(['xdg-open', str(p)])
+                        except Exception:
+                            pass
+                    fila = tk.Frame(c, bg='#1a1d27')
+                    fila.pack(fill='x', pady=2)
+                    tk.Button(fila, text=f'📄 {att["name"]}', bg='#252840', fg='#e2e8f0',
+                              font=('Segoe UI', 9), relief='flat', anchor='w',
+                              command=_abrir).pack(side='left')
+                    tk.Label(fila, text=f'→ {dest}', bg='#1a1d27', fg='#718096',
+                             font=('Segoe UI', 7)).pack(side='left', padx=(6, 0))
+                except Exception as exc:
+                    tk.Label(c, text=f'⚠ Error al guardar {att.get("name", "?")}: {exc}',
+                             bg='#1a1d27', fg='#fc8181', font=('Segoe UI', 8)).pack(anchor='w')
         tk.Button(c, text="Aceptar", bg='#4f8ef7', fg='white', command=t.destroy).pack(pady=(15, 0))
 
 class _VentanaBloqueo:

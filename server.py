@@ -141,19 +141,29 @@ def on_quit_all_students(_data):
 
 @socketio.on('send_message')
 def on_send_message(data):
-    payload = {'title': data.get('title', 'Mensaje'), 'body': data.get('body', '').strip()}
-    if payload['body']:
+    payload = {
+        'title': data.get('title', 'Mensaje'),
+        'body': data.get('body', '').strip(),
+        'attachments': data.get('attachments', []),
+    }
+    if payload['body'] or payload['attachments']:
         emit('show_message', payload, broadcast=True, include_self=False)
-        print(f"[*] Mensaje enviado a todos: {payload['title']}")
+        n = len(payload['attachments'])
+        print(f"[*] Mensaje enviado a todos: {payload['title']}" + (f" ({n} adjunto(s))" if n else ""))
 
 
 @socketio.on('send_message_to')
 def on_send_message_to(data):
     sid = data.get('sid')
     if sid in students:
-        payload = {'title': data.get('title', 'Mensaje'), 'body': data.get('body', '').strip()}
+        payload = {
+            'title': data.get('title', 'Mensaje'),
+            'body': data.get('body', '').strip(),
+            'attachments': data.get('attachments', []),
+        }
         socketio.emit('show_message', payload, to=sid)
-        print(f"[*] Mensaje enviado a {students[sid]['name']}: {payload['title']}")
+        n = len(payload['attachments'])
+        print(f"[*] Mensaje enviado a {students[sid]['name']}: {payload['title']}" + (f" ({n} adjunto(s))" if n else ""))
 
 
 @socketio.on('lock_student')
