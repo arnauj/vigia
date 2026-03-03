@@ -5,17 +5,25 @@ Software de monitoreo de aula para ver en tiempo real las pantallas de los alumn
 
 ---
 
-## Descarga
+## Descarga e Instalación (.deb recomendado)
 
-> **[⬇ Descargar vigia_1.0_all.deb](https://github.com/arnauj/vigia/releases/latest/download/vigia_1.0_all.deb)**
+VIGIA ahora se distribuye en dos paquetes separados para facilitar el despliegue en el aula:
 
-Instala en el equipo del profesor con:
+### 1. Equipo del Profesor (Servidor)
+Instala el panel de control y el servidor de señales.
+> **[⬇ Descargar vigia-server_1.1_amd64.deb](#)**
 
 ```bash
-sudo apt install ./vigia_1.0_all.deb
+sudo apt install ./vigia-server_1.1_amd64.deb
 ```
 
-Durante la instalación se configura automáticamente el acceso directo en el menú de inicio y se instalan todas las dependencias.
+### 2. Equipos de los Alumnos (Cliente)
+Instala el agente de captura. Durante la instalación, **se pedirá la IP del servidor** (por defecto intenta detectar `x.x.x.2`).
+> **[⬇ Descargar vigia-client_1.1_all.deb](#)**
+
+```bash
+sudo apt install ./vigia-client_1.1_all.deb
+```
 
 ---
 
@@ -27,9 +35,21 @@ Durante la instalación se configura automáticamente el acceso directo en el me
 [Alumno 3] ─┘
 ```
 
-- El **servidor** corre en el equipo del profesor y muestra el panel en una **ventana nativa** (GTK + WebKit2GTK). No abre el navegador.
-- El **cliente** corre en cada equipo de alumno y envía capturas de pantalla cada ~1 segundo.
+- El **servidor** corre en el equipo del profesor y muestra el panel en una **ventana nativa** (Tauri o GTK + WebKit2GTK).
+- El **cliente** corre en cada equipo de alumno y envía capturas de pantalla. Se configura automáticamente con la IP del profesor durante la instalación del `.deb`.
 - Todo ocurre dentro de la red local (no necesita internet).
+
+---
+
+## Generar los paquetes .deb
+
+Si deseas generar los paquetes tú mismo desde el código fuente:
+
+```bash
+bash build_debs.sh
+```
+
+Los paquetes resultantes aparecerán en la carpeta `dist/`.
 
 ---
 
