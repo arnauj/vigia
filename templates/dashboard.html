@@ -1470,7 +1470,7 @@ async function toggleCompartir() {
     ];
     
     let ultimoError = null;
-    for (const constraint de estrategias) {
+    for (const constraint of estrategias) {
       try {
         console.log('Intentando compartir con:', constraint);
         _shareStream = await navigator.mediaDevices.getDisplayMedia(constraint);
