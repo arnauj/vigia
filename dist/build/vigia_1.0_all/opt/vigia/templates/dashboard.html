@@ -525,6 +525,34 @@
     #compose-source.show { display: block; }
     #compose-body.src-hidden { display: none; }
 
+    /* ── Modal selección de pantalla ── */
+    #screen-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.7); z-index: 800;
+      align-items: center; justify-content: center;
+    }
+    #screen-overlay.show { display: flex; }
+    #screen-box {
+      background: var(--card-bg); border: 1px solid var(--card-border);
+      border-radius: 10px; width: min(420px, 94vw); padding: 22px 24px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.5);
+    }
+    #screen-box h3 { margin: 0 0 16px; font-size: 1rem; font-weight: 700; }
+    #screen-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
+    .screen-option {
+      background: var(--card-bg); border: 1px solid var(--card-border);
+      border-radius: 8px; padding: 12px 16px; cursor: pointer;
+      text-align: left; color: var(--text); font-size: 0.9rem;
+      transition: border-color .15s, background .15s;
+    }
+    .screen-option:hover { border-color: var(--accent); background: #1e2140; }
+    #screen-cancel {
+      background: none; border: 1px solid var(--card-border); color: var(--muted);
+      border-radius: 8px; padding: 6px 16px; font-size: 0.85rem; cursor: pointer;
+      float: right; transition: border-color .15s, color .15s;
+    }
+    #screen-cancel:hover { border-color: var(--text); color: var(--text); }
+
     /* Mini modal hipervínculo */
     #link-overlay {
       display: none; position: fixed; inset: 0;
@@ -715,6 +743,13 @@
 <div id="toast-container"></div>
 
 <script>
+// ── Utilidades ────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 // ── Estado ────────────────────────────────────────────────────────────────
 const students = {};  // sid → {name, ip, image, last_seen, connected_at}
 let modalSid = null;
@@ -886,7 +921,9 @@ document.getElementById('modal-overlay').addEventListener('click', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (document.getElementById('clipboard-overlay').classList.contains('show')) {
+    if (document.getElementById('screen-overlay').classList.contains('show')) {
+      cerrarScreenModal();
+    } else if (document.getElementById('clipboard-overlay').classList.contains('show')) {
       cerrarPortapapeles();
     } else if (document.getElementById('link-overlay').classList.contains('show')) {
       cerrarLink();
@@ -919,18 +956,13 @@ function applySearch() {
 
 // ── Toast ─────────────────────────────────────────────────────────────────
 function toast(msg, type = '') {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
   const el = document.createElement('div');
   el.className = `toast-item ${type}`;
   el.textContent = msg;
-  document.getElementById('toast-container').appendChild(el);
+  container.appendChild(el);
   setTimeout(() => el.remove(), 4000);
-}
-
-// ── Utilidades ────────────────────────────────────────────────────────────
-function escHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // ── Cerrar cliente de alumnos ─────────────────────────────────────────────
@@ -1430,112 +1462,57 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 // ── Compartir pantalla del profesor ───────────────────────────────────────
-let _shareStream   = null;
-let _shareRunning  = false;
-let _shareTimeout  = null;
-const _shareVideo  = document.createElement('video');
-const _shareCanvas = document.createElement('canvas');
-const _shareCtx    = _shareCanvas.getContext('2d');
-_shareCtx.imageSmoothingEnabled = true;
-_shareCtx.imageSmoothingQuality = 'high';
-_shareVideo.autoplay    = true;
-_shareVideo.muted       = true;
-_shareVideo.playsInline = true;
+// La captura se realiza en el servidor Flask (mss), no con getDisplayMedia,
+// para garantizar compatibilidad con WebKit/Tauri y cualquier navegador.
+let _sharing = false;
 
-const FPS_SHARE    = 2;      // fotogramas por segundo enviados
-const CALIDAD_SHARE = 0.85;  // calidad JPEG 0-1
-const ANCHO_SHARE   = 1280;  // px máximos de ancho (bajado para mayor fluidez)
-
-async function toggleCompartir() {
-  if (_shareStream) {
+function toggleCompartir() {
+  if (_sharing) {
     detenerCompartir();
-    return;
-  }
-
-  if (!navigator.mediaDevices?.getDisplayMedia) {
-    const esSeguro = location.protocol === 'https:' ||
-                     ['localhost', '127.0.0.1'].includes(location.hostname);
-    alert(esSeguro
-      ? 'Tu navegador no soporta compartir pantalla.\nUsa Chrome, Edge o Firefox recientes.'
-      : 'Para compartir pantalla accede desde esta misma máquina:\nhttp://localhost:5000\n(Chrome bloquea esta función en conexiones HTTP externas)');
-    return;
-  }
-
-  try {
-    // getDisplayMedia abre el selector nativo de Chrome (pantalla, ventana o pestaña)
-    _shareStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: 5, max: 10 } },
-      audio: false,
-    });
-
-    _shareVideo.srcObject = _shareStream;
-    _shareStream.getVideoTracks()[0].addEventListener('ended', detenerCompartir);
-
-    // Esperar dimensiones del vídeo antes de capturar (videoWidth puede ser 0 tras play())
-    await new Promise(resolve => {
-      if (_shareVideo.videoWidth) { resolve(); return; }
-      _shareVideo.addEventListener('loadedmetadata', resolve, { once: true });
-    });
-    await _shareVideo.play();
-
-    _shareRunning = true;
-    _loopCompartir();
-    _actualizarBoton(true);
-
-  } catch (err) {
-    console.error('Error al compartir pantalla:', err);
-    // Limpiar el stream si se obtuvo antes de que fallara play()
-    if (_shareStream) { _shareStream.getTracks().forEach(t => t.stop()); _shareStream = null; }
-    _shareRunning = false;
-    if (err.name !== 'NotAllowedError') alert('No se pudo compartir la pantalla: ' + err.message);
+  } else {
+    socket.emit('get_screens');
   }
 }
 
-function _loopCompartir() {
-  if (!_shareRunning || !_shareStream) return;
-  
-  _enviarFrame();
-  
-  // Controlar FPS manualmente con setTimeout dentro del loop
-  _shareTimeout = setTimeout(() => {
-    if (_shareRunning) requestAnimationFrame(_loopCompartir);
-  }, 1000 / FPS_SHARE);
+socket.on('screens_list', data => {
+  if (data.error) { alert(data.error); return; }
+  const list = document.getElementById('screen-list');
+  list.innerHTML = '';
+  data.screens.forEach(s => {
+    const btn = document.createElement('button');
+    btn.className = 'screen-option';
+    btn.textContent = s.label;
+    btn.onclick = () => { cerrarScreenModal(); _iniciarCaptura(s.index); };
+    list.appendChild(btn);
+  });
+  document.getElementById('screen-overlay').classList.add('show');
+});
+
+function cerrarScreenModal() {
+  document.getElementById('screen-overlay').classList.remove('show');
 }
 
-function _enviarFrame() {
-  if (!_shareStream || !_shareVideo.videoWidth) return;
-  try {
-    const vw = _shareVideo.videoWidth;
-    const vh = _shareVideo.videoHeight;
-    _shareCanvas.width  = Math.min(vw, ANCHO_SHARE);
-    _shareCanvas.height = Math.round(_shareCanvas.width * vh / vw);
-    
-    _shareCtx.drawImage(_shareVideo, 0, 0, _shareCanvas.width, _shareCanvas.height);
-    const imgData = _shareCanvas.toDataURL('image/jpeg', CALIDAD_SHARE);
-    socket.emit('teacher_screenshot', { image: imgData, activa: true });
-
-    const prev = document.getElementById('share-preview');
-    prev.src = imgData;
-    if (!prev.classList.contains('show')) prev.classList.add('show');
-  } catch (e) {
-    console.warn('Error capturando frame:', e);
-  }
+function _iniciarCaptura(monitorIndex) {
+  _sharing = true;
+  socket.emit('start_teacher_capture', { monitor: monitorIndex });
+  _actualizarBoton(true);
 }
 
 function detenerCompartir() {
-  _shareRunning = false;
-  clearTimeout(_shareTimeout);
-  if (_shareStream) {
-    _shareStream.getTracks().forEach(t => t.stop());
-    _shareStream = null;
-  }
-  _shareVideo.srcObject = null;
-  socket.emit('teacher_screenshot', { activa: false });
+  _sharing = false;
+  socket.emit('stop_teacher_capture');
   _actualizarBoton(false);
   const prev = document.getElementById('share-preview');
   prev.src = '';
   prev.classList.remove('show');
 }
+
+socket.on('teacher_screen_preview', data => {
+  if (data.error) { alert('No se pudo compartir la pantalla:\n' + data.error); detenerCompartir(); return; }
+  const prev = document.getElementById('share-preview');
+  prev.src = data.image;
+  if (!prev.classList.contains('show')) prev.classList.add('show');
+});
 
 function _actualizarBoton(compartiendo) {
   const btn   = document.getElementById('btn-compartir');
@@ -1553,7 +1530,7 @@ function _actualizarBoton(compartiendo) {
 
 // Detener al cerrar/recargar la página
 window.addEventListener('beforeunload', () => {
-  if (_shareStream) detenerCompartir();
+  if (_sharing) socket.emit('stop_teacher_capture');
 });
 
 // Cerrar compose con Escape; Ctrl+Enter envía
@@ -1694,6 +1671,15 @@ async function _addFiles(fileList) {
       <button id="clipboard-copy-btn" onclick="copiarPortapapeles()">Copiar al servidor</button>
       <button onclick="cerrarPortapapeles()">Cerrar</button>
     </div>
+  </div>
+</div>
+
+<!-- ── Modal selección de pantalla ── -->
+<div id="screen-overlay">
+  <div id="screen-box">
+    <h3>📺 Selecciona qué compartir</h3>
+    <div id="screen-list"><!-- se rellena dinámicamente --></div>
+    <button id="screen-cancel" onclick="cerrarScreenModal()">Cancelar</button>
   </div>
 </div>
 

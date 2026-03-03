@@ -7,7 +7,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PKG_NAME="vigia"
+PKG_NAME="vigia-server"
 PKG_VER="1.0"
 TAURI_BINARY="$SCRIPT_DIR/vigia-dashboard/src-tauri/target/release/vigia"
 
@@ -35,7 +35,7 @@ else
 fi
 PKG_FULL="${PKG_NAME}_${PKG_VER}_${PKG_ARCH}"
 BUILD_DIR="$SCRIPT_DIR/dist/build/$PKG_FULL"
-VIGIA_DST="$BUILD_DIR/opt/vigia"
+VIGIA_DST="$BUILD_DIR/opt/vigia-server"
 
 echo ""
 echo "═══════════════════════════════════════════════"
@@ -85,7 +85,7 @@ Architecture: $PKG_ARCH
 Maintainer: VIGIA
 Section: education
 Priority: optional
-Depends: python3 (>= 3.10), python3-pip, python3-gi, python3-tk, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, libwebkit2gtk-4.1-0, libgtk-3-0
+Depends: python3 (>= 3.10), python3-pip, python3-gi, python3-tk, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, libwebkit2gtk-4.1-0, libgtk-3-0, x11-utils, xdotool
 Description: Sistema de supervisión de aula para Linux
  VIGIA permite al profesor ver en tiempo real las pantallas de los
  alumnos conectados en la misma red local. Incluye servidor (equipo
@@ -100,7 +100,7 @@ EOF
 cat > "$BUILD_DIR/DEBIAN/postinst" <<'POSTINST'
 #!/bin/bash
 set -e
-VIGIA_DIR=/opt/vigia
+VIGIA_DIR=/opt/vigia-server
 
 # Detectar el usuario real (quien ejecutó sudo)
 REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
@@ -110,18 +110,18 @@ chmod +x "$VIGIA_DIR"/*.sh "$VIGIA_DIR"/*.py "$VIGIA_DIR/vigia" 2>/dev/null || t
 
 echo ""
 echo "╔══════════════════════════════════════════╗"
-echo "║  VIGIA instalado en /opt/vigia           ║"
+echo "║  VIGIA instalado en /opt/vigia-server           ║"
 echo "╚══════════════════════════════════════════╝"
 echo ""
 
 # ── Instalar dependencias Python del servidor ─────────────────
 echo "[*] Instalando dependencias Python del servidor..."
 if su - "$REAL_USER" -c \
-     "pip3 install --break-system-packages --user -q flask flask-socketio eventlet 2>/dev/null"; then
+     "pip3 install --break-system-packages --user -q flask flask-socketio eventlet mss Pillow 2>/dev/null"; then
   echo "[✓] Dependencias Python instaladas"
 else
   # Fallback: instalar globalmente si el usuario no puede usar pip
-  pip3 install --break-system-packages -q flask flask-socketio eventlet 2>/dev/null || true
+  pip3 install --break-system-packages -q flask flask-socketio eventlet mss Pillow 2>/dev/null || true
   echo "[✓] Dependencias Python instaladas (modo sistema)"
 fi
 
@@ -131,7 +131,7 @@ if su - "$REAL_USER" -c "bash $VIGIA_DIR/instalar_servidor.sh" 2>/dev/null; then
   echo "[✓] Acceso directo creado"
 else
   echo "[!] No se pudo crear el acceso directo automáticamente."
-  echo "    Ejecuta manualmente: bash /opt/vigia/instalar_servidor.sh"
+  echo "    Ejecuta manualmente: bash /opt/vigia-server/instalar_servidor.sh"
 fi
 echo ""
 POSTINST

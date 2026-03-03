@@ -703,7 +703,22 @@ def ejecutar_interfaz():
     check(); root.mainloop()
 
 if __name__ == '__main__':
-    ip = sys.argv[1] if len(sys.argv) > 1 else input("IP Servidor: ")
+    ip = None
+    if len(sys.argv) > 1:
+        ip = sys.argv[1]
+    elif os.path.exists('/etc/vigia/client.conf'):
+        try:
+            with open('/etc/vigia/client.conf', 'r') as f:
+                ip = f.read().strip()
+        except: pass
+    
+    if not ip:
+        try:
+            ip = input("IP Servidor: ").strip()
+        except EOFError:
+            ip = "127.0.0.1" # Fallback if no input possible
+
+    if not ip: ip = "127.0.0.1"
     if WEBRTC_OK:
         threading.Thread(target=_asyncio_runner, name='WebRTC-Loop', daemon=True).start()
         time.sleep(0.1)   # Dar tiempo al loop a arrancar

@@ -525,6 +525,59 @@
     #compose-source.show { display: block; }
     #compose-body.src-hidden { display: none; }
 
+    /* ── Modal selección de pantalla ── */
+    #screen-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.75); z-index: 800;
+      align-items: center; justify-content: center;
+    }
+    #screen-overlay.show { display: flex; }
+    #screen-box {
+      background: var(--card-bg); border: 1px solid var(--card-border);
+      border-radius: 12px; width: min(860px, 96vw);
+      max-height: 90vh; overflow-y: auto;
+      padding: 24px 24px 18px; box-shadow: 0 12px 48px rgba(0,0,0,.6);
+    }
+    #screen-box h3 { margin: 0 0 18px; font-size: 1rem; font-weight: 700; }
+    .screen-section-header {
+      grid-column: 1 / -1;
+      margin: 12px 0 4px; font-size: 0.72rem; font-weight: 600;
+      color: var(--muted); text-transform: uppercase; letter-spacing: .06em;
+    }
+    .screen-section-header:first-child { margin-top: 0; }
+    #screen-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 10px; margin-bottom: 18px;
+    }
+    .screen-option {
+      background: #12142a; border: 2px solid var(--card-border);
+      border-radius: 8px; padding: 0; cursor: pointer;
+      text-align: left; color: var(--text);
+      transition: border-color .15s, background .15s;
+      overflow: hidden; display: flex; flex-direction: column;
+    }
+    .screen-option:hover { border-color: var(--accent); background: #1a1d3a; }
+    .screen-option .s-thumb {
+      width: 100%; aspect-ratio: 16/10; object-fit: cover;
+      background: #0a0c1a; display: block;
+    }
+    .screen-option .s-thumb-placeholder {
+      width: 100%; aspect-ratio: 16/10;
+      background: #0a0c1a; display: flex; align-items: center;
+      justify-content: center; font-size: 2rem; color: var(--muted);
+    }
+    .screen-option .s-label {
+      padding: 7px 10px; font-size: 0.78rem; font-weight: 500;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #screen-cancel {
+      background: none; border: 1px solid var(--card-border); color: var(--muted);
+      border-radius: 8px; padding: 6px 16px; font-size: 0.85rem; cursor: pointer;
+      float: right; transition: border-color .15s, color .15s;
+    }
+    #screen-cancel:hover { border-color: var(--text); color: var(--text); }
+
     /* Mini modal hipervínculo */
     #link-overlay {
       display: none; position: fixed; inset: 0;
@@ -893,7 +946,9 @@ document.getElementById('modal-overlay').addEventListener('click', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (document.getElementById('clipboard-overlay').classList.contains('show')) {
+    if (document.getElementById('screen-overlay').classList.contains('show')) {
+      cerrarScreenModal();
+    } else if (document.getElementById('clipboard-overlay').classList.contains('show')) {
       cerrarPortapapeles();
     } else if (document.getElementById('link-overlay').classList.contains('show')) {
       cerrarLink();
@@ -1432,153 +1487,153 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 // ── Compartir pantalla del profesor ───────────────────────────────────────
-let _shareStream   = null;
-let _shareRunning  = false;
-let _shareTimeout  = null;
+// IS_LAUNCHER lo inyecta Flask según la variable de entorno VIGIA_TAURI=1.
+// Así la detección es 100% fiable sin depender de URLs ni inyecciones JS.
+const IS_LAUNCHER = {{ 'true' if is_launcher else 'false' }};
+
+let _sharing     = false;
+let _shareStream = null;
+let _shareRunning = false;
+let _shareTimeout = null;
 const _shareVideo  = document.createElement('video');
 const _shareCanvas = document.createElement('canvas');
 const _shareCtx    = _shareCanvas.getContext('2d');
-_shareCtx.imageSmoothingEnabled = true;
-_shareCtx.imageSmoothingQuality = 'high';
-_shareVideo.autoplay    = true;
-_shareVideo.muted       = true;
-_shareVideo.playsInline = true;
+_shareVideo.autoplay = true; _shareVideo.muted = true; _shareVideo.playsInline = true;
+const FPS_SHARE     = 2;
+const CALIDAD_SHARE = 0.85;
+const ANCHO_SHARE   = 1280;
 
-const FPS_SHARE    = 2;      // fotogramas por segundo enviados
-const CALIDAD_SHARE = 0.85;  // calidad JPEG 0-1
-const ANCHO_SHARE   = 1280;  // px máximos de ancho (bajado para mayor fluidez)
+function toggleCompartir() {
+  if (_sharing) { detenerCompartir(); return; }
 
-async function toggleCompartir() {
-  if (_shareStream) {
-    detenerCompartir();
-    return;
-  }
-
-  if (!navigator.mediaDevices?.getDisplayMedia) {
-    const esSeguro = location.protocol === 'https:' ||
-                     ['localhost', '127.0.0.1'].includes(location.hostname);
-    alert(esSeguro
-      ? 'Tu navegador no soporta compartir pantalla.\nUsa Chrome, Edge o Firefox recientes.'
-      : 'Para compartir pantalla accede desde esta misma máquina:\nhttp://localhost:5000\n(Chrome bloquea esta función en conexiones HTTP externas)');
-    return;
-  }
-
-  try {
-    // Intentar compartir con diferentes estrategias de constraints (algunos navegadores/WebKit son muy tiquismiquis)
-    const estrategias = [
-      { video: true },               // Estándar
-      { video: { width: 1280 } },    // Con ancho ideal
-      {}                             // Vacío (algunos WebKit lo prefieren)
-    ];
-    
-    let ultimoError = null;
-    for (const constraint of estrategias) {
-      try {
-        console.log('Intentando compartir con:', constraint);
-        _shareStream = await navigator.mediaDevices.getDisplayMedia(constraint);
-        if (_shareStream) break;
-      } catch (e) {
-        console.warn('Fallo estrategia:', constraint, e.name, e.message);
-        ultimoError = e;
-      }
-    }
-    
-    if (!_shareStream) throw ultimoError || new Error('No se pudo obtener el stream');
-
-    _shareVideo.srcObject = _shareStream;
-    _shareStream.getVideoTracks()[0].addEventListener('ended', detenerCompartir);
-
-    // Esperar dimensiones del vídeo antes de capturar (videoWidth puede ser 0 tras play())
-    await new Promise(resolve => {
-      if (_shareVideo.videoWidth) { resolve(); return; }
-      _shareVideo.addEventListener('loadedmetadata', resolve, { once: true });
-    });
-    await _shareVideo.play();
-
-    _shareRunning = true;
-    _loopCompartir();
-    _actualizarBoton(true);
-
-  } catch (err) {
-    console.error('Error al compartir pantalla:', err);
-    // Limpiar el stream si se obtuvo antes de que fallara play()
-    if (_shareStream) { _shareStream.getTracks().forEach(t => t.stop()); _shareStream = null; }
-    _shareRunning = false;
-    
-    if (err.name !== 'NotAllowedError') {
-      let msg = 'No se pudo compartir la pantalla: ' + err.message;
-      if (err.name === 'OverconstrainedError' || err.name === 'TypeError' || err.message.includes('constraint')) {
-        msg += '\n\nSi estás usando la aplicación de escritorio, prueba a abrir el panel en tu navegador (Chrome o Firefox) accediendo a http://localhost:5000';
-      }
-      alert(msg);
-    }
+  if (IS_LAUNCHER) {
+    // Launcher WebKit2GTK: getDisplayMedia no funciona → selector de servidor
+    socket.emit('get_screens');
+  } else {
+    // Chrome / Firefox: diálogo nativo del navegador
+    navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
+      .then(stream => {
+        _sharing = true;
+        _shareStream = stream;
+        _shareVideo.srcObject = stream;
+        stream.getVideoTracks()[0].addEventListener('ended', detenerCompartir);
+        const go = () => _shareVideo.play().then(() => {
+          _shareRunning = true; _loopCompartir(); _actualizarBoton(true);
+        });
+        _shareVideo.videoWidth ? go() :
+          _shareVideo.addEventListener('loadedmetadata', go, { once: true });
+      })
+      .catch(err => {
+        if (err.name !== 'NotAllowedError')
+          alert('No se pudo compartir la pantalla:\n' + err.message);
+      });
   }
 }
 
+// ── Selector de pantalla/ventana (launcher) ──
+socket.on('screens_list', data => {
+  if (data.error) { alert(data.error); return; }
+  const list = document.getElementById('screen-list');
+  list.innerHTML = '';
+  const monitors = data.screens.filter(s => s.type === 'monitor');
+  const windows  = data.screens.filter(s => s.type === 'window');
+
+  function makeCard(s, icon, params) {
+    const b = document.createElement('button');
+    b.className = 'screen-option';
+    if (s.thumb) {
+      const img = document.createElement('img');
+      img.className = 's-thumb'; img.src = s.thumb; img.alt = s.label;
+      b.appendChild(img);
+    } else {
+      const ph = document.createElement('div');
+      ph.className = 's-thumb-placeholder'; ph.textContent = icon;
+      b.appendChild(ph);
+    }
+    const lbl = document.createElement('span');
+    lbl.className = 's-label'; lbl.textContent = s.label;
+    b.appendChild(lbl);
+    b.onclick = () => { cerrarScreenModal(); _iniciarCapturaServidor(params); };
+    return b;
+  }
+
+  if (monitors.length) {
+    const h = document.createElement('p');
+    h.className = 'screen-section-header'; h.textContent = 'Pantallas';
+    list.appendChild(h);
+    monitors.forEach(s => list.appendChild(makeCard(s, '🖥', { type: 'monitor', monitor: s.index })));
+  }
+  if (windows.length) {
+    const h = document.createElement('p');
+    h.className = 'screen-section-header'; h.textContent = 'Ventanas';
+    list.appendChild(h);
+    windows.forEach(s => list.appendChild(makeCard(s, '🪟', { type: 'window', wid: s.wid })));
+  }
+  document.getElementById('screen-overlay').classList.add('show');
+});
+
+function cerrarScreenModal() {
+  document.getElementById('screen-overlay').classList.remove('show');
+}
+
+function _iniciarCapturaServidor(params) {
+  _sharing = true;
+  socket.emit('start_teacher_capture', params);
+  _actualizarBoton(true);
+}
+
+socket.on('teacher_screen_preview', data => {
+  if (data.error) { alert('No se pudo compartir la pantalla:\n' + data.error); detenerCompartir(); return; }
+  const prev = document.getElementById('share-preview');
+  prev.src = data.image;
+  if (!prev.classList.contains('show')) prev.classList.add('show');
+});
+
+// ── Loop captura local (Chrome) ──
 function _loopCompartir() {
   if (!_shareRunning || !_shareStream) return;
-  
-  _enviarFrame();
-  
-  // Controlar FPS manualmente con setTimeout dentro del loop
-  _shareTimeout = setTimeout(() => {
-    if (_shareRunning) requestAnimationFrame(_loopCompartir);
-  }, 1000 / FPS_SHARE);
-}
-
-function _enviarFrame() {
-  if (!_shareStream || !_shareVideo.videoWidth) return;
-  try {
-    const vw = _shareVideo.videoWidth;
-    const vh = _shareVideo.videoHeight;
+  if (_shareVideo.videoWidth) {
+    const vw = _shareVideo.videoWidth, vh = _shareVideo.videoHeight;
     _shareCanvas.width  = Math.min(vw, ANCHO_SHARE);
     _shareCanvas.height = Math.round(_shareCanvas.width * vh / vw);
-    
     _shareCtx.drawImage(_shareVideo, 0, 0, _shareCanvas.width, _shareCanvas.height);
-    const imgData = _shareCanvas.toDataURL('image/jpeg', CALIDAD_SHARE);
-    socket.emit('teacher_screenshot', { image: imgData, activa: true });
-
+    const img = _shareCanvas.toDataURL('image/jpeg', CALIDAD_SHARE);
+    socket.emit('teacher_screenshot', { image: img, activa: true });
     const prev = document.getElementById('share-preview');
-    prev.src = imgData;
+    prev.src = img;
     if (!prev.classList.contains('show')) prev.classList.add('show');
-  } catch (e) {
-    console.warn('Error capturando frame:', e);
   }
+  _shareTimeout = setTimeout(() => { if (_shareRunning) requestAnimationFrame(_loopCompartir); }, 1000 / FPS_SHARE);
 }
 
 function detenerCompartir() {
-  _shareRunning = false;
+  _sharing = false; _shareRunning = false;
   clearTimeout(_shareTimeout);
   if (_shareStream) {
     _shareStream.getTracks().forEach(t => t.stop());
-    _shareStream = null;
+    _shareStream = null; _shareVideo.srcObject = null;
+    socket.emit('teacher_screenshot', { activa: false });
+  } else {
+    socket.emit('stop_teacher_capture');
   }
-  _shareVideo.srcObject = null;
-  socket.emit('teacher_screenshot', { activa: false });
   _actualizarBoton(false);
   const prev = document.getElementById('share-preview');
-  prev.src = '';
-  prev.classList.remove('show');
+  prev.src = ''; prev.classList.remove('show');
 }
 
 function _actualizarBoton(compartiendo) {
-  const btn   = document.getElementById('btn-compartir');
+  const btn = document.getElementById('btn-compartir');
   const badge = document.getElementById('live-badge');
   if (compartiendo) {
     btn.textContent = '⏹ Dejar de compartir';
-    btn.classList.add('sharing');
-    badge.classList.add('show');
+    btn.classList.add('sharing'); badge.classList.add('show');
   } else {
     btn.textContent = '📺 Compartir mi pantalla';
-    btn.classList.remove('sharing');
-    badge.classList.remove('show');
+    btn.classList.remove('sharing'); badge.classList.remove('show');
   }
 }
 
-// Detener al cerrar/recargar la página
-window.addEventListener('beforeunload', () => {
-  if (_shareStream) detenerCompartir();
-});
+window.addEventListener('beforeunload', () => { if (_sharing) detenerCompartir(); });
 
 // Cerrar compose con Escape; Ctrl+Enter envía
 // (Manejado en el listener global de Escape arriba)
@@ -1718,6 +1773,15 @@ async function _addFiles(fileList) {
       <button id="clipboard-copy-btn" onclick="copiarPortapapeles()">Copiar al servidor</button>
       <button onclick="cerrarPortapapeles()">Cerrar</button>
     </div>
+  </div>
+</div>
+
+<!-- ── Modal selección de pantalla ── -->
+<div id="screen-overlay">
+  <div id="screen-box">
+    <h3>📺 Selecciona qué compartir</h3>
+    <div id="screen-list"><!-- se rellena dinámicamente --></div>
+    <button id="screen-cancel" onclick="cerrarScreenModal()">Cancelar</button>
   </div>
 </div>
 

@@ -17,11 +17,11 @@ echo ""
 # ── Instalar dependencias Python del servidor ─────────────────
 echo "[*] Instalando dependencias Python del servidor..."
 if su - "$REAL_USER" -c \
-     "pip3 install --break-system-packages --user -q flask flask-socketio eventlet 2>/dev/null"; then
+     "pip3 install --break-system-packages --user -q flask flask-socketio eventlet mss Pillow 2>/dev/null"; then
   echo "[✓] Dependencias Python instaladas"
 else
   # Fallback: instalar globalmente si el usuario no puede usar pip
-  pip3 install --break-system-packages -q flask flask-socketio eventlet 2>/dev/null || true
+  pip3 install --break-system-packages -q flask flask-socketio eventlet mss Pillow 2>/dev/null || true
   echo "[✓] Dependencias Python instaladas (modo sistema)"
 fi
 

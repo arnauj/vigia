@@ -7,12 +7,18 @@ Uso: python server.py [puerto]
 
 import os
 import sys
+import io
+import re
+import time
+import base64
+import threading
+import subprocess
 
 async_mode = 'eventlet'
 
 import socket
 from datetime import datetime
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, make_response
 from flask_socketio import SocketIO, emit
 
 print(f"[*] Iniciando servidor VIGIA (modo: {async_mode})")
@@ -35,6 +41,9 @@ students = {}
 # Sesiones activas de vista/control: {student_sid: {prof_sid, mode}}
 viewers: dict = {}
 
+# Estado de compartir pantalla del profesor
+_teacher_capture = {'running': False, 'sid': None}
+
 
 def get_local_ip():
     """Detecta la IP local de la máquina."""
@@ -52,7 +61,14 @@ def get_local_ip():
 
 @app.route('/')
 def dashboard():
-    return render_template('dashboard.html')
+    ua = request.headers.get('User-Agent', '')
+    # Chrome, Firefox y Chromium se identifican con su nombre en el UA.
+    # WebKit2GTK (el launcher) usa AppleWebKit pero sin esos tokens.
+    is_launcher = not any(b in ua for b in ('Chrome/', 'Chromium/', 'Firefox/'))
+    resp = make_response(render_template('dashboard.html', is_launcher=is_launcher))
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    return resp
 
 
 @app.route('/api/students')
@@ -80,6 +96,9 @@ def on_connect():
 
 @socketio.on('disconnect')
 def on_disconnect():
+    if request.sid == _teacher_capture.get('sid'):
+        _teacher_capture['running'] = False
+        socketio.emit('teacher_screen', {'activa': False}, broadcast=True)
     if request.sid in students:
         name = students[request.sid]['name']
         del students[request.sid]
@@ -176,6 +195,196 @@ def on_lock_student(data):
         socketio.emit('lock_screen' if locked else 'unlock_screen', {}, to=sid)
         emit('student_lock_state', {'sid': sid, 'locked': locked}, broadcast=True)
         print(f"[*] {students[sid]['name']} -> {'BLOQUEADO' if locked else 'desbloqueado'}")
+
+
+def _get_window_list():
+    """Devuelve ventanas visibles usando xprop (_NET_CLIENT_LIST + _NET_WM_NAME)."""
+    try:
+        r = subprocess.run(['xprop', '-root', '-notype', '_NET_CLIENT_LIST'],
+                           capture_output=True, text=True, timeout=3)
+        if r.returncode != 0 or '_NET_CLIENT_LIST' not in r.stdout:
+            return []
+        # Extraer IDs hex con regex (evita el prefijo "window id # " del primer elemento)
+        wids = re.findall(r'0x[0-9a-fA-F]+', r.stdout.split(':', 1)[1])
+        windows = []
+        for wid in wids:
+            # Omitir ventanas minimizadas/ocultas
+            state_r = subprocess.run(['xprop', '-id', wid, '-notype', '_NET_WM_STATE'],
+                                     capture_output=True, text=True, timeout=1)
+            if '_NET_WM_STATE_HIDDEN' in state_r.stdout:
+                continue
+            # Nombre de la ventana
+            nr = subprocess.run(['xprop', '-id', wid, '-notype', '_NET_WM_NAME', 'WM_NAME'],
+                                capture_output=True, text=True, timeout=1)
+            title = ''
+            for line in nr.stdout.splitlines():
+                if '_NET_WM_NAME' in line and '=' in line:
+                    title = line.split('=', 1)[1].strip().strip('"')
+                    break
+                if 'WM_NAME' in line and '=' in line and not title:
+                    title = line.split('=', 1)[1].strip().strip('"')
+            if not title or 'VIGIA' in title:
+                continue
+            # Geometría
+            gr = subprocess.run(['xdotool', 'getwindowgeometry', '--shell', wid],
+                                capture_output=True, text=True, timeout=1)
+            geom = dict(kv.split('=', 1) for kv in gr.stdout.splitlines() if '=' in kv)
+            w, h = int(geom.get('WIDTH', 0)), int(geom.get('HEIGHT', 0))
+            if w < 100 or h < 100:
+                continue
+            windows.append({
+                'wid': wid,
+                'x': int(geom.get('X', 0)), 'y': int(geom.get('Y', 0)),
+                'w': w, 'h': h, 'title': title,
+            })
+        return windows
+    except Exception:
+        return []
+
+
+def _get_window_region(wid):
+    """Devuelve la región actual de una ventana vía xdotool."""
+    try:
+        gr = subprocess.run(['xdotool', 'getwindowgeometry', '--shell', wid],
+                            capture_output=True, text=True, timeout=2)
+        geom = dict(kv.split('=', 1) for kv in gr.stdout.splitlines() if '=' in kv)
+        if 'WIDTH' in geom:
+            return {'left': int(geom['X']), 'top': int(geom['Y']),
+                    'width': int(geom['WIDTH']), 'height': int(geom['HEIGHT'])}
+    except Exception:
+        pass
+    return None
+
+
+def _teacher_capture_loop():
+    """Captura la pantalla del profesor con mss y emite los frames por Socket.IO."""
+    try:
+        import mss
+        from PIL import Image
+    except ImportError:
+        socketio.emit('teacher_screen_preview', {'error': 'Instala mss y Pillow en el servidor: pip install mss Pillow'},
+                      to=_teacher_capture['sid'])
+        return
+
+    with mss.mss() as sct:
+        while _teacher_capture['running']:
+            try:
+                if _teacher_capture.get('type') == 'window':
+                    region = _get_window_region(_teacher_capture['wid'])
+                    if region is None:
+                        time.sleep(0.5)
+                        continue
+                    cap = sct.grab(region)
+                else:
+                    mon = sct.monitors[_teacher_capture.get('monitor', 1)]
+                    cap = sct.grab(mon)
+                img = Image.frombytes('RGB', (cap.width, cap.height), cap.rgb)
+                max_w = 1280
+                if img.width > max_w:
+                    ratio = max_w / img.width
+                    img = img.resize((max_w, int(img.height * ratio)), Image.LANCZOS)
+                buf = io.BytesIO()
+                img.save(buf, 'JPEG', quality=85)
+                data_uri = 'data:image/jpeg;base64,' + base64.b64encode(buf.getvalue()).decode()
+                socketio.emit('teacher_screen', {'activa': True, 'image': data_uri}, broadcast=True)
+                socketio.emit('teacher_screen_preview', {'image': data_uri}, to=_teacher_capture['sid'])
+            except Exception as e:
+                print(f'[!] Error capturando pantalla del profesor: {e}')
+            time.sleep(0.5)  # 2 FPS
+
+
+def _capture_thumb(sct, region, max_w=192):
+    """Captura y devuelve un thumbnail JPEG base64 de una región de pantalla."""
+    try:
+        from PIL import Image
+        cap = sct.grab(region)
+        img = Image.frombytes('RGB', (cap.width, cap.height), cap.rgb)
+        th = max(1, round(max_w * img.height / img.width))
+        img = img.resize((max_w, th), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, 'JPEG', quality=60)
+        return 'data:image/jpeg;base64,' + base64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return None
+
+
+def _capture_window_thumb(wid_hex, max_w=192):
+    """Captura thumbnail de ventana via Xlib GetImage.
+    En compositors (KWin, Mutter) obtiene el contenido real de la ventana
+    aunque esté oculta detrás de otras ventanas."""
+    try:
+        from Xlib import display as xlib_display, X
+        from PIL import Image
+        wid = int(wid_hex, 16)
+        d = xlib_display.Display()
+        win = d.create_resource_object('window', wid)
+        geom = win.get_geometry()
+        w, h = geom.width, geom.height
+        if w < 1 or h < 1:
+            return None
+        raw = win.get_image(0, 0, w, h, X.ZPixmap, 0xffffffff)
+        # ZPixmap con profundidad 24/32: datos en formato BGRA (little-endian)
+        img = Image.frombytes('RGBA', (w, h), raw.data, 'raw', 'BGRA')
+        img = img.convert('RGB')
+        th = max(1, round(max_w * h / w))
+        img = img.resize((max_w, th), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, 'JPEG', quality=60)
+        return 'data:image/jpeg;base64,' + base64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return None
+
+
+@socketio.on('get_screens')
+def on_get_screens():
+    try:
+        import mss
+        screens = []
+        with mss.mss() as sct:
+            for i, mon in enumerate(sct.monitors):
+                label = f'Pantalla completa ({mon["width"]}×{mon["height"]})' if i == 0 \
+                        else f'Monitor {i} ({mon["width"]}×{mon["height"]})'
+                screens.append({
+                    'type': 'monitor', 'index': i, 'label': label,
+                    'thumb': _capture_thumb(sct, mon),
+                })
+            for win in _get_window_list():
+                # Capturar via Xlib (contenido real de la ventana, sin solapamiento)
+                # Si falla, usar mss como fallback (región de pantalla)
+                thumb = _capture_window_thumb(win['wid'])
+                if thumb is None:
+                    region = {'left': win['x'], 'top': win['y'],
+                              'width': win['w'], 'height': win['h']}
+                    thumb = _capture_thumb(sct, region)
+                screens.append({
+                    'type': 'window', 'wid': win['wid'], 'label': win['title'],
+                    'thumb': thumb,
+                })
+        emit('screens_list', {'screens': screens})
+    except Exception as e:
+        emit('screens_list', {'error': f'Error al obtener pantallas: {e}\nAsegúrate de tener mss instalado: pip install mss Pillow'})
+
+
+@socketio.on('start_teacher_capture')
+def on_start_teacher_capture(data=None):
+    _teacher_capture['running'] = False  # detener captura previa si la hubiera
+    time.sleep(0.1)
+    data = data or {}
+    _teacher_capture['sid'] = request.sid
+    _teacher_capture['type'] = data.get('type', 'monitor')
+    _teacher_capture['monitor'] = data.get('monitor', 1)
+    _teacher_capture['wid'] = data.get('wid')
+    _teacher_capture['running'] = True
+    t = threading.Thread(target=_teacher_capture_loop, daemon=True)
+    t.start()
+    print('[📺] Compartir pantalla del profesor: iniciado')
+
+
+@socketio.on('stop_teacher_capture')
+def on_stop_teacher_capture():
+    _teacher_capture['running'] = False
+    socketio.emit('teacher_screen', {'activa': False}, broadcast=True)
+    print('[📺] Compartir pantalla del profesor: detenido')
 
 
 @socketio.on('teacher_screenshot')

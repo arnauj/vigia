@@ -7,12 +7,16 @@ Uso: python server.py [puerto]
 
 import os
 import sys
+import io
+import time
+import base64
+import threading
 
 async_mode = 'eventlet'
 
 import socket
 from datetime import datetime
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, make_response
 from flask_socketio import SocketIO, emit
 
 print(f"[*] Iniciando servidor VIGIA (modo: {async_mode})")
@@ -35,6 +39,9 @@ students = {}
 # Sesiones activas de vista/control: {student_sid: {prof_sid, mode}}
 viewers: dict = {}
 
+# Estado de compartir pantalla del profesor
+_teacher_capture = {'running': False, 'sid': None}
+
 
 def get_local_ip():
     """Detecta la IP local de la máquina."""
@@ -52,7 +59,10 @@ def get_local_ip():
 
 @app.route('/')
 def dashboard():
-    return render_template('dashboard.html')
+    resp = make_response(render_template('dashboard.html'))
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    return resp
 
 
 @app.route('/api/students')
@@ -80,6 +90,9 @@ def on_connect():
 
 @socketio.on('disconnect')
 def on_disconnect():
+    if request.sid == _teacher_capture.get('sid'):
+        _teacher_capture['running'] = False
+        socketio.emit('teacher_screen', {'activa': False}, broadcast=True)
     if request.sid in students:
         name = students[request.sid]['name']
         del students[request.sid]
@@ -176,6 +189,72 @@ def on_lock_student(data):
         socketio.emit('lock_screen' if locked else 'unlock_screen', {}, to=sid)
         emit('student_lock_state', {'sid': sid, 'locked': locked}, broadcast=True)
         print(f"[*] {students[sid]['name']} -> {'BLOQUEADO' if locked else 'desbloqueado'}")
+
+
+def _teacher_capture_loop():
+    """Captura la pantalla del profesor con mss y emite los frames por Socket.IO."""
+    try:
+        import mss
+        from PIL import Image
+    except ImportError:
+        socketio.emit('teacher_screen_preview', {'error': 'Instala mss y Pillow en el servidor: pip install mss Pillow'},
+                      to=_teacher_capture['sid'])
+        return
+
+    with mss.mss() as sct:
+        while _teacher_capture['running']:
+            try:
+                mon = sct.monitors[_teacher_capture.get('monitor', 1)]
+                cap = sct.grab(mon)
+                img = Image.frombytes('RGB', (cap.width, cap.height), cap.rgb)
+                max_w = 1280
+                if img.width > max_w:
+                    ratio = max_w / img.width
+                    img = img.resize((max_w, int(img.height * ratio)), Image.LANCZOS)
+                buf = io.BytesIO()
+                img.save(buf, 'JPEG', quality=85)
+                data_uri = 'data:image/jpeg;base64,' + base64.b64encode(buf.getvalue()).decode()
+                socketio.emit('teacher_screen', {'activa': True, 'image': data_uri}, broadcast=True)
+                socketio.emit('teacher_screen_preview', {'image': data_uri}, to=_teacher_capture['sid'])
+            except Exception as e:
+                print(f'[!] Error capturando pantalla del profesor: {e}')
+            time.sleep(0.5)  # 2 FPS
+
+
+@socketio.on('get_screens')
+def on_get_screens():
+    try:
+        import mss
+        with mss.mss() as sct:
+            screens = []
+            for i, mon in enumerate(sct.monitors):
+                if i == 0:
+                    label = f'Escritorio completo ({mon["width"]}×{mon["height"]})'
+                else:
+                    label = f'Monitor {i} ({mon["width"]}×{mon["height"]})'
+                screens.append({'index': i, 'label': label})
+            emit('screens_list', {'screens': screens})
+    except Exception as e:
+        emit('screens_list', {'error': f'Error al obtener pantallas: {e}\nAsegúrate de tener mss instalado: pip install mss Pillow'})
+
+
+@socketio.on('start_teacher_capture')
+def on_start_teacher_capture(data=None):
+    _teacher_capture['running'] = False  # detener captura previa si la hubiera
+    time.sleep(0.1)
+    _teacher_capture['sid'] = request.sid
+    _teacher_capture['monitor'] = (data or {}).get('monitor', 1)
+    _teacher_capture['running'] = True
+    t = threading.Thread(target=_teacher_capture_loop, daemon=True)
+    t.start()
+    print('[📺] Compartir pantalla del profesor: iniciado')
+
+
+@socketio.on('stop_teacher_capture')
+def on_stop_teacher_capture():
+    _teacher_capture['running'] = False
+    socketio.emit('teacher_screen', {'activa': False}, broadcast=True)
+    print('[📺] Compartir pantalla del profesor: detenido')
 
 
 @socketio.on('teacher_screenshot')
