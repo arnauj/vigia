@@ -133,13 +133,18 @@ cat > "$CLIENT_BUILD_DIR/DEBIAN/config" <<'EOF'
 set -e
 . /usr/share/debconf/confmodule
 
-# Try to guess the default IP (x.x.x.2)
-# We look for the default route interface IP
-_IP_LOCAL="$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'src \K\S+' || ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || hostname -I | awk '{print $1}')"
+db_get vigia-client/server_ip || true
+CURRENT_IP="$RET"
 
-if [ -n "$_IP_LOCAL" ]; then
-    DEFAULT_IP="$(echo "$_IP_LOCAL" | awk -F. '{print $1"."$2"."$3".2"}')"
-    db_set vigia-client/server_ip "$DEFAULT_IP"
+# Only guess if no value is set yet
+if [ -z "$CURRENT_IP" ]; then
+    # Try to guess the default IP (x.x.x.2)
+    _IP_LOCAL="$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'src \K\S+' || ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || hostname -I | awk '{print $1}')"
+
+    if [ -n "$_IP_LOCAL" ]; then
+        DEFAULT_IP="$(echo "$_IP_LOCAL" | awk -F. '{print $1"."$2"."$3".2"}')"
+        db_set vigia-client/server_ip "$DEFAULT_IP"
+    fi
 fi
 
 db_input high vigia-client/server_ip || true
@@ -184,6 +189,14 @@ EOD
 chmod 644 "$DESKTOP"
 
 echo "VIGIA Client installed successfully. Server IP set to $SERVER_IP"
+
+# Intentar ejecutar el cliente para el usuario actual
+REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
+if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+    echo "Iniciando VIGIA Alumno para $REAL_USER..."
+    # Ejecutar en segundo plano intentando conectar con la sesión X11
+    su - "$REAL_USER" -c "export DISPLAY=:0; python3 /opt/vigia-client/client.py $SERVER_IP >/dev/null 2>&1 &" || true
+fi
 EOF
 chmod 755 "$CLIENT_BUILD_DIR/DEBIAN/postinst"
 
