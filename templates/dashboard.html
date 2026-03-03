@@ -715,6 +715,13 @@
 <div id="toast-container"></div>
 
 <script>
+// ── Utilidades ────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 // ── Estado ────────────────────────────────────────────────────────────────
 const students = {};  // sid → {name, ip, image, last_seen, connected_at}
 let modalSid = null;
@@ -919,18 +926,13 @@ function applySearch() {
 
 // ── Toast ─────────────────────────────────────────────────────────────────
 function toast(msg, type = '') {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
   const el = document.createElement('div');
   el.className = `toast-item ${type}`;
   el.textContent = msg;
-  document.getElementById('toast-container').appendChild(el);
+  container.appendChild(el);
   setTimeout(() => el.remove(), 4000);
-}
-
-// ── Utilidades ────────────────────────────────────────────────────────────
-function escHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // ── Cerrar cliente de alumnos ─────────────────────────────────────────────
