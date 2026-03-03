@@ -44,7 +44,7 @@ Architecture: amd64
 Maintainer: VIGIA
 Section: education
 Priority: optional
-Depends: python3, python3-pip, python3-gi, python3-tk, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, libwebkit2gtk-4.1-0, libgtk-3-0, python3-flask, python3-flask-socketio, python3-eventlet
+Depends: python3, python3-pip, python3-gi, python3-tk, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, libwebkit2gtk-4.1-0, libgtk-3-0
 Description: VIGIA Server - Classroom Monitoring System (Teacher)
  VIGIA allows teachers to monitor student screens in real-time.
  This package installs the teacher's dashboard and relay server.
@@ -56,6 +56,10 @@ set -e
 VIGIA_DIR=/opt/vigia-server
 APPS_DIR=/usr/share/applications
 DESKTOP="$APPS_DIR/vigia-server.desktop"
+
+# Instalar dependencias de Python faltantes
+echo "Instalando dependencias de Python para el servidor..."
+pip3 install --break-system-packages flask flask-socketio eventlet 2>/dev/null || true
 
 chmod +x "$VIGIA_DIR"/*.py 2>/dev/null || true
 
@@ -108,7 +112,7 @@ Architecture: all
 Maintainer: VIGIA
 Section: education
 Priority: optional
-Depends: python3, python3-pip, python3-tk, python3-pil.imagetk, xdotool, python3-aiortc, python3-numpy, python3-socketio, python3-websocket, python3-mss, python3-pil, python3-pynput, debconf
+Depends: python3, python3-pip, python3-tk, python3-pil, python3-pil.imagetk, xdotool, python3-numpy, debconf
 Description: VIGIA Client - Classroom Monitoring System (Student)
  VIGIA allows teachers to monitor student screens in real-time.
  This package installs the student client.
@@ -155,6 +159,10 @@ SERVER_IP="$RET"
 VIGIA_DIR=/opt/vigia-client
 APPS_DIR=/usr/share/applications
 DESKTOP="$APPS_DIR/vigia-client.desktop"
+
+# Instalar dependencias de Python faltantes
+echo "Instalando dependencias de Python para el alumno..."
+pip3 install --break-system-packages mss pynput aiortc "python-socketio[client]" websocket-client 2>/dev/null || true
 
 chmod +x "$VIGIA_DIR"/*.py 2>/dev/null || true
 
