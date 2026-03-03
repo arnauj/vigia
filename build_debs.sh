@@ -122,9 +122,8 @@ EOF
 cat > "$CLIENT_BUILD_DIR/DEBIAN/templates" <<EOF
 Template: vigia-client/server_ip
 Type: string
-Default: 192.168.1.2
-_Description: IP address of the VIGIA Server:
- Please enter the IP address of the teacher's computer running VIGIA Server.
+_Description: IP del Servidor VIGIA:
+ Por favor, introduce la dirección IP del equipo del profesor.
 EOF
 
 # Config script for debconf
@@ -133,20 +132,21 @@ cat > "$CLIENT_BUILD_DIR/DEBIAN/config" <<'EOF'
 set -e
 . /usr/share/debconf/confmodule
 
-db_get vigia-client/server_ip || true
-CURRENT_IP="$RET"
+# Intentar calcular la IP por defecto (x.x.x.2) cada vez que se configura
+_IP_LOCAL="$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'src \K\S+' || ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || hostname -I | awk '{print $1}')"
 
-# Only guess if no value is set yet
-if [ -z "$CURRENT_IP" ]; then
-    # Try to guess the default IP (x.x.x.2)
-    _IP_LOCAL="$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'src \K\S+' || ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || hostname -I | awk '{print $1}')"
-
-    if [ -n "$_IP_LOCAL" ]; then
-        DEFAULT_IP="$(echo "$_IP_LOCAL" | awk -F. '{print $1"."$2"."$3".2"}')"
+if [ -n "$_IP_LOCAL" ]; then
+    DEFAULT_IP="$(echo "$_IP_LOCAL" | awk -F. '{print $1"."$2"."$3".2"}')"
+    
+    # Solo establecemos el valor si no hay uno previo o queremos sugerir el nuevo
+    db_get vigia-client/server_ip || true
+    if [ -z "$RET" ]; then
         db_set vigia-client/server_ip "$DEFAULT_IP"
     fi
 fi
 
+# Forzar que se muestre la pregunta (marcar como no vista)
+db_fset vigia-client/server_ip seen false
 db_input high vigia-client/server_ip || true
 db_go
 EOF
