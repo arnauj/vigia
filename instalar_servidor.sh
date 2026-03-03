@@ -95,14 +95,17 @@ echo "[✓] pip: $PIP"
 echo "[*] Instalando dependencias Python..."
 $PIP install --break-system-packages --user -q flask flask-socketio eventlet gevent-websocket 2>/dev/null || $PIP install --break-system-packages --user -q flask flask-socketio
 
-# ── Acceso directo ────────────────────────────────────────────
-DESKTOP="$HOME/Escritorio/VIGIA-Servidor.desktop"
+# ── Acceso directo en el menú inicio ─────────────────────────
+APPS_DIR="$HOME/.local/share/applications"
+mkdir -p "$APPS_DIR"
+DESKTOP="$APPS_DIR/vigia-servidor.desktop"
 cat > "$DESKTOP" <<DESKTOP_EOF
 [Desktop Entry]
 Type=Application
 Name=VIGIA Servidor
+Comment=Panel del profesor — supervisión de aula
 Exec=bash -c '$PYTHON3 "$SCRIPT_DIR/server.py"; read -rp "Pulsa Enter para cerrar..."'
-Icon=preferences-system
+Icon=$SCRIPT_DIR/img/logo2_mini.png
 Terminal=true
 Categories=Education;
 DESKTOP_EOF

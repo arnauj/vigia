@@ -67,14 +67,17 @@ echo "[✓] pip: $PIP"
 echo "[*] Instalando librerías Python..."
 $PIP install --break-system-packages --user -q "python-socketio[client]" websocket-client mss Pillow pynput 2>/dev/null
 
-# ── Configurar acceso directo ─────────────────────────────────
-DESKTOP="$HOME/Escritorio/VIGIA-Alumno.desktop"
+# ── Acceso directo en el menú inicio ─────────────────────────
+APPS_DIR="$HOME/.local/share/applications"
+mkdir -p "$APPS_DIR"
+DESKTOP="$APPS_DIR/vigia-alumno.desktop"
 cat > "$DESKTOP" <<DESKTOP_EOF
 [Desktop Entry]
 Type=Application
 Name=VIGIA (Alumno)
+Comment=Cliente de supervisión de aula
 Exec=bash -c '$PYTHON3 "$SCRIPT_DIR/client.py" $IP_SERVIDOR; read -rp "Pulsa Enter para cerrar..."'
-Icon=network-workgroup
+Icon=$SCRIPT_DIR/img/logo2_mini.png
 Terminal=true
 Categories=Education;
 DESKTOP_EOF
