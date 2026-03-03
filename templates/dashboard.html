@@ -1464,7 +1464,7 @@ async function toggleCompartir() {
   try {
     // getDisplayMedia abre el selector nativo de Chrome (pantalla, ventana o pestaña)
     _shareStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: 5, max: 10 } },
+      video: true,
       audio: false,
     });
 
