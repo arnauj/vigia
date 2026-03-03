@@ -99,14 +99,30 @@ $PIP install --break-system-packages --user -q flask flask-socketio eventlet gev
 APPS_DIR="$HOME/.local/share/applications"
 mkdir -p "$APPS_DIR"
 DESKTOP="$APPS_DIR/vigia-servidor.desktop"
+
+# Usar el binario nativo Tauri si existe; si no, Python directamente
+if [ -x "$SCRIPT_DIR/vigia" ]; then
+  # Instalación desde .deb — binario Tauri en /opt/vigia/vigia
+  VIGIA_EXEC="$SCRIPT_DIR/vigia"
+  VIGIA_TERMINAL=false
+elif [ -x "$SCRIPT_DIR/vigia-dashboard/src-tauri/target/release/vigia" ]; then
+  # Compilación de desarrollo
+  VIGIA_EXEC="$SCRIPT_DIR/vigia-dashboard/src-tauri/target/release/vigia"
+  VIGIA_TERMINAL=false
+else
+  # Sin Tauri: arrancar servidor Python en terminal
+  VIGIA_EXEC="bash -c '$PYTHON3 \"$SCRIPT_DIR/server.py\"; read -rp \"Pulsa Enter para cerrar...\"'"
+  VIGIA_TERMINAL=true
+fi
+
 cat > "$DESKTOP" <<DESKTOP_EOF
 [Desktop Entry]
 Type=Application
 Name=VIGIA Servidor
 Comment=Panel del profesor — supervisión de aula
-Exec=bash -c '$PYTHON3 "$SCRIPT_DIR/server.py"; read -rp "Pulsa Enter para cerrar..."'
+Exec=$VIGIA_EXEC
 Icon=$SCRIPT_DIR/img/logo2_mini.png
-Terminal=true
+Terminal=$VIGIA_TERMINAL
 Categories=Education;
 DESKTOP_EOF
 chmod +x "$DESKTOP" 2>/dev/null || true

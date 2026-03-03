@@ -1,0 +1,8 @@
+{
+  "identifier": "default",
+  "description": "Permisos por defecto para VIGIA",
+  "windows": ["main"],
+  "permissions": [
+    "core:default"
+  ]
+}

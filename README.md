@@ -9,12 +9,12 @@ Software de monitoreo de aula para ver en tiempo real las pantallas de los alumn
 
 ```
 [Alumno 1] ─┐
-[Alumno 2] ─┤──► Servidor (profesor) ──► Navegador web con cuadrícula de pantallas
+[Alumno 2] ─┤──► Servidor Flask (profesor) ──► Ventana nativa VIGIA
 [Alumno 3] ─┘
 ```
 
-- El **servidor** corre en el equipo del profesor y muestra un panel web.
-- El **cliente** corre en cada equipo de alumno y envía capturas de pantalla cada ~2 segundos.
+- El **servidor** corre en el equipo del profesor y muestra el panel en una **ventana nativa** (Tauri/WebKit). Opcionalmente también es accesible desde el navegador en `http://localhost:5000`.
+- El **cliente** corre en cada equipo de alumno y envía capturas de pantalla cada ~1 segundo.
 - Todo ocurre dentro de la red local (no necesita internet).
 
 ---
@@ -26,15 +26,16 @@ Software de monitoreo de aula para ver en tiempo real las pantallas de los alumn
 - **Control remoto** — el profesor puede manejar el ratón y teclado del alumno.
 - **Control remoto WebRTC** — stream de vídeo H.264/VP9 directo P2P (UDP) con latencia < 150 ms en LAN. Los eventos de ratón y teclado se envían por un DataChannel WebRTC (también UDP, sin pasar por el servidor). Fallback automático a JPEG+Socket.IO si WebRTC no está disponible.
 - **Bloqueo de pantalla** — bloquea el teclado y ratón del alumno con un overlay.
-- **Mensajes** — el profesor puede enviar mensajes emergentes a uno o todos los alumnos.
+- **Mensajes con adjuntos** — el profesor puede enviar mensajes emergentes (con texto enriquecido y archivos adjuntos) a uno o todos los alumnos. Los adjuntos se guardan automáticamente en `~/Descargas` del alumno.
 - **Pantalla del profesor** — comparte la pantalla del profesor en una ventana flotante en todos los alumnos.
+- **Ventana nativa** — el panel del profesor se muestra como aplicación independiente gracias a Tauri 2.0 (WebKit), sin necesidad de abrir el navegador.
 
 ---
 
 ## Requisitos del sistema
 
 ### Sistema operativo
-- **Kubuntu 22.04 / 24.04** (o cualquier Ubuntu/Debian moderno)
+- **Kubuntu 22.04 / 24.04** (o cualquier Ubuntu/Debian moderno con GTK 3 y WebKit2GTK)
 - Python 3.10 o superior (viene instalado por defecto)
 
 ### Sesión gráfica
@@ -57,42 +58,80 @@ Software de monitoreo de aula para ver en tiempo real las pantallas de los alumn
 
 ---
 
-## Instalación — Equipo del profesor (servidor)
+## Instalación rápida con .deb (recomendado)
 
-### Opción 1: script automático (recomendado)
+```bash
+sudo dpkg -i vigia_1.0_amd64.deb
+```
+
+Durante la instalación se abre el instalador gráfico, que pregunta si el equipo es **servidor (profesor)** o **cliente (alumno)** y configura el acceso directo en el menú de inicio.
+
+Para generar el paquete desde el código fuente:
+
+```bash
+bash build_deb.sh      # Requiere Rust; lo instala automáticamente si falta
+```
+
+---
+
+## Instalación manual — Equipo del profesor (servidor)
+
+### Opción 1: instalador gráfico (recomendado)
+
+```bash
+bash instalar.sh
+```
+
+Abre una ventana de instalación con logo, elige **Servidor** y pulsa *Instalar*.
+
+### Opción 2: script de línea de comandos
 
 ```bash
 bash instalar_servidor.sh
 ```
 
-Instala las dependencias y crea un acceso directo en el Escritorio.
+Instala las dependencias Python y crea un acceso directo en el **menú de inicio**.
 
-### Opción 2: manual
+### Opción 3: manual
 
 ```bash
 sudo apt install python3-pip
 pip3 install flask flask-socketio
 ```
 
-> Si `pip3` da error de "externally-managed-environment":
-> ```bash
-> pip3 install --break-system-packages flask flask-socketio
-> ```
+### Compilar la ventana nativa (Tauri)
+
+Para que el panel se muestre como ventana independiente en lugar de abrirse en el navegador:
+
+```bash
+bash vigia-dashboard/build.sh   # Instala Rust y compila el binario (~5 min la primera vez)
+bash instalar_servidor.sh       # Actualiza el acceso directo para usar el binario
+```
+
+> Si Rust no está instalado, `build.sh` lo descarga e instala automáticamente vía `rustup`.
 
 ---
 
-## Instalación — Equipos de los alumnos (cliente)
+## Instalación manual — Equipos de los alumnos (cliente)
 
-### Opción 1: script automático (recomendado)
+### Opción 1: instalador gráfico (recomendado)
 
 ```bash
-bash instalar_cliente.sh 192.168.X.X
+bash instalar.sh
 ```
 
-Sustituye `192.168.X.X` por la **IP del equipo del profesor**.
-El script instala todo (incluido WebRTC) y crea un acceso directo en el Escritorio.
+Elige **Cliente**, ajusta la IP del servidor si es necesario (se auto-detecta como `X.X.X.2`) y pulsa *Instalar*.
 
-### Opción 2: manual
+### Opción 2: script de línea de comandos
+
+```bash
+bash instalar_cliente.sh           # La IP del servidor se auto-detecta como X.X.X.2
+bash instalar_cliente.sh 192.168.X.X   # O especifica la IP manualmente
+```
+
+Instala todo (incluido WebRTC) y crea un acceso directo en el **menú de inicio**.
+
+### Opción 3: manual
 
 ```bash
 sudo apt install python3-pip python3-tk xdotool python3-aiortc python3-numpy
@@ -118,10 +157,16 @@ Anota la IP de tu red local, por ejemplo `192.168.0.119`.
 
 ### 2. Inicia el servidor (equipo del profesor)
 
+**Con ventana nativa (si está compilado):**
+```bash
+./vigia-dashboard/src-tauri/target/release/vigia
+```
+O desde el acceso directo **VIGIA Servidor** del menú de inicio.
+
+**Sin ventana nativa:**
 ```bash
 python3 server.py
 ```
-
 Se abre el navegador automáticamente con el panel en `http://localhost:5000`.
 
 ### 3. Inicia el cliente (cada equipo de alumno)
@@ -130,7 +175,7 @@ Se abre el navegador automáticamente con el panel en `http://localhost:5000`.
 python3 client.py 192.168.0.119
 ```
 
-O, si se instaló con el script, el alumno hace **doble clic** en `VIGIA (Alumno)` del Escritorio.
+O, si se instaló con el script, el alumno hace **doble clic** en **VIGIA (Alumno)** del menú de inicio.
 
 ### 4. Observar / controlar un alumno
 
@@ -139,7 +184,7 @@ En el panel del profesor, cada tarjeta de alumno tiene dos botones:
 | Botón | Acción |
 |---|---|
 | 👁 | Abre la pantalla del alumno en modo **solo ver** (WebRTC si está disponible, JPEG si no) |
-| 🖱 | Abre la pantalla en modo **control remoto** (ratón y teclado desde el navegador) |
+| 🖱 | Abre la pantalla en modo **control remoto** (ratón y teclado desde el panel) |
 
 El badge en la esquina superior del visor indica el transporte activo:
 - **WebRTC P2P** (verde) — stream de vídeo directo, baja latencia
@@ -198,6 +243,8 @@ Todos los equipos deben estar en la **misma red local**. Si la WiFi del aula tie
 | `Pillow` | Solo alumnos | `pip3 install Pillow` |
 | `python3-aiortc` | Solo alumnos (WebRTC) | `sudo apt install python3-aiortc` |
 | `python3-numpy` | Solo alumnos (WebRTC) | `sudo apt install python3-numpy` |
+| `libwebkit2gtk-4.1-0` | Solo profesor (ventana nativa) | Incluido en el .deb |
+| `rust / cargo` | Solo al compilar | `bash vigia-dashboard/build.sh` |
 
 ---
 
@@ -228,17 +275,35 @@ Ubuntu 24.04 protege los paquetes del sistema. Añade `--break-system-packages`:
 **El cliente se desconecta constantemente**
 Puede ser que la WiFi del aula tenga aislamiento de clientes (AP isolation). Habla con el administrador de red para desactivarlo, o usa cable ethernet.
 
+**La ventana nativa no se abre / error al compilar Tauri**
+- Ejecuta `bash vigia-dashboard/build.sh` y revisa los mensajes de error.
+- Asegúrate de tener conexión a internet para descargar Rust y las dependencias de Cargo.
+- Si el error es de dependencias del sistema, ejecuta: `sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev pkg-config`
+
 ---
 
 ## Estructura de archivos
 
 ```
 VIGIA/
-├── server.py               ← Servidor del profesor
-├── client.py               ← Cliente del alumno
+├── server.py                  ← Servidor del profesor (Flask + SocketIO)
+├── client.py                  ← Cliente del alumno
+├── instalar.py                ← Instalador gráfico (tkinter)
+├── instalar.sh                ← Lanzador del instalador gráfico
+├── instalar_servidor.sh       ← Instalación línea de comandos (profesor)
+├── instalar_cliente.sh        ← Instalación línea de comandos (alumnos)
+├── build_deb.sh               ← Genera dist/vigia_1.0_amd64.deb
 ├── templates/
-│   └── dashboard.html      ← Panel web del profesor
-├── instalar_servidor.sh    ← Script de instalación (profesor)
-├── instalar_cliente.sh     ← Script de instalación (alumnos)
-└── README.md               ← Este archivo
+│   └── dashboard.html         ← Panel SPA del profesor (JS vanilla)
+├── img/
+│   ├── logo2.png
+│   └── logo2_mini.png
+├── vigia-dashboard/           ← Proyecto Tauri 2.0 (ventana nativa)
+│   ├── build.sh               ← Compila el binario (instala Rust si falta)
+│   └── src-tauri/
+│       ├── Cargo.toml
+│       ├── tauri.conf.json
+│       └── src/
+│           └── lib.rs         ← Arranca Flask, espera puerto 5000, abre ventana
+└── README.md
 ```

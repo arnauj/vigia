@@ -1,0 +1,19 @@
+{
+  "productName": "vigia",
+  "version": "1.0.0",
+  "identifier": "com.vigia.dashboard",
+  "build": {
+    "frontendDist": "../frontend"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": ["../../img/logo2_mini.png"]
+  }
+}

@@ -1,0 +1,19 @@
+[package]
+name    = "vigia"
+version = "1.0.0"
+edition = "2021"
+
+[[bin]]
+name = "vigia"
+path = "src/main.rs"
+
+[lib]
+name      = "vigia_lib"
+crate-type = ["lib"]
+path      = "src/lib.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }

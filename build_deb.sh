@@ -2,17 +2,18 @@
 # ────────────────────────────────────────────────────────────────
 #  VIGIA — Generador del paquete .deb
 #  Uso: bash build_deb.sh
-#  Resultado: dist/vigia_1.0_all.deb
+#  Resultado: dist/vigia_1.0_amd64.deb
 # ────────────────────────────────────────────────────────────────
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PKG_NAME="vigia"
 PKG_VER="1.0"
-PKG_ARCH="all"
+PKG_ARCH="amd64"
 PKG_FULL="${PKG_NAME}_${PKG_VER}_${PKG_ARCH}"
 BUILD_DIR="$SCRIPT_DIR/dist/build/$PKG_FULL"
 VIGIA_DST="$BUILD_DIR/opt/vigia"
+TAURI_BINARY="$SCRIPT_DIR/vigia-dashboard/src-tauri/target/release/vigia"
 
 echo ""
 echo "═══════════════════════════════════════════════"
@@ -27,6 +28,14 @@ if ! command -v dpkg-deb >/dev/null 2>&1; then
   exit 1
 fi
 
+# ── Compilar binario Tauri si no existe ───────────────────────
+if [ ! -f "$TAURI_BINARY" ]; then
+  echo "[*] Binario Tauri no encontrado. Compilando…"
+  bash "$SCRIPT_DIR/vigia-dashboard/build.sh"
+else
+  echo "[✓] Binario Tauri: $TAURI_BINARY"
+fi
+
 # ── Estructura de directorios ─────────────────────────────────
 rm -rf "$BUILD_DIR"
 mkdir -p \
@@ -36,21 +45,24 @@ mkdir -p \
   "$BUILD_DIR/usr/share/pixmaps"
 
 # ── Copiar archivos de la aplicación ─────────────────────────
-cp "$SCRIPT_DIR/client.py"           "$VIGIA_DST/"
-cp "$SCRIPT_DIR/server.py"           "$VIGIA_DST/"
-cp "$SCRIPT_DIR/instalar.py"         "$VIGIA_DST/"
-cp "$SCRIPT_DIR/instalar.sh"         "$VIGIA_DST/"
+cp "$SCRIPT_DIR/client.py"            "$VIGIA_DST/"
+cp "$SCRIPT_DIR/server.py"            "$VIGIA_DST/"
+cp "$SCRIPT_DIR/instalar.py"          "$VIGIA_DST/"
+cp "$SCRIPT_DIR/instalar.sh"          "$VIGIA_DST/"
 cp "$SCRIPT_DIR/instalar_servidor.sh" "$VIGIA_DST/"
-cp "$SCRIPT_DIR/instalar_cliente.sh" "$VIGIA_DST/"
-cp "$SCRIPT_DIR/templates/"*         "$VIGIA_DST/templates/"
-cp "$SCRIPT_DIR/img/logo2.png"       "$VIGIA_DST/img/"
-cp "$SCRIPT_DIR/img/logo2_mini.png"  "$VIGIA_DST/img/"
-cp "$SCRIPT_DIR/img/logo2_mini.png"  "$BUILD_DIR/usr/share/pixmaps/vigia.png"
+cp "$SCRIPT_DIR/instalar_cliente.sh"  "$VIGIA_DST/"
+cp "$SCRIPT_DIR/templates/"*          "$VIGIA_DST/templates/"
+cp "$SCRIPT_DIR/img/logo2.png"        "$VIGIA_DST/img/"
+cp "$SCRIPT_DIR/img/logo2_mini.png"   "$VIGIA_DST/img/"
+cp "$SCRIPT_DIR/img/logo2_mini.png"   "$BUILD_DIR/usr/share/pixmaps/vigia.png"
 [ -f "$SCRIPT_DIR/requirements_cliente.txt"  ] && \
   cp "$SCRIPT_DIR/requirements_cliente.txt"  "$VIGIA_DST/"
 [ -f "$SCRIPT_DIR/requirements_servidor.txt" ] && \
   cp "$SCRIPT_DIR/requirements_servidor.txt" "$VIGIA_DST/"
 
+# ── Copiar binario Tauri ──────────────────────────────────────
+cp "$TAURI_BINARY" "$VIGIA_DST/vigia"
+chmod +x "$VIGIA_DST/vigia"
 chmod +x "$VIGIA_DST"/*.sh "$VIGIA_DST"/*.py
 
 # ── DEBIAN/control ────────────────────────────────────────────
@@ -61,11 +73,13 @@ Architecture: $PKG_ARCH
 Maintainer: VIGIA
 Section: education
 Priority: optional
-Depends: python3 (>= 3.10), python3-tk
+Depends: python3 (>= 3.10), python3-tk, libwebkit2gtk-4.1-0, libgtk-3-0
 Description: Sistema de supervisión de aula para Linux
  VIGIA permite al profesor ver en tiempo real las pantallas de los
  alumnos conectados en la misma red local. Incluye servidor (equipo
  del profesor) y cliente (equipo del alumno).
+ .
+ El panel del profesor se muestra como ventana nativa (Tauri/WebKit).
  .
  Sólo compatible con sesiones X11.
 EOF
@@ -80,7 +94,7 @@ VIGIA_DIR=/opt/vigia
 REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
 REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
 
-chmod +x "$VIGIA_DIR"/*.sh "$VIGIA_DIR"/*.py 2>/dev/null || true
+chmod +x "$VIGIA_DIR"/*.sh "$VIGIA_DIR"/*.py "$VIGIA_DIR/vigia" 2>/dev/null || true
 
 echo ""
 echo "╔══════════════════════════════════════════╗"
