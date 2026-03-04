@@ -100,17 +100,9 @@ APPS_DIR="$HOME/.local/share/applications"
 mkdir -p "$APPS_DIR"
 DESKTOP="$APPS_DIR/vigia-servidor.desktop"
 
-# Usar el binario nativo Tauri si existe; si no, Python directamente
-if [ -x "$SCRIPT_DIR/vigia" ]; then
-  # Instalación desde .deb — binario Tauri en /opt/vigia/vigia
-  VIGIA_EXEC="$SCRIPT_DIR/vigia"
-  VIGIA_TERMINAL=false
-elif [ -x "$SCRIPT_DIR/vigia-dashboard/src-tauri/target/release/vigia" ]; then
-  # Compilación de desarrollo
-  VIGIA_EXEC="$SCRIPT_DIR/vigia-dashboard/src-tauri/target/release/vigia"
-  VIGIA_TERMINAL=false
-elif [ -f "$SCRIPT_DIR/vigia-launcher.py" ]; then
-  # Lanzador Python nativo (GTK + WebKit2GTK, sin necesidad de Rust)
+# Preferir vigia-launcher.py: lanza Chrome/Chromium en modo --app (primera opción),
+# con fallback a WebKit2GTK (GPU desactivado, sin pantalla negra) y luego navegador.
+if [ -f "$SCRIPT_DIR/vigia-launcher.py" ]; then
   VIGIA_EXEC="$PYTHON3 $SCRIPT_DIR/vigia-launcher.py"
   VIGIA_TERMINAL=false
 else
