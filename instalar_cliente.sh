@@ -87,6 +87,39 @@ if [ -n "$IP_SERVIDOR" ]; then
   echo "$IP_SERVIDOR" > "$SCRIPT_DIR/.server_ip"
 fi
 
+# ── Autostart XDG (arranque automático al iniciar sesión) ────
+# Se usa XDG autostart en lugar de systemd porque el cliente necesita
+# DISPLAY disponible (Tkinter + captura mss), lo que solo ocurre
+# después de que la sesión gráfica esté completamente activa.
+echo "[*] Configurando inicio automático del cliente..."
+
+AUTOSTART_DIR="$HOME/.config/autostart"
+mkdir -p "$AUTOSTART_DIR"
+
+# Matar instancia previa si estaba corriendo para que el nuevo reemplace
+pkill -f "python.*client\.py" 2>/dev/null || true
+
+cat > "$AUTOSTART_DIR/vigia-alumno.desktop" <<AUTOSTART_EOF
+[Desktop Entry]
+Type=Application
+Name=VIGIA Cliente
+Comment=Cliente de supervisión VIGIA — inicio automático de sesión
+Exec=$PYTHON3 $SCRIPT_DIR/client.py $IP_SERVIDOR
+Terminal=false
+Categories=Education;
+Hidden=false
+X-GNOME-Autostart-enabled=true
+AUTOSTART_EOF
+chmod +x "$AUTOSTART_DIR/vigia-alumno.desktop" 2>/dev/null || true
+
+echo "[✓] Autostart configurado en $AUTOSTART_DIR/vigia-alumno.desktop"
+echo "    El cliente arrancará automáticamente al iniciar sesión."
+
+# Arrancar el cliente ya ahora (sin esperar al próximo reinicio)
+echo "[*] Iniciando cliente VIGIA..."
+nohup "$PYTHON3" "$SCRIPT_DIR/client.py" $IP_SERVIDOR >/tmp/vigia-cliente.log 2>&1 &
+echo "[✓] Cliente iniciado (PID $!). Log: /tmp/vigia-cliente.log"
+
 echo ""
 echo "═══════════════════════════════════════════════"
 echo "  [✓] Instalación completada."

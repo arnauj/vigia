@@ -72,6 +72,34 @@ def dashboard():
     return resp
 
 
+@app.route('/img/<path:filename>')
+def serve_img(filename):
+    from flask import send_from_directory
+    img_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'img')
+    return send_from_directory(img_dir, filename)
+
+
+@app.route('/manifest.json')
+def web_manifest():
+    from flask import jsonify
+    manifest = {
+        "name": "VIGIA — Panel del Profesor",
+        "short_name": "VIGIA",
+        "description": "Supervisión de aula en tiempo real",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#1a1d27",
+        "theme_color": "#1a1d27",
+        "icons": [
+            {"src": "/img/icon-192.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "/img/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
+        ],
+    }
+    resp = make_response(jsonify(manifest))
+    resp.headers['Content-Type'] = 'application/manifest+json'
+    return resp
+
+
 @app.route('/api/students')
 def api_students():
     result = []
@@ -278,7 +306,7 @@ def _teacher_capture_loop():
                 if _teacher_capture.get('type') == 'window':
                     region = _get_window_region(_teacher_capture['wid'])
                     if region is None:
-                        time.sleep(0.5)
+                        socketio.sleep(0.5)
                         continue
                     cap = sct.grab(region)
                 else:
@@ -296,7 +324,7 @@ def _teacher_capture_loop():
                 socketio.emit('teacher_screen_preview', {'image': data_uri}, to=_teacher_capture['sid'])
             except Exception as e:
                 print(f'[!] Error capturando pantalla del profesor: {e}')
-            time.sleep(0.5)  # 2 FPS
+            socketio.sleep(0.5)  # 2 FPS — cede el event loop de eventlet
 
 
 def _capture_thumb(sct, region, max_w=192):
@@ -478,8 +506,9 @@ def on_start_teacher_capture(data=None):
     _teacher_capture['monitor'] = data.get('monitor', 1)
     _teacher_capture['wid'] = data.get('wid')
     _teacher_capture['running'] = True
-    t = threading.Thread(target=_teacher_capture_loop, daemon=True)
-    t.start()
+    # start_background_task crea un green thread de eventlet (no un hilo OS),
+    # garantizando que socketio.emit(broadcast=True) llegue a todos los clientes.
+    socketio.start_background_task(_teacher_capture_loop)
     print('[📺] Compartir pantalla del profesor: iniciado')
 
 

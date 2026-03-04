@@ -62,6 +62,8 @@ cp "$SCRIPT_DIR/templates/"*          "$VIGIA_DST/templates/"
 cp "$SCRIPT_DIR/img/logo2.png"        "$VIGIA_DST/img/"
 cp "$SCRIPT_DIR/img/logo2_mini.png"   "$VIGIA_DST/img/"
 cp "$SCRIPT_DIR/img/logo2_mini.png"   "$BUILD_DIR/usr/share/pixmaps/vigia.png"
+[ -f "$SCRIPT_DIR/img/icon-192.png" ] && cp "$SCRIPT_DIR/img/icon-192.png" "$VIGIA_DST/img/"
+[ -f "$SCRIPT_DIR/img/icon-512.png" ] && cp "$SCRIPT_DIR/img/icon-512.png" "$VIGIA_DST/img/"
 [ -f "$SCRIPT_DIR/requirements_cliente.txt"  ] && \
   cp "$SCRIPT_DIR/requirements_cliente.txt"  "$VIGIA_DST/"
 [ -f "$SCRIPT_DIR/requirements_servidor.txt" ] && \
@@ -142,6 +144,10 @@ cat > "$BUILD_DIR/DEBIAN/prerm" <<'PRERM'
 #!/bin/bash
 REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
 REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
+# Detener y deshabilitar el servicio systemd del servidor
+su - "$REAL_USER" -c "systemctl --user stop vigia-servidor 2>/dev/null; systemctl --user disable vigia-servidor 2>/dev/null" 2>/dev/null || true
+rm -f "$REAL_HOME/.config/systemd/user/vigia-servidor.service" 2>/dev/null || true
+# Eliminar accesos directos
 rm -f \
   "$REAL_HOME/.local/share/applications/vigia-servidor.desktop" \
   "$REAL_HOME/.local/share/applications/vigia-alumno.desktop" 2>/dev/null || true

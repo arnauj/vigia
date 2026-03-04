@@ -29,6 +29,8 @@ cp "$SCRIPT_DIR/templates/"* "$SERVER_BUILD_DIR/opt/vigia-server/templates/"
 cp "$SCRIPT_DIR/img/logo2.png" "$SERVER_BUILD_DIR/opt/vigia-server/img/"
 cp "$SCRIPT_DIR/img/logo2_mini.png" "$SERVER_BUILD_DIR/opt/vigia-server/img/"
 cp "$SCRIPT_DIR/img/logo2_mini.png" "$SERVER_BUILD_DIR/usr/share/pixmaps/vigia-server.png"
+[ -f "$SCRIPT_DIR/img/icon-192.png" ] && cp "$SCRIPT_DIR/img/icon-192.png" "$SERVER_BUILD_DIR/opt/vigia-server/img/"
+[ -f "$SCRIPT_DIR/img/icon-512.png" ] && cp "$SCRIPT_DIR/img/icon-512.png" "$SERVER_BUILD_DIR/opt/vigia-server/img/"
 
 # Copy Tauri binary if exists
 TAURI_BINARY="$SCRIPT_DIR/vigia-dashboard/src-tauri/target/release/vigia"
@@ -54,17 +56,22 @@ cat > "$SERVER_BUILD_DIR/DEBIAN/postinst" <<'EOF'
 #!/bin/bash
 set -e
 VIGIA_DIR=/opt/vigia-server
-APPS_DIR=/usr/share/applications
-DESKTOP="$APPS_DIR/vigia-server.desktop"
 
-# Instalar dependencias de Python faltantes
-echo "Instalando dependencias de Python para el servidor..."
-pip3 install --break-system-packages flask flask-socketio eventlet 2>/dev/null || true
+REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
+REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
+PYTHON3="$(command -v python3 || echo python3)"
 
 chmod +x "$VIGIA_DIR"/*.py 2>/dev/null || true
 
-# Create desktop entry
-cat > "$DESKTOP" <<EOD
+# ── Dependencias Python ───────────────────────────────────────
+echo "Instalando dependencias Python del servidor..."
+su - "$REAL_USER" -c \
+  "pip3 install --break-system-packages --user -q flask flask-socketio eventlet mss Pillow 2>/dev/null" \
+  || pip3 install --break-system-packages -q flask flask-socketio eventlet mss Pillow 2>/dev/null || true
+
+# ── Acceso directo en el menú inicio ─────────────────────────
+APPS_DIR=/usr/share/applications
+cat > "$APPS_DIR/vigia-server.desktop" <<EOD
 [Desktop Entry]
 Type=Application
 Name=VIGIA Servidor
@@ -76,7 +83,35 @@ Categories=Education;
 StartupWMClass=vigia
 StartupNotify=true
 EOD
-chmod 644 "$DESKTOP"
+chmod 644 "$APPS_DIR/vigia-server.desktop"
+
+# ── Servicio systemd de usuario (arranque automático) ────────
+if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+  SYSTEMD_DIR="$REAL_HOME/.config/systemd/user"
+  su - "$REAL_USER" -c "mkdir -p '$SYSTEMD_DIR'"
+  cat > "$SYSTEMD_DIR/vigia-servidor.service" <<EOD
+[Unit]
+Description=VIGIA — Servidor del Panel del Profesor
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=$PYTHON3 $VIGIA_DIR/server.py 5000
+WorkingDirectory=$VIGIA_DIR
+Environment=VIGIA_TAURI=1
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOD
+  chown "$REAL_USER:" "$SYSTEMD_DIR/vigia-servidor.service"
+  su - "$REAL_USER" -c \
+    "systemctl --user daemon-reload && systemctl --user enable --now vigia-servidor" 2>/dev/null || true
+  loginctl enable-linger "$REAL_USER" 2>/dev/null || true
+  echo "Servicio 'vigia-servidor' habilitado para $REAL_USER."
+fi
 
 echo "VIGIA Server installed successfully."
 EOF
@@ -84,7 +119,14 @@ chmod 755 "$SERVER_BUILD_DIR/DEBIAN/postinst"
 
 cat > "$SERVER_BUILD_DIR/DEBIAN/prerm" <<'EOF'
 #!/bin/bash
-rm -f /usr/share/applications/vigia-server.desktop
+REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
+REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
+# Detener y deshabilitar el servicio
+su - "$REAL_USER" -c \
+  "systemctl --user stop vigia-servidor 2>/dev/null; systemctl --user disable vigia-servidor 2>/dev/null" \
+  2>/dev/null || true
+rm -f "$REAL_HOME/.config/systemd/user/vigia-servidor.service" 2>/dev/null || true
+rm -f /usr/share/applications/vigia-server.desktop 2>/dev/null || true
 EOF
 chmod 755 "$SERVER_BUILD_DIR/DEBIAN/prerm"
 
@@ -162,49 +204,73 @@ db_get vigia-client/server_ip
 SERVER_IP="$RET"
 
 VIGIA_DIR=/opt/vigia-client
-APPS_DIR=/usr/share/applications
-DESKTOP="$APPS_DIR/vigia-client.desktop"
-
-# Instalar dependencias de Python faltantes
-echo "Instalando dependencias de Python para el alumno..."
-pip3 install --break-system-packages mss pynput aiortc "python-socketio[client]" websocket-client 2>/dev/null || true
+REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
+REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
+PYTHON3="$(command -v python3 || echo python3)"
 
 chmod +x "$VIGIA_DIR"/*.py 2>/dev/null || true
 
-# Save config
+# ── Guardar IP del servidor ───────────────────────────────────
 mkdir -p /etc/vigia
 echo "$SERVER_IP" > /etc/vigia/client.conf
 
-# Create desktop entry
-cat > "$DESKTOP" <<EOD
+# ── Dependencias Python ───────────────────────────────────────
+echo "Instalando dependencias Python del cliente..."
+pip3 install --break-system-packages mss pynput "python-socketio[client]" websocket-client Pillow 2>/dev/null || true
+
+# ── Acceso directo en el menú inicio ─────────────────────────
+APPS_DIR=/usr/share/applications
+cat > "$APPS_DIR/vigia-client.desktop" <<EOD
 [Desktop Entry]
 Type=Application
 Name=VIGIA Alumno
 Comment=Cliente de supervisión de aula
-Exec=python3 /opt/vigia-client/client.py $SERVER_IP
+Exec=$PYTHON3 $VIGIA_DIR/client.py $SERVER_IP
 Icon=vigia-client
-Terminal=true
+Terminal=false
 Categories=Education;
 EOD
-chmod 644 "$DESKTOP"
+chmod 644 "$APPS_DIR/vigia-client.desktop"
 
-echo "VIGIA Client installed successfully. Server IP set to $SERVER_IP"
-
-# Intentar ejecutar el cliente para el usuario actual
-REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
+# ── XDG autostart (arranque automático al iniciar sesión) ────
+# Se usa XDG autostart en lugar de systemd porque el cliente necesita
+# DISPLAY activo (Tkinter + mss). KDE/GNOME ejecutan estos .desktop
+# al inicio de sesión con el entorno gráfico ya disponible.
 if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
-    echo "Iniciando VIGIA Alumno para $REAL_USER..."
-    # setsid crea una nueva sesión, nohup ignora el cierre de terminal, y las redirecciones cierran los pipes
-    sudo -u "$REAL_USER" DISPLAY=:0 setsid nohup python3 /opt/vigia-client/client.py "$SERVER_IP" </dev/null >/dev/null 2>&1 &
-    # Pequeña pausa para asegurar que el proceso se desvincula
-    sleep 0.5
+  AUTOSTART_DIR="$REAL_HOME/.config/autostart"
+  su - "$REAL_USER" -c "mkdir -p '$AUTOSTART_DIR'"
+  cat > "$AUTOSTART_DIR/vigia-alumno.desktop" <<EOD
+[Desktop Entry]
+Type=Application
+Name=VIGIA Cliente
+Comment=Cliente de supervisión VIGIA — inicio automático de sesión
+Exec=$PYTHON3 $VIGIA_DIR/client.py $SERVER_IP
+Terminal=false
+Categories=Education;
+Hidden=false
+X-GNOME-Autostart-enabled=true
+EOD
+  chown "$REAL_USER:" "$AUTOSTART_DIR/vigia-alumno.desktop"
+  echo "Autostart configurado para $REAL_USER."
+
+  # Arrancar el cliente inmediatamente (sin esperar al siguiente reinicio)
+  pkill -u "$REAL_USER" -f "python.*client\.py" 2>/dev/null || true
+  su - "$REAL_USER" -c \
+    "nohup $PYTHON3 $VIGIA_DIR/client.py $SERVER_IP >/tmp/vigia-cliente.log 2>&1 &" 2>/dev/null || true
 fi
+
+echo "VIGIA Client installed successfully. Server IP: $SERVER_IP"
 EOF
 chmod 755 "$CLIENT_BUILD_DIR/DEBIAN/postinst"
 
 cat > "$CLIENT_BUILD_DIR/DEBIAN/prerm" <<'EOF'
 #!/bin/bash
-rm -f /usr/share/applications/vigia-client.desktop
+REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
+REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
+# Matar cliente en ejecución y eliminar autostart
+pkill -u "$REAL_USER" -f "python.*client\.py" 2>/dev/null || true
+rm -f "$REAL_HOME/.config/autostart/vigia-alumno.desktop" 2>/dev/null || true
+rm -f /usr/share/applications/vigia-client.desktop 2>/dev/null || true
 EOF
 chmod 755 "$CLIENT_BUILD_DIR/DEBIAN/prerm"
 

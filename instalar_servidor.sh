@@ -133,6 +133,45 @@ StartupNotify=true
 DESKTOP_EOF
 chmod +x "$DESKTOP" 2>/dev/null || true
 
+# ── Servicio systemd de usuario (arranque automático) ────────
+echo "[*] Configurando inicio automático del servidor..."
+
+SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
+mkdir -p "$SYSTEMD_USER_DIR"
+
+cat > "$SYSTEMD_USER_DIR/vigia-servidor.service" <<SERVICE_EOF
+[Unit]
+Description=VIGIA — Servidor del Panel del Profesor
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=$PYTHON3 $SCRIPT_DIR/server.py 5000
+WorkingDirectory=$SCRIPT_DIR
+Environment=VIGIA_TAURI=1
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+SERVICE_EOF
+
+# Detener versión anterior si está corriendo, luego recargar y activar
+systemctl --user stop vigia-servidor 2>/dev/null || true
+systemctl --user daemon-reload
+systemctl --user enable --now vigia-servidor
+
+# Permitir que el servicio arranque en el boot aunque el usuario no haya iniciado
+# sesión gráfica (los alumnos podrán conectar desde el primer momento)
+loginctl enable-linger "$USER" 2>/dev/null || true
+
+echo "[✓] Servicio systemd 'vigia-servidor' activo y habilitado."
+echo "    Comandos útiles:"
+echo "      systemctl --user status vigia-servidor"
+echo "      systemctl --user restart vigia-servidor"
+echo "      journalctl --user -u vigia-servidor -f"
+
 echo ""
 echo "═══════════════════════════════════════════════"
 echo "  [✓] Instalación completada con éxito."
