@@ -17,7 +17,6 @@ import queue
 import base64
 import shutil
 import subprocess
-from html.parser import HTMLParser as _HTMLParser
 
 # ── Importaciones ────────────────────────────────────────────────────────────
 
@@ -166,6 +165,7 @@ _XDO_KEY_MAP = {
     'left': 'Left', 'right': 'Right', 'up': 'Up', 'down': 'Down',
     'ctrl': 'Control_L', 'alt': 'Alt_L', 'shift': 'Shift_L', 'win': 'Super_L'
 }
+_BTN_MAP_XDO = {'left': 1, 'middle': 2, 'right': 3}
 
 def _get_pynput_key(key):
     try:
@@ -336,13 +336,12 @@ def on_do_input(data):
         return
 
     # ── clicks: xdotool primero (más fiable en X11 para todas las apps) ───────
-    _btn_map_xdo = {'left': 1, 'middle': 2, 'right': 3}
     _btn_map_pyn = {'left': _PBtn.left, 'middle': _PBtn.middle, 'right': _PBtn.right} if _PBtn else {}
     button = data.get('button', 'left')
 
     if tipo == 'mousedown':
         if _XDO_CMD:
-            _xdo('mousemove', x, y, 'mousedown', _btn_map_xdo.get(button, 1)); return
+            _xdo('mousemove', x, y, 'mousedown', _BTN_MAP_XDO.get(button, 1)); return
         if _mouse_ctrl and _PBtn:
             try: _mouse_ctrl.position = (x, y); _mouse_ctrl.press(_btn_map_pyn.get(button, _PBtn.left))
             except: pass
@@ -350,7 +349,7 @@ def on_do_input(data):
 
     if tipo == 'mouseup':
         if _XDO_CMD:
-            _xdo('mousemove', x, y, 'mouseup', _btn_map_xdo.get(button, 1)); return
+            _xdo('mousemove', x, y, 'mouseup', _BTN_MAP_XDO.get(button, 1)); return
         if _mouse_ctrl and _PBtn:
             try: _mouse_ctrl.position = (x, y); _mouse_ctrl.release(_btn_map_pyn.get(button, _PBtn.left))
             except: pass
@@ -387,7 +386,7 @@ def on_do_input(data):
         if _XDO_CMD:
             _xdo('key', '--clearmodifiers', combo); return
         # fallback pynput: descomponer el combo
-        if _kbd_ctrl and _kbd_ctrl:
+        if _kbd_ctrl:
             parts = combo.split('+')
             keys  = [_get_pynput_key(p) for p in parts]
             try:
@@ -455,8 +454,7 @@ def on_teacher_screen(data):
 @sio.on('get_clipboard')
 def on_get_clipboard(_data):
     text = ''
-    _env = dict(os.environ)
-    if 'DISPLAY' not in _env: _env['DISPLAY'] = ':0'
+    _env = _xdo_env  # ya calculado en _init_input()
     # Intentar con xclip / xsel (requieren DISPLAY)
     for cmd in [
         ['xclip', '-o', '-selection', 'clipboard'],

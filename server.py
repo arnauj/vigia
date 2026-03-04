@@ -13,6 +13,7 @@ import time
 import base64
 import threading
 import subprocess
+import webbrowser
 
 async_mode = 'eventlet'
 
@@ -88,9 +89,14 @@ def api_students():
 
 # ── Eventos Socket.IO ────────────────────────────────────────────────────────
 
+def _get_client_ip():
+    return (request.environ.get('HTTP_X_FORWARDED_FOR')
+            or request.environ.get('REMOTE_ADDR', 'Desconocida'))
+
+
 @socketio.on('connect')
 def on_connect():
-    client_ip = (request.environ.get('HTTP_X_FORWARDED_FOR') or request.environ.get('REMOTE_ADDR', 'Desconocida'))
+    client_ip = _get_client_ip()
     print(f"[+] Conexión: {request.sid}  IP: {client_ip}")
 
 
@@ -111,7 +117,7 @@ def on_disconnect():
 
 @socketio.on('register')
 def on_register(data):
-    client_ip = (request.environ.get('HTTP_X_FORWARDED_FOR') or request.environ.get('REMOTE_ADDR', 'Desconocida'))
+    client_ip = _get_client_ip()
     name = data.get('name', 'Alumno')
     now = datetime.now().strftime('%H:%M:%S')
     students[request.sid] = {
@@ -588,9 +594,6 @@ def on_webrtc_ice(data):
 # ── Arranque ─────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
-    import threading
-    import webbrowser
-
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
     ip = get_local_ip()
     sep = '=' * 52
@@ -604,7 +607,6 @@ if __name__ == '__main__':
     # Solo abrir navegador cuando no está corriendo dentro de Tauri
     if not os.environ.get('VIGIA_TAURI'):
         def _abrir_navegador():
-            import time
             time.sleep(1.5)
             try:
                 webbrowser.open(f"http://localhost:{port}")
