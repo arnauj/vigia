@@ -318,13 +318,13 @@ def _teacher_capture_loop():
                     ratio = max_w / img.width
                     img = img.resize((max_w, int(img.height * ratio)), Image.LANCZOS)
                 buf = io.BytesIO()
-                img.save(buf, 'JPEG', quality=85)
+                img.save(buf, 'JPEG', quality=70)
                 data_uri = 'data:image/jpeg;base64,' + base64.b64encode(buf.getvalue()).decode()
                 socketio.emit('teacher_screen', {'activa': True, 'image': data_uri}, broadcast=True)
                 socketio.emit('teacher_screen_preview', {'image': data_uri}, to=_teacher_capture['sid'])
             except Exception as e:
                 print(f'[!] Error capturando pantalla del profesor: {e}')
-            socketio.sleep(0.5)  # 2 FPS — cede el event loop de eventlet
+            socketio.sleep(0.1)  # 10 FPS — cede el event loop de eventlet
 
 
 def _capture_thumb(sct, region, max_w=192):

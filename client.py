@@ -188,7 +188,7 @@ REINTENTOS_ESPERA = 5
 
 # ── Estado ───────────────────────────────────────────────────────────────────
 sio = sio_module.Client(reconnection=True, reconnection_attempts=0)
-_cola_profesor      = queue.Queue(maxsize=3)
+_cola_profesor      = queue.Queue(maxsize=2)
 _cola_bloqueo       = queue.Queue(maxsize=10)
 _cola_mensajes      = queue.Queue(maxsize=20)
 _cola_clipboard_req = queue.Queue(maxsize=1)
@@ -570,7 +570,7 @@ if WEBRTC_OK:
 class _VentanaProfesor:
     def __init__(self, root):
         self.top = tk.Toplevel(root); self.top.title("📺 Pantalla del Profesor"); self.top.configure(bg='#0f1117')
-        self.top.geometry("960x560"); self.top.attributes('-topmost', True)
+        self.top.attributes('-zoomed', True); self.top.attributes('-topmost', True)
         self._label = tk.Label(self.top, bg='#0f1117', text="⏳ Esperando imagen…", fg='#718096', font=('Segoe UI', 12))
         self._label.pack(expand=True, fill='both')
         self._foto = None
@@ -697,7 +697,7 @@ def ejecutar_interfaz():
                 try: _cola_clipboard_res.put_nowait(cb)
                 except Exception: pass
         except: pass
-        root.after(100, check)
+        root.after(33, check)
     check(); root.mainloop()
 
 if __name__ == '__main__':
