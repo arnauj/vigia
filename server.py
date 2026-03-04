@@ -313,7 +313,7 @@ def _teacher_capture_loop():
                     mon = sct.monitors[_teacher_capture.get('monitor', 1)]
                     cap = sct.grab(mon)
                 img = Image.frombytes('RGB', (cap.width, cap.height), cap.rgb)
-                max_w = 1280
+                max_w = 1920
                 if img.width > max_w:
                     ratio = max_w / img.width
                     img = img.resize((max_w, int(img.height * ratio)), Image.LANCZOS)
