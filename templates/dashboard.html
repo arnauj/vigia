@@ -1696,9 +1696,23 @@ function _traducirCoords(e) {
     ? document.getElementById('liveview-video')
     : document.getElementById('liveview-img');
   const rect = el.getBoundingClientRect();
+  // object-fit:contain puede añadir barras negras dentro del elemento.
+  // Calcular el área real del contenido según la relación de aspecto original.
+  const contentAR = _liveOrigW / _liveOrigH;
+  const boxAR     = rect.width  / rect.height;
+  let cw, ch, cx, cy;
+  if (boxAR > contentAR) {
+    // Caja más ancha que el contenido: pillarboxing (barras laterales)
+    ch = rect.height; cw = ch * contentAR;
+    cx = rect.left + (rect.width - cw) / 2; cy = rect.top;
+  } else {
+    // Caja más alta que el contenido: letterboxing (barras arriba/abajo)
+    cw = rect.width; ch = cw / contentAR;
+    cx = rect.left; cy = rect.top + (rect.height - ch) / 2;
+  }
   return {
-    x: Math.round((e.clientX - rect.left) / rect.width  * _liveOrigW),
-    y: Math.round((e.clientY - rect.top)  / rect.height * _liveOrigH),
+    x: Math.round((e.clientX - cx) / cw * _liveOrigW),
+    y: Math.round((e.clientY - cy) / ch * _liveOrigH),
   };
 }
 
