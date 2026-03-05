@@ -275,7 +275,7 @@ if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
 
   su - "$REAL_USER" -c \
     "DISPLAY='$_XDISPLAY' XAUTHORITY='$REAL_HOME/.Xauthority' \
-     setsid nohup /usr/local/bin/vigia-client </dev/null >/tmp/vigia-cliente.log 2>&1 &" \
+     python3 -c \"import subprocess; subprocess.Popen(['/usr/local/bin/vigia-client'], stdin=open('/dev/null'), stdout=open('/tmp/vigia-cliente.log','w'), stderr=subprocess.STDOUT, close_fds=True, start_new_session=True)\"" \
     </dev/null 2>/dev/null || true
   echo "Cliente VIGIA iniciado para $REAL_USER (DISPLAY=$_XDISPLAY)."
 fi
