@@ -20,7 +20,7 @@ async_mode = 'eventlet'
 import socket
 from datetime import datetime
 from flask import Flask, render_template, jsonify, request, make_response
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit, join_room
 
 print(f"[*] Iniciando servidor VIGIA (modo: {async_mode})")
 
@@ -128,6 +128,13 @@ def on_connect():
     print(f"[+] Conexión: {request.sid}  IP: {client_ip}")
 
 
+@socketio.on('register_teacher')
+def on_register_teacher():
+    """Dashboard joins the 'professors' room so broadcasts target only teachers."""
+    join_room('professors')
+    print(f"[👁] Dashboard registrado en sala 'professors': {request.sid}")
+
+
 @socketio.on('disconnect')
 def on_disconnect():
     if request.sid == _teacher_capture.get('sid'):
@@ -140,7 +147,7 @@ def on_disconnect():
             prof_sid = viewers.pop(request.sid)['prof_sid']
             socketio.emit('student_view_ended', {'sid': request.sid}, to=prof_sid)
         print(f"[-] Desconectado: {name}")
-        emit('student_disconnected', {'sid': request.sid}, broadcast=True)
+        socketio.emit('student_disconnected', {'sid': request.sid}, to='professors')
 
 
 @socketio.on('register')
@@ -154,7 +161,7 @@ def on_register(data):
     }
     print(f"[+] Registrado: {name}  ({client_ip})")
     emit('registered', {'status': 'ok', 'sid': request.sid})
-    emit('student_connected', {'sid': request.sid, 'name': name, 'ip': client_ip, 'connected_at': now}, broadcast=True)
+    socketio.emit('student_connected', {'sid': request.sid, 'name': name, 'ip': client_ip, 'connected_at': now}, to='professors')
 
 
 @socketio.on('screenshot')
@@ -163,7 +170,7 @@ def on_screenshot(data):
     now = datetime.now().strftime('%H:%M:%S')
     students[request.sid]['screenshot'] = data.get('image')
     students[request.sid]['last_seen'] = now
-    emit('update_screenshot', {'sid': request.sid, 'image': data.get('image'), 'last_seen': now}, broadcast=True, include_self=False)
+    socketio.emit('update_screenshot', {'sid': request.sid, 'image': data.get('image'), 'last_seen': now}, to='professors')
 
 
 @socketio.on('request_students')
@@ -227,7 +234,7 @@ def on_lock_student(data):
     if sid in students:
         students[sid]['locked'] = locked
         socketio.emit('lock_screen' if locked else 'unlock_screen', {}, to=sid)
-        emit('student_lock_state', {'sid': sid, 'locked': locked}, broadcast=True)
+        socketio.emit('student_lock_state', {'sid': sid, 'locked': locked}, to='professors')
         print(f"[*] {students[sid]['name']} -> {'BLOQUEADO' if locked else 'desbloqueado'}")
 
 
@@ -558,7 +565,7 @@ def on_command_output(data):
     sid = request.sid
     if sid not in students:
         return
-    emit('command_result', {
+    socketio.emit('command_result', {
         'sid': sid,
         'name': students[sid]['name'],
         'cmd_id': data.get('cmd_id', ''),
@@ -566,7 +573,7 @@ def on_command_output(data):
         'stdout': data.get('stdout', ''),
         'stderr': data.get('stderr', ''),
         'returncode': data.get('returncode', -1),
-    }, broadcast=True)
+    }, to='professors')
 
 
 @socketio.on('send_message_to_many')

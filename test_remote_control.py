@@ -126,13 +126,13 @@ class TestProcesarInput(unittest.TestCase):
     def test_mousemove(self):
         calls = self._run({'type': 'mousemove', 'x': 640, 'y': 480})
         args = self._xdo_args(calls)
-        self.assertIn(['mousemove', '--sync', '640', '480'], args,
-                      "mousemove debe llamar xdotool mousemove --sync x y")
+        self.assertIn(['mousemove', '640', '480'], args,
+                      "mousemove debe llamar xdotool mousemove x y")
 
     def test_mousedown_izquierdo(self):
         calls = self._run({'type': 'mousedown', 'x': 100, 'y': 200, 'button': 'left'})
         args = self._xdo_args(calls)
-        self.assertIn(['mousemove', '--sync', '100', '200'], args)
+        self.assertIn(['mousemove', '100', '200'], args)
         self.assertIn(['mousedown', '1'], args,
                       "mousedown left debe llamar xdotool mousedown 1")
 
@@ -252,6 +252,7 @@ class TestInputQueue(unittest.TestCase):
         """on_do_input debe llamar put_nowait en la cola para mousemove."""
         encolados = []
         orig_put_nowait = client._input_q.put_nowait
+        client._last_mouse_time = 0.0  # reset throttle so the event is not dropped
 
         def _fake_put_nowait(item):
             encolados.append(item)

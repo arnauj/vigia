@@ -145,10 +145,7 @@ def _init_input():
     if _XDO_CMD:
         print(f"  [✓] xdotool detectado en {_XDO_CMD}.")
     else:
-        print("  [!] xdotool NO detectado. Intentando instalar...")
-        os.system('sudo apt-get update -qq 2>/dev/null && sudo apt-get install -y xdotool -qq 2>/dev/null')
-        _XDO_CMD = shutil.which('xdotool')
-        if _XDO_CMD: print(f"  [✓] xdotool instalado correctamente.")
+        print("  [!] xdotool no detectado — pynput manejará todo el control remoto.")
 
     # Precalcular entorno para xdotool (se reutiliza en cada evento)
     _xdo_env = dict(os.environ)
@@ -241,7 +238,7 @@ if WEBRTC_OK:
     class ScreenStreamTrack(VideoStreamTrack):
         kind = "video"
         _CLOCK_RATE = 90000
-        _TARGET_FPS = 15
+        _TARGET_FPS = 30
 
         def __init__(self):
             super().__init__()
@@ -274,8 +271,9 @@ if WEBRTC_OK:
                 bgra = np.frombuffer(cap.bgra, np.uint8).reshape(cap.height, cap.width, 4)
                 rgb  = bgra[:, :, [2, 1, 0]]   # BGRA → RGB
                 h, w = rgb.shape[:2]
-                if w > 1920:
-                    new_w, new_h = 1920, int(h * 1920 / w)
+                # Cap at 1280px wide: reduces CPU encoding load and network bandwidth
+                if w > 1280:
+                    new_w, new_h = 1280, int(h * 1280 / w)
                     img = Image.fromarray(rgb).resize((new_w, new_h), Image.LANCZOS)
                     rgb = np.array(img)
                 return rgb
@@ -355,7 +353,8 @@ def _procesar_input(data):
             try: _mouse_ctrl.position = (x, y); return
             except: pass
         if _XDO_CMD:
-            _xdo_sync('mousemove', '--sync', x, y)
+            # No --sync: fire-and-forget is faster; X11 processes these in order anyway
+            _xdo_sync('mousemove', x, y)
         return
 
     if tipo == 'scroll':
@@ -365,7 +364,7 @@ def _procesar_input(data):
             except: pass
         if _XDO_CMD:
             btn = 4 if dy > 0 else 5
-            _xdo_sync('mousemove', '--sync', x, y)
+            _xdo_sync('mousemove', x, y)
             for _ in range(abs(dy) or 1): _xdo_sync('click', btn)
         return
 
@@ -377,7 +376,7 @@ def _procesar_input(data):
             try: _mouse_ctrl.position = (x, y); _mouse_ctrl.press(_btn_map_pyn.get(button, _PBtn.left)); return
             except: pass
         if _XDO_CMD:
-            _xdo_sync('mousemove', '--sync', x, y)
+            _xdo_sync('mousemove', x, y)
             _xdo_sync('mousedown', _BTN_MAP_XDO.get(button, 1))
         return
 
@@ -386,7 +385,7 @@ def _procesar_input(data):
             try: _mouse_ctrl.position = (x, y); _mouse_ctrl.release(_btn_map_pyn.get(button, _PBtn.left)); return
             except: pass
         if _XDO_CMD:
-            _xdo_sync('mousemove', '--sync', x, y)
+            _xdo_sync('mousemove', x, y)
             _xdo_sync('mouseup', _BTN_MAP_XDO.get(button, 1))
         return
 
@@ -443,13 +442,21 @@ def _procesar_input(data):
             except: pass
 
 
+_last_mouse_time = 0.0
+_MOUSE_THROTTLE  = 0.01   # 100 Hz maximum for mousemove events
+
 @sio.on('do_input')
 def on_do_input(data):
     """Encola el evento; el hilo vigia-input lo ejecuta en orden estricto."""
+    global _last_mouse_time
     if not INPUT_OK: return
     tipo = data.get('type', '')
-    # mousemove: descartar si cola llena (el coalescing del worker elimina viejos)
     if tipo == 'mousemove':
+        # Throttle to 100 Hz max; excess events dropped before reaching the queue
+        now = time.monotonic()
+        if now - _last_mouse_time < _MOUSE_THROTTLE:
+            return
+        _last_mouse_time = now
         try: _input_q.put_nowait(data)
         except queue.Full: pass
     else:
