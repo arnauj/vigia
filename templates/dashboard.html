@@ -1958,7 +1958,7 @@ window.addEventListener('beforeunload', () => { if (_sharing) detenerCompartir()
 // Unificado con el listener global en la línea 817.
 
 // Listeners modal hipervínculo y compose — diferidos a DOMContentLoaded
-// porque esos elementos están DESPUÉS del </script> y no existen aún aquí.
+// porque esos elementos están definidos después del bloque script y aún no existen aquí.
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('link-url').addEventListener('keydown', (e) => {
     if (e.key === 'Enter')  insertarLink();
