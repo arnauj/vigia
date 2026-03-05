@@ -744,11 +744,13 @@
     #terminal-prompt { color: var(--green); font-family: monospace; font-size: 1rem; }
     #terminal-cmd {
       flex: 1; background: transparent; border: none;
+      border-bottom: 1px solid #3a4060;
       color: #e2e8f0;
       font-family: 'Cascadia Code','Fira Code','Consolas',monospace;
-      font-size: 0.92rem; outline: none;
+      font-size: 0.92rem; outline: none; padding: 2px 4px;
     }
-    #terminal-cmd::placeholder { color: var(--muted); }
+    #terminal-cmd:focus { border-bottom-color: var(--green); }
+    #terminal-cmd::placeholder { color: #8899bb; }
     #terminal-output-wrap {
       flex: 1; min-height: 120px; max-height: 420px; overflow-y: auto;
       background: #080a10;

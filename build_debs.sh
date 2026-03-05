@@ -275,8 +275,8 @@ if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
 
   su - "$REAL_USER" -c \
     "DISPLAY='$_XDISPLAY' XAUTHORITY='$REAL_HOME/.Xauthority' \
-     nohup /usr/local/bin/vigia-client >/tmp/vigia-cliente.log 2>&1 &" \
-    2>/dev/null || true
+     setsid nohup /usr/local/bin/vigia-client </dev/null >/tmp/vigia-cliente.log 2>&1 &" \
+    </dev/null 2>/dev/null || true
   echo "Cliente VIGIA iniciado para $REAL_USER (DISPLAY=$_XDISPLAY)."
 fi
 
