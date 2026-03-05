@@ -1551,10 +1551,14 @@ async function _iniciarWebRTC(sid, mode) {
     _pc = new RTCPeerConnection({ iceServers: _STUN });
 
     if (mode === 'control') {
-      // Canal de ratón: no ordenado, sin retransmisiones — como UDP, mínima latencia
-      _dc_mouse = _pc.createDataChannel('vigia-mouse', { ordered: false, maxRetransmits: 0 });
-      // Canal de teclado: ordenado y fiable — los eventos de tecla deben llegar en orden
-      _dc_kbd   = _pc.createDataChannel('vigia-input', { ordered: true });
+      // Canal de ratón: no ordenado, sin retransmisiones — prioridad alta, mínima latencia (UDP-like)
+      _dc_mouse = _pc.createDataChannel('vigia-mouse', { ordered: false, maxRetransmits: 0, priority: 'high' });
+      // Canal de teclado: ordenado y fiable, prioridad alta — los eventos de tecla llegan en orden
+      _dc_kbd   = _pc.createDataChannel('vigia-input', { ordered: true, priority: 'high' });
+      _dc_mouse.onopen  = () => console.log('[WebRTC] DataChannel ratón abierto');
+      _dc_mouse.onclose = () => console.log('[WebRTC] DataChannel ratón cerrado');
+      _dc_kbd.onopen    = () => console.log('[WebRTC] DataChannel teclado abierto');
+      _dc_kbd.onclose   = () => console.log('[WebRTC] DataChannel teclado cerrado');
     }
 
     _pc.ontrack = (ev) => {
@@ -1562,11 +1566,14 @@ async function _iniciarWebRTC(sid, mode) {
       const vid = document.getElementById('liveview-video');
       vid.srcObject = ev.streams[0];
       vid.onloadedmetadata = () => {
-        // NO usar getSettings().width: es la resolución del stream, no la de la pantalla real.
-        // La resolución real llega por el evento screen_info enviado por el cliente.
-        const s = ev.streams[0].getVideoTracks()[0].getSettings();
-        _liveOrigW = s.width  || _liveOrigW;
-        _liveOrigH = s.height || _liveOrigH;
+        // La resolución real de la pantalla llega por screen_info (Socket.IO) y es la que
+        // se usa para mapear coordenadas. Solo usar dimensiones del stream como último
+        // recurso si screen_info aún no ha llegado (valores por defecto 1280×720).
+        if (_liveOrigW === 1280 && _liveOrigH === 720) {
+          const s = ev.streams[0].getVideoTracks()[0].getSettings();
+          if (s.width)  _liveOrigW = s.width;
+          if (s.height) _liveOrigH = s.height;
+        }
       };
       vid.style.display = 'block';
       document.getElementById('liveview-img').style.display = 'none';
@@ -1585,8 +1592,11 @@ async function _iniciarWebRTC(sid, mode) {
     };
 
     _pc.oniceconnectionstatechange = () => {
-      if (['failed','disconnected'].includes(_pc?.iceConnectionState))
-        _fallbackJPEG('ICE ' + _pc.iceConnectionState);
+      const state = _pc?.iceConnectionState;
+      if (['failed','disconnected'].includes(state)) {
+        _webrtcActivo = false;  // permitir que _fallbackJPEG actúe aunque el vídeo estuviera activo
+        _fallbackJPEG('ICE ' + state);
+      }
     };
 
     const offer = await _pc.createOffer({ offerToReceiveVideo:true, offerToReceiveAudio:false });
@@ -1620,7 +1630,7 @@ function _fallbackJPEG(razon) {
   document.getElementById('liveview-img').style.display = 'block';
   document.getElementById('liveview-transport').textContent = 'JPEG';
   document.getElementById('liveview-transport').style.color = 'var(--muted)';
-  if (_pc) { _pc.close(); _pc = null; _dc = null; }
+  if (_pc) { _pc.close(); _pc = null; _dc_mouse = null; _dc_kbd = null; }
   // Resetear el estado WebRTC del cliente: si su ICE llegó a "connected"
   // pero el dashboard no recibió video, el cliente dejó de enviar JPEG.
   // stop_view → viewer_stop en cliente (_webrtc_activo=False, cierra PC)

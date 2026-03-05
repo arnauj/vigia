@@ -52,7 +52,12 @@ vigia-launcher.py   Native window launcher (teacher side).
 templates/dashboard.html
                     Single-page app: JS vanilla + Socket.IO 4.x + Bootstrap 5 (CDN).
                     No build step. Edit the file directly.
-                    WebRTC via RTCPeerConnection + DataChannel 'vigia-input'.
+                    WebRTC via RTCPeerConnection + two DataChannels (priority:'high'):
+                      'vigia-mouse' (ordered:false, maxRetransmits:0) — mouse events (UDP-like)
+                      'vigia-input' (ordered:true) — keyboard events (reliable, ordered)
+                    _enviarInput() routes mouse→vigia-mouse, keyboard→vigia-input,
+                    falls back to Socket.IO if channels are not open.
+                    Screen resolution comes from screen_info event (not from stream settings).
 
 client.py           Socket.IO client + mss capture + Tkinter (floating windows).
                     Unified daemon thread `bucle_capturas` for screenshots.
@@ -68,6 +73,13 @@ instalar_cliente.sh
                     creates ~/.config/autostart/vigia-alumno.desktop,
                     starts client immediately without waiting for reboot.
 
+test_remote_control.py
+                    unittest suite (39 tests) for remote control logic.
+                    Run: python3 test_remote_control.py  (no server or X11 required)
+                    Covers: xdotool key maps, _procesar_input (mouse + keyboard),
+                    input queue routing, coordinate translation (letterbox/pillarbox),
+                    DataChannel dispatch logic.
+
 build_debs.sh       Builds vigia-server_1.1_amd64.deb and vigia-client_1.1_all.deb.
                     Server postinst: pip deps + /usr/share/applications desktop + systemd service.
                     Client postinst: debconf for server IP + pip deps + desktop + XDG autostart.
@@ -77,7 +89,7 @@ build_debs.sh       Builds vigia-server_1.1_amd64.deb and vigia-client_1.1_all.d
 
 - **No database.** All state lives in `students` and `viewers` dicts in `server.py`. Restarting the server clears all connected clients.
 - **JPEG over Socket.IO is the fallback.** Frames are base64-encoded (max 8 MB). WebRTC P2P (H.264/VP9 over UDP) is used when `python3-aiortc` is installed on the client.
-- **WebRTC fallback timeout:** 8 seconds. If ICE does not connect, the viewer switches automatically to JPEG mode.
+- **WebRTC fallback timeout:** 4 seconds (dashboard side). If ICE does not connect, or if the P2P video track is established but ICE later drops, `_fallbackJPEG` resets `_webrtcActivo` and switches back to JPEG.
 - **Chrome --app is the preferred UI.** It supports `getDisplayMedia()` natively and avoids GPU/KWin conflicts. An isolated temporary profile is used so it does not interfere with the user's Chrome.
 - **WebKit2GTK GPU must be disabled** (`WEBKIT_DISABLE_DMABUF_RENDERER=1`, `WEBKIT_DISABLE_COMPOSITING_MODE=1`, `LIBGL_ALWAYS_SOFTWARE=1`) before initializing GTK; otherwise KWin/KDE deadlocks the compositor causing a black screen.
 - **`instalar_servidor.sh` always uses `vigia-launcher.py`**, never the Tauri binary, even if it exists.
