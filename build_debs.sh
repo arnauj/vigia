@@ -286,9 +286,9 @@ chmod 755 "$CLIENT_BUILD_DIR/DEBIAN/postinst"
 
 cat > "$CLIENT_BUILD_DIR/DEBIAN/prerm" <<'EOF'
 #!/bin/bash
-# Matar todas las instancias del cliente (cualquier usuario)
+# Matar instancias del cliente por ruta exacta (evitar matar a dpkg mismo)
+pkill -f "/opt/vigia-client/client\.py" 2>/dev/null || true
 pkill -f "python.*client\.py" 2>/dev/null || true
-pkill -f "vigia-client" 2>/dev/null || true
 rm -f /etc/xdg/autostart/vigia-alumno.desktop 2>/dev/null || true
 rm -f /usr/share/applications/vigia-client.desktop 2>/dev/null || true
 rm -f /usr/local/bin/vigia-client 2>/dev/null || true
