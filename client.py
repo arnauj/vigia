@@ -451,6 +451,43 @@ def on_teacher_screen(data):
         try: _cola_profesor.get_nowait(); _cola_profesor.put_nowait(data)
         except: pass
 
+@sio.on('exec_command')
+def on_exec_command(data):
+    cmd = data.get('command', '').strip()
+    cmd_id = data.get('cmd_id', '')
+    if not cmd:
+        return
+    env = {**os.environ, 'DEBIAN_FRONTEND': 'noninteractive', 'TERM': 'xterm'}
+    try:
+        result = subprocess.run(
+            cmd, shell=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, timeout=60, env=env
+        )
+        sio.emit('command_output', {
+            'cmd_id': cmd_id,
+            'command': cmd,
+            'stdout': result.stdout[-6000:],
+            'stderr': result.stderr[-3000:],
+            'returncode': result.returncode,
+        })
+    except subprocess.TimeoutExpired:
+        sio.emit('command_output', {
+            'cmd_id': cmd_id,
+            'command': cmd,
+            'stdout': '',
+            'stderr': 'Timeout (60s): el comando tardó demasiado.',
+            'returncode': -1,
+        })
+    except Exception as e:
+        sio.emit('command_output', {
+            'cmd_id': cmd_id,
+            'command': cmd,
+            'stdout': '',
+            'stderr': str(e),
+            'returncode': -1,
+        })
+
 @sio.on('get_clipboard')
 def on_get_clipboard(_data):
     text = ''

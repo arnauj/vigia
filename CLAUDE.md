@@ -195,3 +195,23 @@ El servidor se instala en `/opt/vigia-server/`. El cliente en `/opt/vigia-client
 `postinst` del cliente usa debconf para preguntar la IP, crea autostart XDG y arranca el cliente.
 `prerm` del servidor para y deshabilita el servicio systemd.
 `prerm` del cliente mata el proceso y elimina el autostart.
+
+## REGLA OBLIGATORIA: regenerar los .deb tras cada cambio
+
+**Cada vez que se modifique cualquier archivo del proyecto, es OBLIGATORIO regenerar los paquetes `.deb` afectados en `./dist/` ejecutando:**
+
+```bash
+bash build_debs.sh
+```
+
+Esto garantiza que `dist/vigia-server_1.1_amd64.deb` y `dist/vigia-client_1.1_all.deb` estén siempre sincronizados con el código fuente.
+
+### Qué cambios afectan a qué paquete
+
+| Archivo/componente modificado | Paquete a regenerar |
+|---|---|
+| `server.py`, `vigia-launcher.py`, `templates/`, `instalar_servidor.sh`, `img/` | `vigia-server_1.1_amd64.deb` |
+| `client.py`, `instalar_cliente.sh` | `vigia-client_1.1_all.deb` |
+| Cualquier archivo compartido o cambio global | **Ambos** paquetes |
+
+> Nunca entregar ni documentar un cambio sin haber ejecutado `bash build_debs.sh` y verificado que los `.deb` de `dist/` se han actualizado correctamente.

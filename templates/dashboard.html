@@ -707,6 +707,181 @@
     }
     .attach-chip-remove:hover { color: var(--red); }
 
+    /* ── Terminal remoto ── */
+    #terminal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.82); z-index: 750;
+      align-items: center; justify-content: center;
+    }
+    #terminal-overlay.show { display: flex; }
+    #terminal-box {
+      background: var(--card-bg); border: 1px solid var(--card-border);
+      border-radius: 12px; width: min(820px, 96vw);
+      max-height: 88vh; display: flex; flex-direction: column;
+      box-shadow: 0 8px 40px rgba(0,0,0,.6); overflow: hidden;
+    }
+    #terminal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 13px 18px; border-bottom: 1px solid var(--card-border);
+      font-weight: 700; font-size: 1rem; flex-shrink: 0;
+    }
+    #terminal-header button {
+      background: none; border: none; color: var(--muted);
+      font-size: 1.4rem; cursor: pointer; line-height: 1; transition: color .15s;
+    }
+    #terminal-header button:hover { color: var(--text); }
+    #terminal-para-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 18px; border-bottom: 1px solid var(--card-border);
+      font-size: 0.88rem; flex-shrink: 0;
+    }
+    #terminal-para { color: var(--accent); font-weight: 600; }
+    #terminal-input-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 18px; border-bottom: 1px solid var(--card-border);
+      flex-shrink: 0; background: #0a0c14;
+    }
+    #terminal-prompt { color: var(--green); font-family: monospace; font-size: 1rem; }
+    #terminal-cmd {
+      flex: 1; background: transparent; border: none;
+      color: #e2e8f0;
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace;
+      font-size: 0.92rem; outline: none;
+    }
+    #terminal-cmd::placeholder { color: var(--muted); }
+    #terminal-output-wrap {
+      flex: 1; min-height: 120px; max-height: 420px; overflow-y: auto;
+      background: #080a10;
+    }
+    .term-result {
+      border-bottom: 1px solid #141620;
+      padding: 8px 18px 10px;
+    }
+    .term-result-header {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 3px;
+    }
+    .term-result-name {
+      color: var(--accent); font-weight: 600;
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace;
+      font-size: 0.82rem;
+    }
+    .term-badge-run { background: #1a1f30; color: var(--muted); border: 1px solid #444; border-radius: 4px; padding: 1px 7px; font-size: 0.70rem; }
+    .term-badge-ok  { background: #1a3320; color: var(--green); border: 1px solid var(--green); border-radius: 4px; padding: 1px 7px; font-size: 0.70rem; }
+    .term-badge-err { background: #2d1a1a; color: var(--red);   border: 1px solid var(--red);   border-radius: 4px; padding: 1px 7px; font-size: 0.70rem; }
+    .term-stdout, .term-stderr {
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace;
+      font-size: 0.78rem; line-height: 1.5;
+      white-space: pre-wrap; word-break: break-all;
+    }
+    .term-stdout { color: #a8c898; }
+    .term-stderr { color: #e07070; }
+    .term-empty {
+      color: var(--muted); font-size: 0.82rem;
+      padding: 28px 18px; text-align: center;
+    }
+    #terminal-footer {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 18px; border-top: 1px solid var(--card-border); flex-shrink: 0;
+    }
+    .term-exec-btn {
+      background: var(--green); color: #071507; border: none;
+      border-radius: 8px; padding: 7px 22px; font-size: 0.87rem;
+      font-weight: 700; cursor: pointer; transition: background .15s;
+    }
+    .term-exec-btn:hover { background: #38a060; }
+    .term-cancel-btn {
+      background: none; border: 1px solid var(--card-border); color: var(--muted);
+      border-radius: 8px; padding: 7px 16px; font-size: 0.87rem;
+      cursor: pointer; transition: border-color .15s, color .15s;
+    }
+    .term-cancel-btn:hover { border-color: var(--text); color: var(--text); }
+    .term-clear-btn {
+      background: none; border: 1px solid var(--card-border); color: var(--muted);
+      border-radius: 7px; padding: 4px 12px; font-size: 0.80rem;
+      cursor: pointer; transition: border-color .15s, color .15s;
+    }
+    .term-clear-btn:hover { border-color: var(--red); color: var(--red); }
+    .term-ind-btn {
+      background: none; border: 1px solid var(--card-border);
+      border-radius: 6px; color: var(--muted); cursor: pointer;
+      padding: 3px 7px; font-size: 0.8rem; line-height: 1.3;
+      flex-shrink: 0; transition: border-color .15s, color .15s;
+    }
+    .term-ind-btn:hover { border-color: var(--green); color: var(--green); }
+    #btn-terminal {
+      background: none; border: 1px solid var(--card-border); color: var(--muted);
+      border-radius: 8px; padding: 6px 14px; font-size: 0.85rem; cursor: pointer;
+      transition: border-color .15s, color .15s; white-space: nowrap;
+    }
+    #btn-terminal:hover { border-color: var(--green); color: var(--green); }
+
+    /* ── Selección múltiple ── */
+    .student-card.selected {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(79,142,247,.35);
+    }
+    .card-select-check {
+      position: absolute;
+      top: 6px; right: 6px;
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      font-size: 0.72rem;
+      font-weight: 700;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 5;
+      pointer-events: none;
+    }
+    .student-card.selected .card-select-check { display: flex; }
+
+    #selection-bar {
+      display: none;
+      padding: 8px 20px;
+      background: #151a30;
+      border-bottom: 1px solid var(--accent);
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      font-size: 0.85rem;
+    }
+    #selection-bar.show { display: flex; }
+    #sel-count { color: var(--accent); font-weight: 600; min-width: 160px; }
+    .sel-btn {
+      background: none;
+      border: 1px solid var(--card-border);
+      color: var(--muted);
+      border-radius: 7px;
+      padding: 5px 12px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: border-color .15s, color .15s, background .15s;
+      white-space: nowrap;
+    }
+    .sel-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .sel-btn.primary {
+      background: var(--accent); color: #fff; border-color: var(--accent);
+    }
+    .sel-btn.primary:hover { background: #3a7de0; border-color: #3a7de0; }
+    .sel-btn.cancel { margin-left: auto; }
+    .sel-btn.cancel:hover { border-color: var(--red); color: var(--red); }
+
+    #btn-select-mode {
+      background: none;
+      border: 1px solid var(--card-border);
+      color: var(--muted);
+      border-radius: 8px;
+      padding: 6px 14px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: border-color .15s, color .15s, background .15s;
+      white-space: nowrap;
+    }
+    #btn-select-mode:hover { border-color: var(--accent); color: var(--accent); }
+    #btn-select-mode.active { background: #1a2340; border-color: var(--accent); color: var(--accent); }
+
     /* Preview miniatura de lo que se comparte */
     #share-preview {
       display: none;
@@ -738,12 +913,25 @@
     <input type="range" id="size-slider" min="180" max="520" value="280" step="20" />
   </label>
   <input type="text" id="search-input" placeholder="🔍 Buscar alumno…" />
+  <button id="btn-select-mode" onclick="toggleSelectionMode()">☑ Seleccionar</button>
+  <button id="btn-terminal" onclick="abrirTerminal()">⌨ Terminal</button>
   <button id="btn-compartir" onclick="toggleCompartir()">📺 Compartir mi pantalla</button>
   <button id="btn-cerrar-todos" onclick="quitAll()"
           style="background:none;border:1px solid var(--card-border);color:var(--muted);border-radius:8px;padding:6px 14px;font-size:0.85rem;cursor:pointer;transition:border-color .15s,color .15s"
           onmouseover="this.style.borderColor='#fc8181';this.style.color='#fc8181'"
           onmouseout="this.style.borderColor='var(--card-border)';this.style.color='var(--muted)'">⏻ Cerrar todos</button>
   <img id="share-preview" alt="Previsualización" title="Lo que ven los alumnos" />
+</div>
+
+<!-- ── Barra de selección múltiple ── -->
+<div id="selection-bar">
+  <span id="sel-count">Ningún alumno seleccionado</span>
+  <button class="sel-btn" onclick="seleccionarTodos()">Seleccionar todos</button>
+  <button class="sel-btn" onclick="deseleccionarTodos()">Ninguno</button>
+  <button class="sel-btn primary" onclick="abrirComposeSeleccion()">✉ Mensaje a seleccionados</button>
+  <button class="sel-btn primary" onclick="compartirConSeleccionados()">📺 Compartir con seleccionados</button>
+  <button class="sel-btn primary" onclick="abrirTerminalSeleccion()" style="background:#1a3320;border-color:var(--green);color:var(--green)">⌨ Comando a seleccionados</button>
+  <button class="sel-btn cancel" onclick="cancelarSeleccion()">✕ Cancelar selección</button>
 </div>
 
 <!-- ── Barra de mensajes ── -->
@@ -786,6 +974,9 @@ function escHtml(s) {
 // ── Estado ────────────────────────────────────────────────────────────────
 const students = {};  // sid → {name, ip, image, last_seen, connected_at}
 let modalSid = null;
+let _selectionMode = false;
+const _selectedSids = new Set();
+let _shareSids = null;  // null = todos, Set = solo seleccionados
 
 // ── Socket.IO ─────────────────────────────────────────────────────────────
 const socket = io({ transports: ['websocket'] });
@@ -832,6 +1023,8 @@ socket.on('student_connected', (data) => {
 socket.on('student_disconnected', (data) => {
   const name = students[data.sid]?.name || 'Alumno';
   delete students[data.sid];
+  _selectedSids.delete(data.sid);
+  if (_selectionMode) updateSelectionBar();
   removeCard(data.sid);
   updateCount();
   toggleEmpty();
@@ -872,11 +1065,15 @@ function renderCard(sid) {
       <div class="lock-overlay" id="lock-overlay-${sid}">
         <span class="lock-icon">🔒</span>BLOQUEADO
       </div>
+      <div class="card-select-check">✓</div>
     </div>
     <div class="card-info">
       <button class="msg-ind-btn"
               title="Enviar mensaje a este alumno"
               onclick="event.stopPropagation(); abrirMsgInd('${sid}')">✉</button>
+      <button class="term-ind-btn"
+              title="Ejecutar comando en este alumno"
+              onclick="event.stopPropagation(); abrirTerminal('${sid}')">⌨</button>
       <button class="view-btn"
               title="Ver pantalla en directo (solo ver)"
               onclick="event.stopPropagation(); abrirLiveView('${sid}','view')">👁</button>
@@ -890,7 +1087,10 @@ function renderCard(sid) {
               title="Cerrar aplicación del alumno"
               onclick="event.stopPropagation(); quitStudent('${sid}')">⏻</button>
     </div>`;
-  div.addEventListener('click', () => openModal(sid));
+  div.addEventListener('click', () => {
+    if (_selectionMode) { toggleSelectCard(sid); return; }
+    openModal(sid);
+  });
   document.getElementById('grid').appendChild(div);
 
   if (s.image) updateCardImage(sid, s.image, s.last_seen);
@@ -927,6 +1127,88 @@ function toggleEmpty() {
   document.getElementById('empty-msg').style.display = empty ? 'block' : 'none';
 }
 
+// ── Selección múltiple ────────────────────────────────────────────────────
+function toggleSelectionMode() {
+  _selectionMode = !_selectionMode;
+  const btn = document.getElementById('btn-select-mode');
+  const bar = document.getElementById('selection-bar');
+  if (_selectionMode) {
+    btn.classList.add('active');
+    btn.textContent = '✓ Seleccionando';
+    bar.classList.add('show');
+    updateSelectionBar();
+  } else {
+    btn.classList.remove('active');
+    btn.textContent = '☑ Seleccionar';
+    bar.classList.remove('show');
+    clearSelection();
+  }
+}
+
+function toggleSelectCard(sid) {
+  if (_selectedSids.has(sid)) {
+    _selectedSids.delete(sid);
+    document.getElementById(`card-${sid}`)?.classList.remove('selected');
+  } else {
+    _selectedSids.add(sid);
+    document.getElementById(`card-${sid}`)?.classList.add('selected');
+  }
+  updateSelectionBar();
+}
+
+function updateSelectionBar() {
+  const n = _selectedSids.size;
+  document.getElementById('sel-count').textContent =
+    n === 0 ? 'Ningún alumno seleccionado'
+            : `${n} alumno${n !== 1 ? 's' : ''} seleccionado${n !== 1 ? 's' : ''}`;
+}
+
+function seleccionarTodos() {
+  document.querySelectorAll('.student-card').forEach(card => {
+    if (card.style.display === 'none') return;
+    const sid = card.id.replace('card-', '');
+    _selectedSids.add(sid);
+    card.classList.add('selected');
+  });
+  updateSelectionBar();
+}
+
+function deseleccionarTodos() {
+  _selectedSids.forEach(sid => {
+    document.getElementById(`card-${sid}`)?.classList.remove('selected');
+  });
+  _selectedSids.clear();
+  updateSelectionBar();
+}
+
+function clearSelection() {
+  _selectedSids.forEach(sid => {
+    document.getElementById(`card-${sid}`)?.classList.remove('selected');
+  });
+  _selectedSids.clear();
+}
+
+function cancelarSeleccion() {
+  _selectionMode = false;
+  const btn = document.getElementById('btn-select-mode');
+  btn.classList.remove('active');
+  btn.textContent = '☑ Seleccionar';
+  document.getElementById('selection-bar').classList.remove('show');
+  clearSelection();
+}
+
+function abrirComposeSeleccion() {
+  if (_selectedSids.size === 0) { toast('No hay alumnos seleccionados.', ''); return; }
+  abrirCompose([..._selectedSids]);
+}
+
+function compartirConSeleccionados() {
+  if (_selectedSids.size === 0) { toast('No hay alumnos seleccionados.', ''); return; }
+  if (_sharing) { detenerCompartir(); return; }
+  _shareSids = new Set(_selectedSids);
+  toggleCompartir();
+}
+
 // ── Modal ─────────────────────────────────────────────────────────────────
 function openModal(sid) {
   modalSid = sid;
@@ -960,6 +1242,8 @@ document.addEventListener('keydown', (e) => {
       cerrarPortapapeles();
     } else if (document.getElementById('link-overlay').classList.contains('show')) {
       cerrarLink();
+    } else if (document.getElementById('terminal-overlay').classList.contains('show')) {
+      cerrarTerminal();
     } else if (document.getElementById('compose-overlay').classList.contains('show')) {
       cerrarCompose();
     } else if (document.getElementById('modal-overlay').classList.contains('show')) {
@@ -1018,13 +1302,22 @@ let _composeSid   = null;   // null = todos los alumnos
 let _composeFiles = [];     // [{name, type, size, data (base64 sin prefijo)}]
 
 function abrirCompose(sid = null) {
-  _composeSid = sid || null;
+  _composeSid = sid;  // null | string | string[]
   _composeFiles = [];
   _renderFileList();
   // Salir de modo fuente si estaba activo
   if (typeof _sourceMode !== 'undefined' && _sourceMode) toggleSource();
-  document.getElementById('compose-para').textContent =
-    sid ? (students[sid]?.name || sid) : 'Todos los alumnos';
+  let paraText;
+  if (sid === null) {
+    paraText = 'Todos los alumnos';
+  } else if (Array.isArray(sid)) {
+    paraText = sid.length <= 3
+      ? sid.map(s => students[s]?.name || s).join(', ')
+      : `${sid.length} alumnos seleccionados`;
+  } else {
+    paraText = students[sid]?.name || sid;
+  }
+  document.getElementById('compose-para').textContent = paraText;
   document.getElementById('compose-titulo').value = 'Mensaje del profesor';
   document.getElementById('compose-body').innerHTML = '';
   document.getElementById('compose-overlay').classList.add('show');
@@ -1051,7 +1344,10 @@ function enviarCompose() {
     document.getElementById('compose-body').focus();
     return;
   }
-  if (_composeSid) {
+  if (Array.isArray(_composeSid)) {
+    socket.emit('send_message_to_many', { sids: _composeSid, title: titulo, body, attachments });
+    toast(`✉ Mensaje enviado a ${_composeSid.length} alumno(s)`, 'connect');
+  } else if (_composeSid) {
     socket.emit('send_message_to', { sid: _composeSid, title: titulo, body, attachments });
     toast(`✉ Mensaje enviado a ${students[_composeSid]?.name || _composeSid}`, 'connect');
   } else {
@@ -1594,6 +1890,7 @@ function cerrarScreenModal() {
 
 function _iniciarCapturaServidor(params) {
   _sharing = true;
+  if (_shareSids) params.sids = [..._shareSids];
   socket.emit('start_teacher_capture', params);
   _actualizarBoton(true);
 }
@@ -1614,7 +1911,9 @@ function _loopCompartir() {
     _shareCanvas.height = Math.round(_shareCanvas.width * vh / vw);
     _shareCtx.drawImage(_shareVideo, 0, 0, _shareCanvas.width, _shareCanvas.height);
     const img = _shareCanvas.toDataURL('image/jpeg', CALIDAD_SHARE);
-    socket.emit('teacher_screenshot', { image: img, activa: true });
+    const _sharePayload = { image: img, activa: true };
+    if (_shareSids) _sharePayload.sids = [..._shareSids];
+    socket.emit('teacher_screenshot', _sharePayload);
     const prev = document.getElementById('share-preview');
     prev.src = img;
     if (!prev.classList.contains('show')) prev.classList.add('show');
@@ -1624,6 +1923,7 @@ function _loopCompartir() {
 
 function detenerCompartir() {
   _sharing = false; _shareRunning = false;
+  _shareSids = null;
   clearTimeout(_shareTimeout);
   if (_shareStream) {
     _shareStream.getTracks().forEach(t => t.stop());
@@ -1709,6 +2009,97 @@ async function _addFiles(fileList) {
 }
 
 // Los listeners de adjuntos se registran en DOMContentLoaded (elementos definidos tras este script)
+
+// ── Terminal remoto ───────────────────────────────────────────────────────
+let _termTarget = null;  // null = todos | string = sid individual | string[] = selección
+
+function abrirTerminal(target = null) {
+  _termTarget = target;
+  let paraText;
+  if (target === null) {
+    paraText = 'Todos los alumnos';
+  } else if (Array.isArray(target)) {
+    paraText = target.length <= 3
+      ? target.map(s => students[s]?.name || s).join(', ')
+      : `${target.length} alumnos seleccionados`;
+  } else {
+    paraText = students[target]?.name || target;
+  }
+  document.getElementById('terminal-para').textContent = paraText;
+  document.getElementById('terminal-overlay').classList.add('show');
+  setTimeout(() => document.getElementById('terminal-cmd').focus(), 60);
+}
+
+function abrirTerminalSeleccion() {
+  if (_selectedSids.size === 0) { toast('No hay alumnos seleccionados.', ''); return; }
+  abrirTerminal([..._selectedSids]);
+}
+
+function cerrarTerminal() {
+  document.getElementById('terminal-overlay').classList.remove('show');
+}
+
+function limpiarTerminal() {
+  document.getElementById('terminal-output-wrap').innerHTML =
+    '<div class="term-empty" id="terminal-empty">Ejecuta un comando para ver la salida aquí.</div>';
+}
+
+function ejecutarComando() {
+  const cmd = document.getElementById('terminal-cmd').value.trim();
+  if (!cmd) { document.getElementById('terminal-cmd').focus(); return; }
+
+  let sids;
+  if (_termTarget === null) {
+    sids = Object.keys(students);
+  } else if (Array.isArray(_termTarget)) {
+    sids = _termTarget.filter(s => students[s]);
+  } else {
+    sids = students[_termTarget] ? [_termTarget] : [];
+  }
+  if (sids.length === 0) { toast('No hay alumnos disponibles.', ''); return; }
+
+  const cmdId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const wrap  = document.getElementById('terminal-output-wrap');
+  const empty = document.getElementById('terminal-empty');
+  if (empty) empty.remove();
+
+  sids.forEach(sid => {
+    const name = students[sid]?.name || sid;
+    const el = document.createElement('div');
+    el.className = 'term-result';
+    el.id = `term-result-${cmdId}-${sid}`;
+    el.innerHTML =
+      `<div class="term-result-header">` +
+        `<span class="term-result-name">${escHtml(name)}</span>` +
+        `<span class="term-badge-run" id="term-badge-${cmdId}-${sid}">⏳ ejecutando</span>` +
+      `</div>` +
+      `<div class="term-stdout" id="term-out-${cmdId}-${sid}"></div>` +
+      `<div class="term-stderr" id="term-err-${cmdId}-${sid}"></div>`;
+    wrap.appendChild(el);
+  });
+  wrap.scrollTop = wrap.scrollHeight;
+
+  socket.emit('run_command', { sids, command: cmd, cmd_id: cmdId });
+  document.getElementById('terminal-cmd').value = '';
+  document.getElementById('terminal-cmd').focus();
+  toast(`⌨ Comando enviado a ${sids.length} equipo(s)`, 'connect');
+}
+
+socket.on('command_result', (data) => {
+  const { cmd_id, sid, stdout, stderr, returncode } = data;
+  const outEl   = document.getElementById(`term-out-${cmd_id}-${sid}`);
+  const errEl   = document.getElementById(`term-err-${cmd_id}-${sid}`);
+  const badgeEl = document.getElementById(`term-badge-${cmd_id}-${sid}`);
+  if (!outEl) return;  // resultado de un comando ya limpiado o anterior
+  if (badgeEl) {
+    badgeEl.className = returncode === 0 ? 'term-badge-ok' : 'term-badge-err';
+    badgeEl.textContent = returncode === 0 ? `✓ ${returncode}` : `✗ ${returncode}`;
+  }
+  if (stdout) outEl.textContent = stdout;
+  if (stderr) errEl.textContent = stderr;
+  const wrap = document.getElementById('terminal-output-wrap');
+  if (wrap) wrap.scrollTop = wrap.scrollHeight;
+});
 </script>
 
 <!-- ── Modal redactar mensaje ── -->
@@ -1798,6 +2189,36 @@ async function _addFiles(fileList) {
     <h3>📺 Selecciona qué compartir</h3>
     <div id="screen-list"><!-- se rellena dinámicamente --></div>
     <button id="screen-cancel" onclick="cerrarScreenModal()">Cancelar</button>
+  </div>
+</div>
+
+<!-- ── Modal terminal remoto ── -->
+<div id="terminal-overlay">
+  <div id="terminal-box">
+    <div id="terminal-header">
+      <span>⌨ Terminal remoto</span>
+      <button onclick="cerrarTerminal()" title="Cerrar (Esc)">✕</button>
+    </div>
+    <div id="terminal-para-row">
+      <span style="color:var(--muted);min-width:52px;font-size:0.88rem">Para:</span>
+      <span id="terminal-para">Todos los alumnos</span>
+    </div>
+    <div id="terminal-input-row">
+      <span id="terminal-prompt">$</span>
+      <input id="terminal-cmd" type="text" spellcheck="false"
+             placeholder="sudo apt install -y paquete  →  Enter para ejecutar"
+             onkeydown="if(event.key==='Enter')ejecutarComando()" />
+    </div>
+    <div id="terminal-output-wrap">
+      <div class="term-empty" id="terminal-empty">Ejecuta un comando para ver la salida aquí.</div>
+    </div>
+    <div id="terminal-footer">
+      <button class="term-clear-btn" onclick="limpiarTerminal()">🗑 Limpiar salida</button>
+      <div style="display:flex;gap:8px">
+        <button class="term-cancel-btn" onclick="cerrarTerminal()">Cerrar</button>
+        <button class="term-exec-btn"   onclick="ejecutarComando()">▶ Ejecutar</button>
+      </div>
+    </div>
   </div>
 </div>
 

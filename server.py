@@ -43,7 +43,7 @@ students = {}
 viewers: dict = {}
 
 # Estado de compartir pantalla del profesor
-_teacher_capture = {'running': False, 'sid': None}
+_teacher_capture = {'running': False, 'sid': None, 'sids': None}
 
 
 def get_local_ip():
@@ -320,7 +320,12 @@ def _teacher_capture_loop():
                 buf = io.BytesIO()
                 img.save(buf, 'JPEG', quality=70)
                 data_uri = 'data:image/jpeg;base64,' + base64.b64encode(buf.getvalue()).decode()
-                socketio.emit('teacher_screen', {'activa': True, 'image': data_uri}, broadcast=True)
+                _sids = _teacher_capture.get('sids')
+                if _sids:
+                    for _sid in _sids:
+                        socketio.emit('teacher_screen', {'activa': True, 'image': data_uri}, to=_sid)
+                else:
+                    socketio.emit('teacher_screen', {'activa': True, 'image': data_uri}, broadcast=True)
                 socketio.emit('teacher_screen_preview', {'image': data_uri}, to=_teacher_capture['sid'])
             except Exception as e:
                 print(f'[!] Error capturando pantalla del profesor: {e}')
@@ -505,6 +510,7 @@ def on_start_teacher_capture(data=None):
     _teacher_capture['type'] = data.get('type', 'monitor')
     _teacher_capture['monitor'] = data.get('monitor', 1)
     _teacher_capture['wid'] = data.get('wid')
+    _teacher_capture['sids'] = data.get('sids') or None  # lista de sids destino (None = todos)
     _teacher_capture['running'] = True
     # start_background_task crea un green thread de eventlet (no un hilo OS),
     # garantizando que socketio.emit(broadcast=True) llegue a todos los clientes.
@@ -523,7 +529,63 @@ def on_stop_teacher_capture():
 def on_teacher_screenshot(data):
     activa = data.get('activa', True)
     payload = {'activa': activa, 'image': data.get('image') if activa else None}
-    emit('teacher_screen', payload, broadcast=True)
+    sids = data.get('sids')
+    if sids:
+        for sid in sids:
+            socketio.emit('teacher_screen', payload, to=sid)
+    else:
+        emit('teacher_screen', payload, broadcast=True)
+
+
+@socketio.on('run_command')
+def on_run_command(data):
+    sids = data.get('sids', [])
+    cmd = data.get('command', '').strip()
+    cmd_id = data.get('cmd_id', '')
+    if not cmd or not sids:
+        return
+    payload = {'command': cmd, 'cmd_id': cmd_id}
+    sent = 0
+    for sid in sids:
+        if sid in students:
+            socketio.emit('exec_command', payload, to=sid)
+            sent += 1
+    print(f"[>_] Comando enviado a {sent} cliente(s): {cmd[:80]}")
+
+
+@socketio.on('command_output')
+def on_command_output(data):
+    sid = request.sid
+    if sid not in students:
+        return
+    emit('command_result', {
+        'sid': sid,
+        'name': students[sid]['name'],
+        'cmd_id': data.get('cmd_id', ''),
+        'command': data.get('command', ''),
+        'stdout': data.get('stdout', ''),
+        'stderr': data.get('stderr', ''),
+        'returncode': data.get('returncode', -1),
+    }, broadcast=True)
+
+
+@socketio.on('send_message_to_many')
+def on_send_message_to_many(data):
+    sids = data.get('sids', [])
+    payload = {
+        'title': data.get('title', 'Mensaje'),
+        'body': data.get('body', '').strip(),
+        'attachments': data.get('attachments', []),
+    }
+    if not (payload['body'] or payload['attachments']):
+        return
+    n_sent = 0
+    for sid in sids:
+        if sid in students:
+            socketio.emit('show_message', payload, to=sid)
+            n_sent += 1
+    n = len(payload['attachments'])
+    print(f"[*] Mensaje enviado a {n_sent} alumno(s) seleccionados: {payload['title']}" + (f" ({n} adjunto(s))" if n else ""))
 
 
 @socketio.on('start_view')

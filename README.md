@@ -5,6 +5,19 @@ Software de monitoreo de aula para ver en tiempo real las pantallas de los alumn
 
 ---
 
+## Descargas
+
+Los paquetes `.deb` listos para instalar están en la carpeta `dist/` de este repositorio:
+
+| Paquete | Destinatario | Archivo |
+|---|---|---|
+| **VIGIA Servidor** | Equipo del profesor | [`dist/vigia-server_1.1_amd64.deb`](dist/vigia-server_1.1_amd64.deb) |
+| **VIGIA Cliente** | Equipos de los alumnos | [`dist/vigia-client_1.1_all.deb`](dist/vigia-client_1.1_all.deb) |
+
+> Los paquetes se regeneran automáticamente con `bash build_debs.sh` cada vez que se actualiza el código fuente.
+
+---
+
 ## Instalación rápida
 
 VIGIA se distribuye en dos paquetes `.deb` separados: uno para el profesor y otro para los alumnos.
@@ -25,7 +38,7 @@ sudo apt install ./vigia-client_1.1_all.deb
 
 Durante la instalación **se pedirá la IP del servidor** (por defecto se sugiere `x.x.x.2` detectada automáticamente). El cliente arranca solo al iniciar sesión (XDG autostart).
 
-> Los paquetes `.deb` están en la carpeta `dist/` del repositorio o en los [releases de GitHub](#).
+> Los paquetes `.deb` están en la carpeta [`dist/`](dist/) del repositorio. Consulta la sección [Descargas](#descargas) al inicio de este documento.
 
 ---
 

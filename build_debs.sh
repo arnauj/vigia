@@ -210,7 +210,7 @@ PYTHON3="$(command -v python3 || echo python3)"
 
 chmod +x "$VIGIA_DIR"/*.py 2>/dev/null || true
 
-# ── Guardar IP del servidor ───────────────────────────────────
+# ── Guardar IP del servidor (config global) ───────────────────
 mkdir -p /etc/vigia
 echo "$SERVER_IP" > /etc/vigia/client.conf
 
@@ -218,45 +218,66 @@ echo "$SERVER_IP" > /etc/vigia/client.conf
 echo "Instalando dependencias Python del cliente..."
 pip3 install --break-system-packages mss pynput "python-socketio[client]" websocket-client Pillow 2>/dev/null || true
 
-# ── Acceso directo en el menú inicio ─────────────────────────
-APPS_DIR=/usr/share/applications
-cat > "$APPS_DIR/vigia-client.desktop" <<EOD
+# ── Script lanzador global ────────────────────────────────────
+# Lee la IP del servidor en tiempo de ejecución desde /etc/vigia/client.conf,
+# de modo que funciona para cualquier usuario sin necesitar la IP en el .desktop
+cat > /usr/local/bin/vigia-client <<LAUNCHER
+#!/bin/bash
+SERVER_IP="\$(cat /etc/vigia/client.conf 2>/dev/null | tr -d '[:space:]')"
+exec $PYTHON3 $VIGIA_DIR/client.py "\$SERVER_IP"
+LAUNCHER
+chmod 755 /usr/local/bin/vigia-client
+
+# ── Acceso directo en el menú inicio (global, todos los usuarios) ─
+cat > /usr/share/applications/vigia-client.desktop <<EOD
 [Desktop Entry]
 Type=Application
 Name=VIGIA Alumno
 Comment=Cliente de supervisión de aula
-Exec=$PYTHON3 $VIGIA_DIR/client.py $SERVER_IP
+Exec=/usr/local/bin/vigia-client
 Icon=vigia-client
 Terminal=false
 Categories=Education;
 EOD
-chmod 644 "$APPS_DIR/vigia-client.desktop"
+chmod 644 /usr/share/applications/vigia-client.desktop
 
-# ── XDG autostart (arranque automático al iniciar sesión) ────
-# Se usa XDG autostart en lugar de systemd porque el cliente necesita
-# DISPLAY activo (Tkinter + mss). KDE/GNOME ejecutan estos .desktop
-# al inicio de sesión con el entorno gráfico ya disponible.
-if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
-  AUTOSTART_DIR="$REAL_HOME/.config/autostart"
-  su - "$REAL_USER" -c "mkdir -p '$AUTOSTART_DIR'"
-  cat > "$AUTOSTART_DIR/vigia-alumno.desktop" <<EOD
+# ── XDG autostart global (todos los usuarios de la máquina) ──
+# /etc/xdg/autostart/ es procesado por KDE/GNOME/XFCE para CUALQUIER usuario
+# que inicie sesión gráfica, no solo el que instaló el paquete.
+mkdir -p /etc/xdg/autostart
+cat > /etc/xdg/autostart/vigia-alumno.desktop <<EOD
 [Desktop Entry]
 Type=Application
-Name=VIGIA Cliente
+Name=VIGIA Alumno
 Comment=Cliente de supervisión VIGIA — inicio automático de sesión
-Exec=$PYTHON3 $VIGIA_DIR/client.py $SERVER_IP
+Exec=/usr/local/bin/vigia-client
 Terminal=false
-Categories=Education;
 Hidden=false
 X-GNOME-Autostart-enabled=true
+Categories=Education;
 EOD
-  chown "$REAL_USER:" "$AUTOSTART_DIR/vigia-alumno.desktop"
-  echo "Autostart configurado para $REAL_USER."
+chmod 644 /etc/xdg/autostart/vigia-alumno.desktop
 
-  # Arrancar el cliente inmediatamente (sin esperar al siguiente reinicio)
+# ── Arrancar el cliente inmediatamente para el usuario activo ─
+if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+  # Detener cualquier instancia previa
   pkill -u "$REAL_USER" -f "python.*client\.py" 2>/dev/null || true
+  sleep 0.3
+
+  # Detectar el DISPLAY activo del usuario leyendo el entorno de sus procesos
+  _XDISPLAY=""
+  for _pid in $(pgrep -u "$REAL_USER" 2>/dev/null | head -30); do
+    _XDISPLAY=$(tr '\0' '\n' < "/proc/$_pid/environ" 2>/dev/null \
+                | grep "^DISPLAY=" | cut -d= -f2 | grep -v "^$" | head -1)
+    [ -n "$_XDISPLAY" ] && break
+  done
+  [ -z "$_XDISPLAY" ] && _XDISPLAY=":0"
+
   su - "$REAL_USER" -c \
-    "nohup $PYTHON3 $VIGIA_DIR/client.py $SERVER_IP >/tmp/vigia-cliente.log 2>&1 &" 2>/dev/null || true
+    "DISPLAY='$_XDISPLAY' XAUTHORITY='$REAL_HOME/.Xauthority' \
+     nohup /usr/local/bin/vigia-client >/tmp/vigia-cliente.log 2>&1 &" \
+    2>/dev/null || true
+  echo "Cliente VIGIA iniciado para $REAL_USER (DISPLAY=$_XDISPLAY)."
 fi
 
 echo "VIGIA Client installed successfully. Server IP: $SERVER_IP"
@@ -265,12 +286,12 @@ chmod 755 "$CLIENT_BUILD_DIR/DEBIAN/postinst"
 
 cat > "$CLIENT_BUILD_DIR/DEBIAN/prerm" <<'EOF'
 #!/bin/bash
-REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
-REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
-# Matar cliente en ejecución y eliminar autostart
-pkill -u "$REAL_USER" -f "python.*client\.py" 2>/dev/null || true
-rm -f "$REAL_HOME/.config/autostart/vigia-alumno.desktop" 2>/dev/null || true
+# Matar todas las instancias del cliente (cualquier usuario)
+pkill -f "python.*client\.py" 2>/dev/null || true
+pkill -f "vigia-client" 2>/dev/null || true
+rm -f /etc/xdg/autostart/vigia-alumno.desktop 2>/dev/null || true
 rm -f /usr/share/applications/vigia-client.desktop 2>/dev/null || true
+rm -f /usr/local/bin/vigia-client 2>/dev/null || true
 EOF
 chmod 755 "$CLIENT_BUILD_DIR/DEBIAN/prerm"
 
