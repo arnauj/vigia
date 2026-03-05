@@ -340,19 +340,19 @@ def on_do_input(data):
     button = data.get('button', 'left')
 
     if tipo == 'mousedown':
-        if _XDO_CMD:
-            _xdo('mousemove', x, y, 'mousedown', _BTN_MAP_XDO.get(button, 1)); return
         if _mouse_ctrl and _PBtn:
-            try: _mouse_ctrl.position = (x, y); _mouse_ctrl.press(_btn_map_pyn.get(button, _PBtn.left))
+            try: _mouse_ctrl.position = (x, y); _mouse_ctrl.press(_btn_map_pyn.get(button, _PBtn.left)); return
             except: pass
+        if _XDO_CMD:
+            _xdo('mousemove', x, y, 'mousedown', _BTN_MAP_XDO.get(button, 1))
         return
 
     if tipo == 'mouseup':
-        if _XDO_CMD:
-            _xdo('mousemove', x, y, 'mouseup', _BTN_MAP_XDO.get(button, 1)); return
         if _mouse_ctrl and _PBtn:
-            try: _mouse_ctrl.position = (x, y); _mouse_ctrl.release(_btn_map_pyn.get(button, _PBtn.left))
+            try: _mouse_ctrl.position = (x, y); _mouse_ctrl.release(_btn_map_pyn.get(button, _PBtn.left)); return
             except: pass
+        if _XDO_CMD:
+            _xdo('mousemove', x, y, 'mouseup', _BTN_MAP_XDO.get(button, 1))
         return
 
     # ── teclado ───────────────────────────────────────────────────────────────
