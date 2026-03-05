@@ -1469,7 +1469,7 @@ let _liveviewSid   = null;
 let _liveviewMode  = 'view';
 let _liveOrigW = 1280, _liveOrigH = 720;
 let _lastMouseSend = 0, _liveFps = 0, _liveFpsTs = 0;
-let _pc = null, _dc = null, _webrtcActivo = false;
+let _pc = null, _dc_mouse = null, _dc_kbd = null, _webrtcActivo = false;
 const _STUN = [{ urls:'stun:stun.l.google.com:19302' },
                { urls:'stun:stun1.l.google.com:19302' }];
 
@@ -1488,6 +1488,12 @@ socket.on('live_frame', (data) => {
 
 socket.on('student_view_ended', (data) => {
   if (data.sid === _liveviewSid) cerrarLiveView();
+});
+
+socket.on('screen_info', (data) => {
+  if (data.sid !== _liveviewSid) return;
+  _liveOrigW = data.w || _liveOrigW;
+  _liveOrigH = data.h || _liveOrigH;
 });
 
 function abrirLiveView(sid, mode) {
@@ -1528,7 +1534,7 @@ function cerrarLiveView() {
   document.getElementById('liveview-body').classList.remove('control-mode');
   document.getElementById('liveview-img').src = '';
   if (_pc) { _pc.close(); _pc = null; }
-  _dc = null; _webrtcActivo = false;
+  _dc_mouse = null; _dc_kbd = null; _webrtcActivo = false;
   const vid = document.getElementById('liveview-video');
   vid.srcObject = null; vid.style.display = 'none';
   document.getElementById('liveview-img').style.display = 'block';
@@ -1541,12 +1547,14 @@ function cerrarLiveView() {
 async function _iniciarWebRTC(sid, mode) {
   if (typeof RTCPeerConnection === 'undefined') return;
   try {
-    if (_pc) { _pc.close(); _pc = null; _dc = null; }
+    if (_pc) { _pc.close(); _pc = null; _dc_mouse = null; _dc_kbd = null; }
     _pc = new RTCPeerConnection({ iceServers: _STUN });
 
     if (mode === 'control') {
-      _dc = _pc.createDataChannel('vigia-input', { ordered:true });
-      // readyState se comprueba en _enviarInput; no tocamos _webrtcActivo desde el DC
+      // Canal de ratón: no ordenado, sin retransmisiones — como UDP, mínima latencia
+      _dc_mouse = _pc.createDataChannel('vigia-mouse', { ordered: false, maxRetransmits: 0 });
+      // Canal de teclado: ordenado y fiable — los eventos de tecla deben llegar en orden
+      _dc_kbd   = _pc.createDataChannel('vigia-input', { ordered: true });
     }
 
     _pc.ontrack = (ev) => {
@@ -1554,6 +1562,8 @@ async function _iniciarWebRTC(sid, mode) {
       const vid = document.getElementById('liveview-video');
       vid.srcObject = ev.streams[0];
       vid.onloadedmetadata = () => {
+        // NO usar getSettings().width: es la resolución del stream, no la de la pantalla real.
+        // La resolución real llega por el evento screen_info enviado por el cliente.
         const s = ev.streams[0].getVideoTracks()[0].getSettings();
         _liveOrigW = s.width  || _liveOrigW;
         _liveOrigH = s.height || _liveOrigH;
@@ -1650,10 +1660,20 @@ function cerrarPortapapeles() {
 }
 
 function _enviarInput(payload) {
-  if (_webrtcActivo && _dc?.readyState === 'open')
-    _dc.send(JSON.stringify(payload));
-  else
-    socket.emit('remote_input', payload);
+  const tipo = payload.type;
+  const esMouse = tipo === 'mousemove' || tipo === 'mousedown' || tipo === 'mouseup' || tipo === 'scroll';
+  if (_webrtcActivo) {
+    if (esMouse && _dc_mouse?.readyState === 'open') {
+      _dc_mouse.send(JSON.stringify(payload)); return;
+    }
+    if (!esMouse && _dc_kbd?.readyState === 'open') {
+      _dc_kbd.send(JSON.stringify(payload)); return;
+    }
+    // fallback: cualquier canal abierto
+    if (_dc_kbd?.readyState === 'open')   { _dc_kbd.send(JSON.stringify(payload));   return; }
+    if (_dc_mouse?.readyState === 'open') { _dc_mouse.send(JSON.stringify(payload)); return; }
+  }
+  socket.emit('remote_input', payload);
 }
 
 // Traducción de teclas del navegador a nombres de pyautogui

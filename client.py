@@ -114,11 +114,12 @@ _PBtn       = None
 _XDO_CMD    = shutil.which('xdotool')
 _xdo_env    = None   # entorno precalculado para xdotool (evita copiar os.environ en cada evento)
 
-def _xdo(*args):
-    """Lanza xdotool sin bloquear ni esperar confirmación del servidor X11."""
+def _xdo_sync(*args):
+    """Ejecuta xdotool de forma síncrona (bloqueante). Usar solo desde el hilo de entrada."""
     try:
-        subprocess.Popen([_XDO_CMD] + [str(a) for a in args],
-                         env=_xdo_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run([_XDO_CMD] + [str(a) for a in args],
+                       env=_xdo_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=2)
     except Exception as e:
         print(f"  [!] xdotool {args}: {e}")
 
@@ -166,6 +167,39 @@ _XDO_KEY_MAP = {
     'ctrl': 'Control_L', 'alt': 'Alt_L', 'shift': 'Shift_L', 'win': 'Super_L'
 }
 _BTN_MAP_XDO = {'left': 1, 'middle': 2, 'right': 3}
+
+# ── Cola de entrada dedicada ───────────────────────────────────────────────────
+# Todos los eventos de ratón/teclado pasan por esta cola y son procesados
+# en orden estricto por un único hilo. Esto evita:
+#   - Ejecuciones paralelas de xdotool que llegan fuera de orden
+#   - Race conditions en pynput (controladores Xlib no thread-safe entre hilos)
+#   - Movimientos de ratón estancados por HOL blocking en el DataChannel
+_input_q: queue.Queue = queue.Queue(maxsize=400)
+
+def _input_worker():
+    """Hilo dedicado: ejecuta eventos de entrada uno a uno, en orden."""
+    while True:
+        data = _input_q.get()
+        try:
+            # Coalescing de mousemove: si hay más moves en cola, descartar el actual
+            # y procesar solo el más reciente antes del próximo evento no-move.
+            if data.get('type') == 'mousemove':
+                while True:
+                    try:
+                        nxt = _input_q.get_nowait()
+                    except queue.Empty:
+                        break
+                    if nxt.get('type') == 'mousemove':
+                        data = nxt          # descartar move viejo, usar el más reciente
+                    else:
+                        _procesar_input(data)   # ejecutar el move más reciente
+                        data = nxt              # continuar con el siguiente evento
+                        break
+            _procesar_input(data)
+        except Exception:
+            pass
+
+threading.Thread(target=_input_worker, daemon=True, name='vigia-input').start()
 
 def _get_pynput_key(key):
     try:
@@ -305,25 +339,25 @@ def bucle_capturas():
             sct = None; time.sleep(1)
 
 # ── Manejo de entrada ─────────────────────────────────────────────────────────
-@sio.on('do_input')
-def on_do_input(data):
-    if not INPUT_OK: return
+
+def _procesar_input(data):
+    """Ejecuta un evento de entrada. Llamar SOLO desde el hilo _input_worker."""
     tipo = data.get('type', '')
     try:
         x = int(data.get('x', 0))
         y = int(data.get('y', 0))
-    except: return
+    except:
+        x = y = 0
 
-    # ── mousemove: pynput es instantáneo (sin fork/exec) ──────────────────────
+    # ── ratón ─────────────────────────────────────────────────────────────────
     if tipo == 'mousemove':
         if _mouse_ctrl:
             try: _mouse_ctrl.position = (x, y); return
             except: pass
         if _XDO_CMD:
-            _xdo('mousemove', x, y)   # sin --sync para no bloquear el hilo
+            _xdo_sync('mousemove', '--sync', x, y)
         return
 
-    # ── scroll: pynput primero (sin fork) ──────────────────────────────────────
     if tipo == 'scroll':
         dy = int(data.get('dy', 0))
         if _mouse_ctrl:
@@ -331,11 +365,10 @@ def on_do_input(data):
             except: pass
         if _XDO_CMD:
             btn = 4 if dy > 0 else 5
-            _xdo('mousemove', x, y)
-            for _ in range(abs(dy) or 1): _xdo('click', btn)
+            _xdo_sync('mousemove', '--sync', x, y)
+            for _ in range(abs(dy) or 1): _xdo_sync('click', btn)
         return
 
-    # ── clicks: xdotool primero (más fiable en X11 para todas las apps) ───────
     _btn_map_pyn = {'left': _PBtn.left, 'middle': _PBtn.middle, 'right': _PBtn.right} if _PBtn else {}
     button = data.get('button', 'left')
 
@@ -344,7 +377,8 @@ def on_do_input(data):
             try: _mouse_ctrl.position = (x, y); _mouse_ctrl.press(_btn_map_pyn.get(button, _PBtn.left)); return
             except: pass
         if _XDO_CMD:
-            _xdo('mousemove', x, y, 'mousedown', _BTN_MAP_XDO.get(button, 1))
+            _xdo_sync('mousemove', '--sync', x, y)
+            _xdo_sync('mousedown', _BTN_MAP_XDO.get(button, 1))
         return
 
     if tipo == 'mouseup':
@@ -352,54 +386,49 @@ def on_do_input(data):
             try: _mouse_ctrl.position = (x, y); _mouse_ctrl.release(_btn_map_pyn.get(button, _PBtn.left)); return
             except: pass
         if _XDO_CMD:
-            _xdo('mousemove', x, y, 'mouseup', _BTN_MAP_XDO.get(button, 1))
+            _xdo_sync('mousemove', '--sync', x, y)
+            _xdo_sync('mouseup', _BTN_MAP_XDO.get(button, 1))
         return
 
     # ── teclado ───────────────────────────────────────────────────────────────
-
-    # Carácter imprimible: un solo proceso, respeta layout del cliente
     if tipo == 'type':
         char = data.get('char', '')
         if not char: return
         if _XDO_CMD:
-            _xdo('type', '--clearmodifiers', '--delay', '0', '--', char); return
+            _xdo_sync('type', '--clearmodifiers', '--delay', '0', '--', char); return
         if _kbd_ctrl:
             try: _kbd_ctrl.type(char)
             except: pass
         return
 
-    # Tecla especial (Enter, Backspace, flechas…): press+release en un proceso
     if tipo == 'keypress':
         k = _XDO_KEY_MAP.get(data.get('key', '').lower(), data.get('key'))
         if _XDO_CMD:
-            _xdo('key', '--clearmodifiers', k); return
+            _xdo_sync('key', '--clearmodifiers', k); return
         if _kbd_ctrl:
             pk = _get_pynput_key(data.get('key'))
             try: _kbd_ctrl.press(pk); _kbd_ctrl.release(pk)
             except: pass
         return
 
-    # Combinación con modificadora (Ctrl+C, Alt+F4…): un proceso para el combo
     if tipo == 'keycombo':
-        combo = data.get('combo', '')   # e.g. 'ctrl+c'
+        combo = data.get('combo', '')
         if not combo: return
         if _XDO_CMD:
-            _xdo('key', '--clearmodifiers', combo); return
-        # fallback pynput: descomponer el combo
+            _xdo_sync('key', '--clearmodifiers', combo); return
         if _kbd_ctrl:
             parts = combo.split('+')
             keys  = [_get_pynput_key(p) for p in parts]
             try:
-                for k in keys:   _kbd_ctrl.press(k)
+                for k in keys:            _kbd_ctrl.press(k)
                 for k in reversed(keys): _kbd_ctrl.release(k)
             except: pass
         return
 
-    # Modificadoras sueltas: keydown/keyup para mantener estado (Ctrl, Shift…)
     if tipo == 'keydown':
         k = _XDO_KEY_MAP.get(data.get('key', '').lower(), data.get('key'))
         if _XDO_CMD:
-            _xdo('keydown', k); return
+            _xdo_sync('keydown', k); return
         if _kbd_ctrl:
             try: _kbd_ctrl.press(_get_pynput_key(data.get('key')))
             except: pass
@@ -408,10 +437,25 @@ def on_do_input(data):
     if tipo == 'keyup':
         k = _XDO_KEY_MAP.get(data.get('key', '').lower(), data.get('key'))
         if _XDO_CMD:
-            _xdo('keyup', k); return
+            _xdo_sync('keyup', k); return
         if _kbd_ctrl:
             try: _kbd_ctrl.release(_get_pynput_key(data.get('key')))
             except: pass
+
+
+@sio.on('do_input')
+def on_do_input(data):
+    """Encola el evento; el hilo vigia-input lo ejecuta en orden estricto."""
+    if not INPUT_OK: return
+    tipo = data.get('type', '')
+    # mousemove: descartar si cola llena (el coalescing del worker elimina viejos)
+    if tipo == 'mousemove':
+        try: _input_q.put_nowait(data)
+        except queue.Full: pass
+    else:
+        # Clicks y teclado: pequeño timeout para no perderlos
+        try: _input_q.put(data, timeout=0.05)
+        except queue.Full: pass
 
 # ── Eventos Socket.IO ─────────────────────────────────────────────────────────
 @sio.event
@@ -423,6 +467,13 @@ def connect():
 def on_viewer_start(data):
     global _en_observacion; _en_observacion = True
     print(f"[*] El profesor está observando/controlando.")
+    # Enviar resolución real de pantalla para que el profesor mapee coordenadas correctamente
+    try:
+        with mss.mss() as _sct:
+            _mon = _sct.monitors[1]
+            sio.emit('screen_info', {'w': _mon['width'], 'h': _mon['height']})
+    except Exception:
+        pass
 
 @sio.on('viewer_stop')
 def on_viewer_stop(_data):
@@ -537,6 +588,7 @@ if WEBRTC_OK:
 
         @pc.on("datachannel")
         def on_dc(channel):
+            # Acepta ambos canales: vigia-mouse (ratón, UDP-like) y vigia-input (teclado, fiable)
             @channel.on("message")
             def on_msg(msg):
                 try: on_do_input(json.loads(msg))

@@ -620,6 +620,18 @@ def on_remote_frame(data):
         }, to=v_data['prof_sid'])
 
 
+@socketio.on('screen_info')
+def on_screen_info(data):
+    # El cliente envía su resolución real de pantalla; reenviar al profesor observador
+    v_data = viewers.get(request.sid)
+    if v_data:
+        socketio.emit('screen_info', {
+            'sid': request.sid,
+            'w':   data.get('w', 1280),
+            'h':   data.get('h', 720),
+        }, to=v_data['prof_sid'])
+
+
 @socketio.on('remote_input')
 def on_remote_input(data):
     student_sid = data.get('sid')
