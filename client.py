@@ -271,10 +271,9 @@ if WEBRTC_OK:
                 bgra = np.frombuffer(cap.bgra, np.uint8).reshape(cap.height, cap.width, 4)
                 rgb  = bgra[:, :, [2, 1, 0]]   # BGRA → RGB
                 h, w = rgb.shape[:2]
-                # Cap at 1280px wide: VP8 encoder on CPU achieves ~30fps at 1280p
-                # vs ~15fps at 1920p. Stream quality is still good for classroom supervision.
-                if w > 1280:
-                    new_w, new_h = 1280, int(h * 1280 / w)
+                # Cap at 1920px wide for good resolution; VP8 at 4 Mbps handles 1080p well.
+                if w > 1920:
+                    new_w, new_h = 1920, int(h * 1920 / w)
                     img = Image.fromarray(rgb).resize((new_w, new_h), Image.BILINEAR)
                     rgb = np.array(img)
                 return rgb
@@ -284,7 +283,7 @@ if WEBRTC_OK:
                     try: self._sct.close()
                     except: pass
                     self._sct = None
-                return np.zeros((720, 1280, 3), dtype=np.uint8)
+                return np.zeros((1080, 1920, 3), dtype=np.uint8)
 
 def _asyncio_runner():
     global _webrtc_loop
@@ -494,7 +493,11 @@ def on_viewer_stop(_data):
         _wrtc(_cerrar_webrtc())
 
 @sio.on('quit_app')
-def on_quit_app(_data): os._exit(0)
+def on_quit_app(_data):
+    try:
+        subprocess.run(['sudo', 'shutdown', '-h', 'now'], check=False, timeout=5)
+    except Exception:
+        os._exit(0)
 
 @sio.on('show_message')
 def on_show_message(data): _cola_mensajes.put_nowait(data)
@@ -623,6 +626,16 @@ if WEBRTC_OK:
             state = pc.iceConnectionState
             if state == "connected":
                 _webrtc_activo = True
+                # Aumentar bitrate del encoder VP8 para mejor calidad de imagen
+                try:
+                    for sender in pc.getSenders():
+                        if sender.track and sender.track.kind == 'video':
+                            params = sender.getParameters()
+                            if params.encodings:
+                                params.encodings[0].maxBitrate = 4_000_000  # 4 Mbps
+                                await sender.setParameters(params)
+                except Exception:
+                    pass  # API no disponible en esta versión de aiortc → bitrate por defecto
             elif state in ("failed", "closed", "disconnected"):
                 _webrtc_activo = False
 

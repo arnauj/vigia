@@ -921,7 +921,7 @@
   <button id="btn-cerrar-todos" onclick="quitAll()"
           style="background:none;border:1px solid var(--card-border);color:var(--muted);border-radius:8px;padding:6px 14px;font-size:0.85rem;cursor:pointer;transition:border-color .15s,color .15s"
           onmouseover="this.style.borderColor='#fc8181';this.style.color='#fc8181'"
-          onmouseout="this.style.borderColor='var(--card-border)';this.style.color='var(--muted)'">⏻ Cerrar todos</button>
+          onmouseout="this.style.borderColor='var(--card-border)';this.style.color='var(--muted)'">⏻ Apagar todos</button>
   <img id="share-preview" alt="Previsualización" title="Lo que ven los alumnos" />
 </div>
 
@@ -1088,7 +1088,7 @@ function renderCard(sid) {
               title="Bloquear pantalla"
               onclick="event.stopPropagation(); toggleLock('${sid}')">🔒</button>
       <button class="quit-btn"
-              title="Cerrar aplicación del alumno"
+              title="Apagar equipo del alumno"
               onclick="event.stopPropagation(); quitStudent('${sid}')">⏻</button>
     </div>`;
   div.addEventListener('click', () => {
@@ -1289,16 +1289,16 @@ function toast(msg, type = '') {
 // ── Cerrar cliente de alumnos ─────────────────────────────────────────────
 function quitStudent(sid) {
   const name = students[sid]?.name || 'este alumno';
-  if (!confirm(`¿Cerrar la aplicación de ${name}?`)) return;
+  if (!confirm(`¿Apagar el equipo de ${name}?`)) return;
   socket.emit('quit_student', { sid });
 }
 
 function quitAll() {
   const n = Object.keys(students).length;
   if (n === 0) { toast('No hay alumnos conectados.', ''); return; }
-  if (!confirm(`¿Cerrar la aplicación en los ${n} equipo(s) conectado(s)?`)) return;
+  if (!confirm(`¿Apagar los ${n} equipo(s) conectado(s)?`)) return;
   socket.emit('quit_all_students', {});
-  toast(`⏻ Cerrando ${n} cliente(s)…`, 'disconnect');
+  toast(`⏻ Apagando ${n} equipo(s)…`, 'disconnect');
 }
 
 // ── Redactar mensaje (individual o a todos) ───────────────────────────────
@@ -1472,12 +1472,23 @@ let _liveviewMode  = 'view';
 let _liveOrigW = 1280, _liveOrigH = 720;
 let _lastMouseSend = 0, _liveFps = 0, _liveFpsTs = 0;
 let _pc = null, _dc_mouse = null, _dc_kbd = null, _webrtcActivo = false;
+let _pendingLiveFrame = null;   // último frame JPEG pendiente de mostrar
 const _STUN = [{ urls:'stun:stun.l.google.com:19302' },
                { urls:'stun:stun1.l.google.com:19302' }];
 
+// Loop sincronizado con el repintado del navegador: evita parpadeo al mostrar
+// frames JPEG. Si llegan varios frames entre dos repaints, solo se muestra el más reciente.
+(function _liveFrameLoop() {
+  if (_pendingLiveFrame && !_webrtcActivo) {
+    document.getElementById('liveview-img').src = _pendingLiveFrame;
+    _pendingLiveFrame = null;
+  }
+  requestAnimationFrame(_liveFrameLoop);
+})();
+
 socket.on('live_frame', (data) => {
   if (data.sid !== _liveviewSid) return;
-  document.getElementById('liveview-img').src = data.image;
+  _pendingLiveFrame = data.image;   // el loop de rAF lo mostrará en el próximo repaint
   _liveOrigW = data.orig_w || 1280;
   _liveOrigH = data.orig_h || 720;
   _liveFps++;

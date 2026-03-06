@@ -190,14 +190,14 @@ def on_quit_student(data):
     sid = data.get('sid')
     if sid in students:
         socketio.emit('quit_app', {}, to=sid)
-        print(f"[*] Cerrando cliente: {students[sid]['name']}")
+        print(f"[*] Apagando equipo: {students[sid]['name']}")
 
 
 @socketio.on('quit_all_students')
 def on_quit_all_students(_data):
     for sid in list(students.keys()):
         socketio.emit('quit_app', {}, to=sid)
-    print(f"[*] Cerrando todos los clientes")
+    print(f"[*] Apagando todos los equipos")
 
 
 @socketio.on('send_message')
