@@ -113,6 +113,20 @@ EOD
   echo "Servicio 'vigia-servidor' habilitado para $REAL_USER."
 fi
 
+# ── Sudo sin contraseña (necesario para exec_command remoto) ──
+# Crea /etc/sudoers.d/vigia-<usuario> con NOPASSWD:ALL para el usuario real.
+if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+  SUDOERS_FILE="/etc/sudoers.d/vigia-${REAL_USER}"
+  echo "${REAL_USER} ALL=(ALL) NOPASSWD: ALL" > "$SUDOERS_FILE"
+  chmod 0440 "$SUDOERS_FILE"
+  if visudo -c -f "$SUDOERS_FILE" 2>/dev/null; then
+    echo "Sudo sin contraseña configurado para $REAL_USER."
+  else
+    rm -f "$SUDOERS_FILE"
+    echo "Advertencia: no se pudo validar el fichero sudoers; skipping."
+  fi
+fi
+
 echo "VIGIA Server installed successfully."
 EOF
 chmod 755 "$SERVER_BUILD_DIR/DEBIAN/postinst"
@@ -127,6 +141,8 @@ su - "$REAL_USER" -c \
   2>/dev/null || true
 rm -f "$REAL_HOME/.config/systemd/user/vigia-servidor.service" 2>/dev/null || true
 rm -f /usr/share/applications/vigia-server.desktop 2>/dev/null || true
+# Eliminar regla sudoers de vigia
+rm -f "/etc/sudoers.d/vigia-${REAL_USER}" 2>/dev/null || true
 EOF
 chmod 755 "$SERVER_BUILD_DIR/DEBIAN/prerm"
 
@@ -280,6 +296,20 @@ if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
   echo "Cliente VIGIA iniciado para $REAL_USER (DISPLAY=$_XDISPLAY)."
 fi
 
+# ── Sudo sin contraseña (necesario para exec_command remoto y apt) ──
+# Permite al alumno ejecutar comandos del terminal remoto sin prompt de contraseña.
+if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+  SUDOERS_FILE="/etc/sudoers.d/vigia-${REAL_USER}"
+  echo "${REAL_USER} ALL=(ALL) NOPASSWD: ALL" > "$SUDOERS_FILE"
+  chmod 0440 "$SUDOERS_FILE"
+  if visudo -c -f "$SUDOERS_FILE" 2>/dev/null; then
+    echo "Sudo sin contraseña configurado para $REAL_USER."
+  else
+    rm -f "$SUDOERS_FILE"
+    echo "Advertencia: no se pudo validar el fichero sudoers; skipping."
+  fi
+fi
+
 echo "VIGIA Client installed successfully. Server IP: $SERVER_IP"
 EOF
 chmod 755 "$CLIENT_BUILD_DIR/DEBIAN/postinst"
@@ -292,6 +322,9 @@ pkill -f "python.*client\.py" 2>/dev/null || true
 rm -f /etc/xdg/autostart/vigia-alumno.desktop 2>/dev/null || true
 rm -f /usr/share/applications/vigia-client.desktop 2>/dev/null || true
 rm -f /usr/local/bin/vigia-client 2>/dev/null || true
+# Eliminar regla sudoers de vigia
+REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
+rm -f "/etc/sudoers.d/vigia-${REAL_USER}" 2>/dev/null || true
 EOF
 chmod 755 "$CLIENT_BUILD_DIR/DEBIAN/prerm"
 
