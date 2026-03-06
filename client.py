@@ -271,9 +271,9 @@ if WEBRTC_OK:
                 bgra = np.frombuffer(cap.bgra, np.uint8).reshape(cap.height, cap.width, 4)
                 rgb  = bgra[:, :, [2, 1, 0]]   # BGRA → RGB
                 h, w = rgb.shape[:2]
-                # Cap at 1280px wide: reduces CPU encoding load and network bandwidth
-                if w > 1280:
-                    new_w, new_h = 1280, int(h * 1280 / w)
+                # Cap at 1920px wide for good quality; avoids upscaling blurriness
+                if w > 1920:
+                    new_w, new_h = 1920, int(h * 1920 / w)
                     img = Image.fromarray(rgb).resize((new_w, new_h), Image.LANCZOS)
                     rgb = np.array(img)
                 return rgb
@@ -283,7 +283,7 @@ if WEBRTC_OK:
                     try: self._sct.close()
                     except: pass
                     self._sct = None
-                return np.zeros((720, 1280, 3), dtype=np.uint8)
+                return np.zeros((1080, 1920, 3), dtype=np.uint8)
 
 def _asyncio_runner():
     global _webrtc_loop
@@ -372,12 +372,15 @@ def _procesar_input(data):
     button = data.get('button', 'left')
 
     if tipo == 'mousedown':
+        mods = data.get('mods', [])
         if _mouse_ctrl and _PBtn:
             try: _mouse_ctrl.position = (x, y); _mouse_ctrl.press(_btn_map_pyn.get(button, _PBtn.left)); return
             except: pass
         if _XDO_CMD:
             _xdo_sync('mousemove', x, y)
+            for m in mods: _xdo_sync('keydown', m)
             _xdo_sync('mousedown', _BTN_MAP_XDO.get(button, 1))
+            for m in reversed(mods): _xdo_sync('keyup', m)
         return
 
     if tipo == 'mouseup':
@@ -414,7 +417,7 @@ def _procesar_input(data):
         combo = data.get('combo', '')
         if not combo: return
         if _XDO_CMD:
-            _xdo_sync('key', '--clearmodifiers', combo); return
+            _xdo_sync('key', combo); return
         if _kbd_ctrl:
             parts = combo.split('+')
             keys  = [_get_pynput_key(p) for p in parts]

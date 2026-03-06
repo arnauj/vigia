@@ -1734,9 +1734,7 @@ document.addEventListener('DOMContentLoaded', function () {
   const ov   = document.getElementById('liveview-overlay');
   const body = document.getElementById('liveview-body');
 
-  // Modificadoras que necesitan keydown/keyup para poder combinarse
-  const _MOD_KEYS = { 'Control':'ctrl', 'Alt':'alt', 'Shift':'shift', 'Meta':'win' };
-  const _MOD_SET  = new Set(Object.keys(_MOD_KEYS));
+  const _MOD_SET = new Set(['Control', 'Alt', 'Shift', 'Meta']);
 
   ov.addEventListener('keydown', (e) => {
     if (!_liveviewSid) return;
@@ -1745,22 +1743,28 @@ document.addEventListener('DOMContentLoaded', function () {
     if (e.ctrlKey && e.shiftKey && e.key === 'C') { e.preventDefault(); pedirPortapapeles(); return; }
     e.preventDefault();
 
-    if (_MOD_SET.has(e.key)) {
-      // Tecla modificadora sola: keydown para que el cliente mantenga el estado
-      _enviarInput({ sid: _liveviewSid, type: 'keydown', key: _MOD_KEYS[e.key] });
-    } else if (e.ctrlKey || e.altKey || e.metaKey) {
-      // Combinación con modificadora (Ctrl+C, Alt+F4…): un solo evento combo
-      const parts = [];
-      if (e.ctrlKey)  parts.push('ctrl');
-      if (e.altKey)   parts.push('alt');
-      if (e.shiftKey) parts.push('shift');
+    // Tecla modificadora sola: no enviar (el estado se incluye en cada keycombo)
+    if (_MOD_SET.has(e.key)) return;
+
+    const mods = [];
+    if (e.ctrlKey)  mods.push('ctrl');
+    if (e.altKey)   mods.push('alt');
+    if (e.shiftKey) mods.push('shift');
+    if (e.metaKey)  mods.push('win');
+
+    if (mods.length > 0 && (mods.some(m => m !== 'shift') || e.key.length > 1)) {
+      // Combinación con modificadora: Ctrl+C, Alt+F4, Shift+Flecha, Shift+Inicio…
+      // Excepción AltGr (Ctrl+Alt + carácter imprimible): enviar como type
+      if (e.altKey && e.ctrlKey && e.key.length === 1) {
+        _enviarInput({ sid: _liveviewSid, type: 'type', char: e.key }); return;
+      }
       const k = _mapKey(e.key);
-      if (k) _enviarInput({ sid: _liveviewSid, type: 'keycombo', combo: [...parts, k].join('+') });
+      if (k) _enviarInput({ sid: _liveviewSid, type: 'keycombo', combo: [...mods, k].join('+') });
     } else if (e.key.length === 1) {
       // Carácter imprimible: type (press+release en un proceso, más fiable)
       _enviarInput({ sid: _liveviewSid, type: 'type', char: e.key });
     } else {
-      // Tecla especial (Enter, Backspace, flechas…): keypress (press+release)
+      // Tecla especial (Enter, Backspace, flechas sin modificador…): keypress
       const k = _mapKey(e.key);
       if (k) _enviarInput({ sid: _liveviewSid, type: 'keypress', key: k });
     }
@@ -1769,18 +1773,10 @@ document.addEventListener('DOMContentLoaded', function () {
   ov.addEventListener('keyup', (e) => {
     if (!_liveviewSid || _liveviewMode !== 'control' || e.key === 'Escape') return;
     e.preventDefault();
-    // Solo interesa el keyup de modificadoras (para soltar Ctrl, Alt, Shift)
-    if (_MOD_SET.has(e.key))
-      _enviarInput({ sid: _liveviewSid, type: 'keyup', key: _MOD_KEYS[e.key] });
+    // Modificadoras ya no se mantienen presionadas en el cliente; keyup ignorado
   });
 
-  ov.addEventListener('blur', () => {
-    if (!_liveviewSid || _liveviewMode !== 'control') return;
-    // Liberar todas las modificadoras para evitar que se queden pegadas si se cambia de ventana/foco
-    Object.values(_MOD_KEYS).forEach(k => {
-      _enviarInput({ sid: _liveviewSid, type: 'keyup', key: k });
-    });
-  });
+  // Sin blur handler: al no usar keydown/keyup de modificadoras no hay estado que limpiar
 
   body.addEventListener('mousemove', (e) => {
     if (_liveviewMode !== 'control' || !_liveviewSid) return;
@@ -1797,7 +1793,11 @@ document.addEventListener('DOMContentLoaded', function () {
     ov.focus();
     const { x, y } = _traducirCoords(e);
     const btn = ['left','middle','right'][e.button] || 'left';
-    _enviarInput({ sid: _liveviewSid, type: 'mousedown', x, y, button: btn });
+    const mods = [];
+    if (e.ctrlKey)  mods.push('ctrl');
+    if (e.shiftKey) mods.push('shift');
+    if (e.altKey)   mods.push('alt');
+    _enviarInput({ sid: _liveviewSid, type: 'mousedown', x, y, button: btn, ...(mods.length ? { mods } : {}) });
   });
 
   body.addEventListener('mouseup', (e) => {
