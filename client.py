@@ -271,10 +271,11 @@ if WEBRTC_OK:
                 bgra = np.frombuffer(cap.bgra, np.uint8).reshape(cap.height, cap.width, 4)
                 rgb  = bgra[:, :, [2, 1, 0]]   # BGRA → RGB
                 h, w = rgb.shape[:2]
-                # Cap at 1920px wide for good quality; avoids upscaling blurriness
-                if w > 1920:
-                    new_w, new_h = 1920, int(h * 1920 / w)
-                    img = Image.fromarray(rgb).resize((new_w, new_h), Image.LANCZOS)
+                # Cap at 1280px wide: VP8 encoder on CPU achieves ~30fps at 1280p
+                # vs ~15fps at 1920p. Stream quality is still good for classroom supervision.
+                if w > 1280:
+                    new_w, new_h = 1280, int(h * 1280 / w)
+                    img = Image.fromarray(rgb).resize((new_w, new_h), Image.BILINEAR)
                     rgb = np.array(img)
                 return rgb
             except Exception as e:
@@ -283,7 +284,7 @@ if WEBRTC_OK:
                     try: self._sct.close()
                     except: pass
                     self._sct = None
-                return np.zeros((1080, 1920, 3), dtype=np.uint8)
+                return np.zeros((720, 1280, 3), dtype=np.uint8)
 
 def _asyncio_runner():
     global _webrtc_loop
@@ -323,14 +324,14 @@ def bucle_capturas():
             if _en_observacion and not _webrtc_activo:
                 captura = sct.grab(monitor)
                 img = Image.frombytes('RGB', captura.size, captura.bgra, 'raw', 'BGRX')
-                ancho_r = min(orig_w, 1920)
+                ancho_r = min(orig_w, 1280)
                 if img.width > ancho_r:
-                    img = img.resize((ancho_r, int(img.height * ancho_r / img.width)), Image.LANCZOS)
-                buf = io.BytesIO(); img.save(buf, format='JPEG', quality=75)
+                    img = img.resize((ancho_r, int(img.height * ancho_r / img.width)), Image.BILINEAR)
+                buf = io.BytesIO(); img.save(buf, format='JPEG', quality=70)
                 sio.emit('remote_frame', {'image': _b64(buf.getvalue()), 'orig_w': orig_w, 'orig_h': orig_h})
-                time.sleep(0.1)
+                time.sleep(0.05)   # ~20 fps JPEG fallback
             else:
-                time.sleep(0.3)
+                time.sleep(0.2)
         except:
             try: sct.close()
             except: pass

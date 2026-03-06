@@ -1582,6 +1582,21 @@ async function _iniciarWebRTC(sid, mode) {
       _webrtcActivo = true;  // P2P de vídeo establecido (view y control)
       document.getElementById('liveview-transport').textContent = 'WebRTC P2P';
       document.getElementById('liveview-transport').style.color = 'var(--green)';
+      // Contador de FPS real del stream WebRTC
+      _liveFps = 0; _liveFpsTs = Date.now();
+      if ('requestVideoFrameCallback' in vid) {
+        const _rvfc = (now, meta) => {
+          if (!_webrtcActivo) return;
+          _liveFps++;
+          const elapsed = Date.now() - _liveFpsTs;
+          if (elapsed >= 1000) {
+            document.getElementById('liveview-fps').textContent = `${_liveFps} fps`;
+            _liveFps = 0; _liveFpsTs = Date.now();
+          }
+          vid.requestVideoFrameCallback(_rvfc);
+        };
+        vid.requestVideoFrameCallback(_rvfc);
+      }
     };
 
     _pc.onicecandidate = (ev) => {
