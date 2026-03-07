@@ -14,31 +14,40 @@
 
   <style>
     :root {
-      --bg: #0f1117;
-      --card-bg: #1a1d27;
-      --card-border: #2d3148;
-      --accent: #4f8ef7;
-      --text: #e2e8f0;
-      --muted: #718096;
+      --bg: #070b16;
+      --bg-soft: #0f1628;
+      --card-bg: #101a30;
+      --card-bg-2: #0f172a;
+      --card-border: #273557;
+      --accent: #3aa0ff;
+      --accent-2: #12c2b0;
+      --text: #e7edf9;
+      --muted: #8ea0c3;
       --green: #48bb78;
       --red: #fc8181;
+      --amber: #f6ad55;
+      --shadow: 0 12px 36px rgba(3, 9, 24, 0.45);
     }
 
     * { box-sizing: border-box; }
 
     body {
-      background: var(--bg);
+      background:
+        radial-gradient(1200px 500px at 88% -10%, rgba(58,160,255,0.18), transparent 60%),
+        radial-gradient(900px 460px at 8% -8%, rgba(18,194,176,0.14), transparent 58%),
+        linear-gradient(180deg, #050914 0%, #090f1f 45%, #070b16 100%);
       color: var(--text);
-      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-family: "Manrope", "Segoe UI", system-ui, sans-serif;
       margin: 0;
       min-height: 100vh;
     }
 
     /* ── Cabecera ── */
     header {
-      background: var(--card-bg);
-      border-bottom: 1px solid var(--card-border);
-      padding: 12px 20px;
+      background: linear-gradient(180deg, rgba(16,26,48,.92), rgba(12,20,38,.88));
+      border-bottom: 1px solid rgba(142,160,195,.18);
+      backdrop-filter: blur(8px);
+      padding: 14px 20px;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -47,11 +56,12 @@
       z-index: 100;
     }
     header h1 {
-      font-size: 1.25rem;
-      font-weight: 700;
+      font-size: 1.35rem;
+      font-weight: 800;
       margin: 0;
       color: var(--accent);
-      letter-spacing: 0.02em;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
     }
     header h1 span { color: var(--text); }
 
@@ -74,55 +84,61 @@
       50%       { opacity: .5; transform: scale(1.3); }
     }
     #count-badge {
-      background: var(--accent);
+      background: linear-gradient(120deg, var(--accent), var(--accent-2));
       color: #fff;
       border-radius: 999px;
-      padding: 2px 10px;
+      padding: 3px 10px;
       font-weight: 600;
       font-size: 0.8rem;
     }
 
     /* ── Controles ── */
     #controls {
-      padding: 12px 20px;
+      margin: 14px 20px 0;
+      padding: 12px 14px;
       display: flex;
       align-items: center;
       gap: 14px;
       flex-wrap: wrap;
+      border: 1px solid rgba(142,160,195,.16);
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgba(17,26,46,.9), rgba(12,20,37,.86));
+      box-shadow: var(--shadow);
     }
     #controls label { font-size: 0.82rem; color: var(--muted); }
     #controls input[type=range] { width: 120px; accent-color: var(--accent); }
     #search-input {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
+      background: #0b1428;
+      border: 1px solid #2d3f68;
       color: var(--text);
-      border-radius: 6px;
-      padding: 5px 10px;
+      border-radius: 8px;
+      padding: 7px 11px;
       font-size: 0.85rem;
-      width: 180px;
+      width: 220px;
     }
     #search-input:focus { outline: none; border-color: var(--accent); }
 
     /* ── Cuadrícula ── */
     #grid {
-      padding: 16px 20px;
+      padding: 16px 20px 20px;
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(var(--card-w, 280px), 1fr));
       gap: 14px;
     }
 
     .student-card {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 10px;
+      background: linear-gradient(180deg, rgba(16,26,48,.98), rgba(13,21,40,.96));
+      border: 1px solid rgba(142,160,195,.16);
+      border-radius: 14px;
       overflow: hidden;
       cursor: pointer;
       transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+      box-shadow: 0 8px 24px rgba(2, 8, 20, .34);
     }
     .student-card:hover {
       transform: translateY(-2px);
       border-color: var(--accent);
-      box-shadow: 0 4px 20px rgba(79,142,247,.25);
+      box-shadow: 0 10px 30px rgba(58,160,255,.24);
     }
     .student-card:hover .card-header {
       background: rgba(255,255,255,0.05);
@@ -131,7 +147,7 @@
     .card-screen {
       width: 100%;
       aspect-ratio: 16/9;
-      background: #0a0c14;
+      background: #070f21;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -157,8 +173,8 @@
       display: flex;
       align-items: center;
       gap: 8px;
-      background: rgba(255,255,255,0.02);
-      border-bottom: 1px solid var(--card-border);
+      background: rgba(5, 11, 26, .24);
+      border-bottom: 1px solid rgba(142,160,195,.12);
     }
     .card-info {
       padding: 8px 12px;
@@ -184,8 +200,9 @@
     .status-dot {
       width: 7px; height: 7px;
       border-radius: 50%;
-      background: var(--green);
+      background: #20d398;
       flex-shrink: 0;
+      box-shadow: 0 0 0 4px rgba(32,211,152,.15);
     }
 
     /* ── Mensaje vacío ── */
@@ -329,21 +346,20 @@
     }
     .msg-ind-btn:hover { border-color: var(--accent); color: var(--accent); }
 
-    /* ── Barra de mensajes ── */
-    #msg-bar { padding: 0 20px 12px; }
+    /* ── Botón nuevo mensaje ── */
     #btn-enviar-msg {
-      background: var(--accent);
+      background: linear-gradient(120deg, var(--accent), #1f83e2);
       color: #fff;
       border: none;
-      border-radius: 8px;
-      padding: 7px 16px;
+      border-radius: 10px;
+      padding: 8px 16px;
       font-size: 0.85rem;
-      font-weight: 600;
+      font-weight: 700;
       cursor: pointer;
-      transition: background .15s;
+      transition: background .15s, transform .15s;
       white-space: nowrap;
     }
-    #btn-enviar-msg:hover { background: #3a7de0; }
+    #btn-enviar-msg:hover { background: linear-gradient(120deg, #2890f4, #1774cc); transform: translateY(-1px); }
 
     /* ── Modal redactar mensaje ── */
     #compose-overlay {
@@ -463,6 +479,8 @@
       display: flex; align-items: center; justify-content: space-between;
       padding: 10px 16px; flex-shrink: 0;
       background: var(--card-bg); border-bottom: 1px solid var(--card-border);
+      gap: 10px;
+      flex-wrap: wrap;
     }
     #liveview-header-left  { display: flex; align-items: center; gap: 10px; }
     #liveview-name         { font-weight: 700; font-size: 1rem; }
@@ -471,7 +489,7 @@
       padding: 2px 10px; border-radius: 999px; border: 1px solid;
     }
     .lv-badge.view    { color: var(--accent); border-color: var(--accent); background: #1a2340; }
-    .lv-badge.control { color: #f6ad55;       border-color: #f6ad55;       background: #2d1f0a; }
+    .lv-badge.control { color: var(--amber);  border-color: var(--amber);  background: #2d1f0a; }
     #liveview-fps { font-size: 0.78rem; color: var(--muted); }
     #liveview-header button {
       background: none; border: 1px solid var(--card-border); color: var(--muted);
@@ -479,6 +497,79 @@
       transition: border-color .15s, color .15s;
     }
     #liveview-header button:hover { border-color: var(--text); color: var(--text); }
+    #liveview-header button.active {
+      background: #112544;
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    #liveview-toolbar {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid rgba(142,160,195,.16);
+      border-radius: 10px;
+      background: #0a1226;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.02);
+      flex-wrap: wrap;
+    }
+    #liveview-toolbar.show { display: flex; }
+    .lv-tool-btn {
+      background: #111a31;
+      border: 1px solid #2b3d68;
+      color: var(--muted);
+      border-radius: 8px;
+      padding: 5px 10px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: border-color .15s, color .15s, background .15s;
+      line-height: 1.2;
+    }
+    .lv-tool-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .lv-tool-btn.active {
+      background: #102441;
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+    .lv-tool-label {
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 600;
+      margin-left: 4px;
+    }
+    #lv-overlay-color {
+      width: 36px;
+      height: 30px;
+      border: 1px solid #2b3d68;
+      border-radius: 8px;
+      background: #0d1830;
+      cursor: pointer;
+      padding: 0;
+    }
+    #lv-overlay-size {
+      width: 110px;
+      accent-color: var(--accent);
+    }
+    #lv-overlay-size-val {
+      color: var(--text);
+      font-size: 0.76rem;
+      min-width: 24px;
+      text-align: right;
+    }
+    #lv-overlay-text {
+      background: #0b1428;
+      border: 1px solid #2d3f68;
+      color: var(--text);
+      border-radius: 8px;
+      padding: 5px 9px;
+      font-size: 0.8rem;
+      min-width: 180px;
+      outline: none;
+      display: none;
+    }
+    #lv-overlay-text:focus { border-color: var(--accent); }
+    #liveview-body.overlay-draw-mode { cursor: crosshair; }
     #clipboard-overlay {
       display: none; position: fixed; inset: 0; z-index: 1200;
       background: rgba(0,0,0,.65); align-items: center; justify-content: center;
@@ -507,7 +598,7 @@
       flex: 1; min-height: 0; overflow: hidden;
       display: flex; align-items: center; justify-content: center;
     }
-    #liveview-body.control-mode { cursor: crosshair; }
+    #liveview-body.control-mode { cursor: default; }
     #liveview-img {
       max-width: 100%; max-height: 100%; object-fit: contain; display: block;
       user-select: none; -webkit-user-drag: none;
@@ -610,17 +701,17 @@
 
     /* ── Botón compartir pantalla ── */
     #btn-compartir {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
+      background: #111b33;
+      border: 1px solid #2b3d68;
       color: var(--text);
       border-radius: 8px;
       padding: 6px 14px;
       font-size: 0.85rem;
       cursor: pointer;
-      transition: background .15s, border-color .15s;
+      transition: background .15s, border-color .15s, color .15s;
       white-space: nowrap;
     }
-    #btn-compartir:hover { background: #252840; border-color: var(--accent); }
+    #btn-compartir:hover { background: #142241; border-color: var(--accent); color: var(--accent); }
     #btn-compartir.sharing {
       background: #2d1a1a;
       border-color: var(--red);
@@ -811,11 +902,11 @@
     }
     .term-ind-btn:hover { border-color: var(--green); color: var(--green); }
     #btn-terminal {
-      background: none; border: 1px solid var(--card-border); color: var(--muted);
+      background: #111b33; border: 1px solid #2b3d68; color: var(--muted);
       border-radius: 8px; padding: 6px 14px; font-size: 0.85rem; cursor: pointer;
-      transition: border-color .15s, color .15s; white-space: nowrap;
+      transition: border-color .15s, color .15s, background .15s; white-space: nowrap;
     }
-    #btn-terminal:hover { border-color: var(--green); color: var(--green); }
+    #btn-terminal:hover { border-color: var(--green); color: var(--green); background: #122922; }
 
     /* ── Selección múltiple ── */
     .student-card.selected {
@@ -871,8 +962,8 @@
     .sel-btn.cancel:hover { border-color: var(--red); color: var(--red); }
 
     #btn-select-mode {
-      background: none;
-      border: 1px solid var(--card-border);
+      background: #111b33;
+      border: 1px solid #2b3d68;
       color: var(--muted);
       border-radius: 8px;
       padding: 6px 14px;
@@ -881,8 +972,25 @@
       transition: border-color .15s, color .15s, background .15s;
       white-space: nowrap;
     }
-    #btn-select-mode:hover { border-color: var(--accent); color: var(--accent); }
-    #btn-select-mode.active { background: #1a2340; border-color: var(--accent); color: var(--accent); }
+    #btn-select-mode:hover { border-color: var(--accent); color: var(--accent); background: #142241; }
+    #btn-select-mode.active { background: #16315b; border-color: var(--accent); color: var(--accent); }
+
+    #btn-cerrar-todos {
+      background: #111b33;
+      border: 1px solid #2b3d68;
+      color: var(--muted);
+      border-radius: 8px;
+      padding: 6px 14px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: border-color .15s, color .15s, background .15s;
+      white-space: nowrap;
+    }
+    #btn-cerrar-todos:hover {
+      border-color: var(--red);
+      color: var(--red);
+      background: #2d1a1a;
+    }
 
     /* Preview miniatura de lo que se comparte */
     #share-preview {
@@ -916,12 +1024,10 @@
   </label>
   <input type="text" id="search-input" placeholder="🔍 Buscar alumno…" />
   <button id="btn-select-mode" onclick="toggleSelectionMode()">☑ Seleccionar</button>
+  <button id="btn-enviar-msg" onclick="abrirCompose()">✉ Nuevo mensaje</button>
   <button id="btn-terminal" onclick="abrirTerminal()">⌨ Terminal</button>
   <button id="btn-compartir" onclick="toggleCompartir()">📺 Compartir mi pantalla</button>
-  <button id="btn-cerrar-todos" onclick="quitAll()"
-          style="background:none;border:1px solid var(--card-border);color:var(--muted);border-radius:8px;padding:6px 14px;font-size:0.85rem;cursor:pointer;transition:border-color .15s,color .15s"
-          onmouseover="this.style.borderColor='#fc8181';this.style.color='#fc8181'"
-          onmouseout="this.style.borderColor='var(--card-border)';this.style.color='var(--muted)'">⏻ Apagar todos</button>
+  <button id="btn-cerrar-todos" onclick="quitAll()">⏻ Apagar todos</button>
   <img id="share-preview" alt="Previsualización" title="Lo que ven los alumnos" />
 </div>
 
@@ -934,11 +1040,6 @@
   <button class="sel-btn primary" onclick="compartirConSeleccionados()">📺 Compartir con seleccionados</button>
   <button class="sel-btn primary" onclick="abrirTerminalSeleccion()" style="background:#1a3320;border-color:var(--green);color:var(--green)">⌨ Comando a seleccionados</button>
   <button class="sel-btn cancel" onclick="cancelarSeleccion()">✕ Cancelar selección</button>
-</div>
-
-<!-- ── Barra de mensajes ── -->
-<div id="msg-bar">
-  <button id="btn-enviar-msg" onclick="abrirCompose()">✉ Nuevo mensaje</button>
 </div>
 
 <!-- ── Cuadrícula de alumnos ── -->
@@ -1473,8 +1574,73 @@ let _liveOrigW = 1280, _liveOrigH = 720;
 let _lastMouseSend = 0, _liveFps = 0, _liveFpsTs = 0;
 let _pc = null, _dc_mouse = null, _dc_kbd = null, _webrtcActivo = false;
 let _pendingLiveFrame = null;   // último frame JPEG pendiente de mostrar
+let _overlayEnabled = false;
+let _overlayDrawMode = false;
+let _overlayTool = 'brush';
+let _overlayColor = '#ff3b30';
+let _overlaySize = 6;
+let _overlayText = '';
+let _overlayLastPoint = null;
 const _STUN = [{ urls:'stun:stun.l.google.com:19302' },
                { urls:'stun:stun1.l.google.com:19302' }];
+
+function _emitOverlay(payload) {
+  if (!_liveviewSid || _liveviewMode !== 'control') return;
+  _enviarInput({ sid: _liveviewSid, ...payload });
+}
+
+function _syncOverlayUi() {
+  const overlayBtn = document.getElementById('lv-overlay-toggle');
+  const drawBtn = document.getElementById('lv-draw-toggle');
+  const toolbar = document.getElementById('liveview-toolbar');
+  const body = document.getElementById('liveview-body');
+  const textInput = document.getElementById('lv-overlay-text');
+  const sizeVal = document.getElementById('lv-overlay-size-val');
+  const toolBrush = document.getElementById('lv-tool-brush');
+  const toolText = document.getElementById('lv-tool-text');
+
+  if (overlayBtn) {
+    overlayBtn.textContent = `🧑‍🏫 Pizarra: ${_overlayEnabled ? 'ON' : 'OFF'}`;
+    overlayBtn.classList.toggle('active', _overlayEnabled);
+  }
+  if (drawBtn) {
+    drawBtn.textContent = `✏ Dibujar: ${_overlayDrawMode ? 'ON' : 'OFF'}`;
+    drawBtn.classList.toggle('active', _overlayDrawMode);
+    drawBtn.disabled = !_overlayEnabled;
+    drawBtn.style.opacity = _overlayEnabled ? '1' : '.5';
+    drawBtn.style.cursor = _overlayEnabled ? 'pointer' : 'not-allowed';
+  }
+  if (toolbar) {
+    const showTools = _liveviewMode === 'control' && _overlayEnabled;
+    toolbar.classList.toggle('show', showTools);
+  }
+  if (body) {
+    body.classList.toggle('overlay-draw-mode', _overlayDrawMode);
+  }
+  if (toolBrush && toolText) {
+    toolBrush.classList.toggle('active', _overlayTool === 'brush');
+    toolText.classList.toggle('active', _overlayTool === 'text');
+  }
+  if (textInput) {
+    textInput.style.display = _overlayTool === 'text' ? '' : 'none';
+  }
+  if (sizeVal) sizeVal.textContent = String(_overlaySize);
+}
+
+function _setOverlayEnabled(value) {
+  _overlayEnabled = !!value;
+  if (!_overlayEnabled) _overlayDrawMode = false;
+  _overlayLastPoint = null;
+  _emitOverlay({ type: 'overlay_toggle', enabled: _overlayEnabled });
+  _syncOverlayUi();
+}
+
+function _setOverlayDrawMode(value) {
+  if (!_overlayEnabled) return;
+  _overlayDrawMode = !!value;
+  _overlayLastPoint = null;
+  _syncOverlayUi();
+}
 
 // Loop sincronizado con el repintado del navegador: evita parpadeo al mostrar
 // frames JPEG. Si llegan varios frames entre dos repaints, solo se muestra el más reciente.
@@ -1514,19 +1680,39 @@ function abrirLiveView(sid, mode) {
   _liveviewMode = mode;
   _liveOrigW = 1280; _liveOrigH = 720;
   _liveFps = 0; _liveFpsTs = Date.now();
+  _overlayEnabled = false;
+  _overlayDrawMode = false;
+  _overlayTool = 'brush';
+  _overlayColor = '#ff3b30';
+  _overlaySize = 6;
+  _overlayText = '';
+  _overlayLastPoint = null;
 
   document.getElementById('liveview-name').textContent = students[sid]?.name || sid;
   const badge = document.getElementById('liveview-badge');
   const body  = document.getElementById('liveview-body');
+  const overlayBtn = document.getElementById('lv-overlay-toggle');
+  const drawBtn = document.getElementById('lv-draw-toggle');
+  const colorInput = document.getElementById('lv-overlay-color');
+  const sizeInput = document.getElementById('lv-overlay-size');
+  const textInput = document.getElementById('lv-overlay-text');
   if (mode === 'control') {
     badge.textContent = '🖱 Control remoto';
     badge.className   = 'lv-badge control';
     body.classList.add('control-mode');
+    overlayBtn.style.display = '';
+    drawBtn.style.display = '';
   } else {
     badge.textContent = '👁 Solo ver';
     badge.className   = 'lv-badge view';
     body.classList.remove('control-mode');
+    overlayBtn.style.display = 'none';
+    drawBtn.style.display = 'none';
   }
+  colorInput.value = _overlayColor;
+  sizeInput.value = String(_overlaySize);
+  textInput.value = '';
+  _syncOverlayUi();
   document.getElementById('liveview-fps').textContent = '…';
   document.getElementById('liveview-img').src = students[sid]?.image || '';
 
@@ -1539,12 +1725,20 @@ function abrirLiveView(sid, mode) {
 }
 
 function cerrarLiveView() {
+  if (_overlayEnabled && _liveviewSid) {
+    _emitOverlay({ type: 'overlay_toggle', enabled: false });
+  }
   if (_liveviewSid) socket.emit('stop_view', { sid: _liveviewSid });
   _liveviewSid = null;
+  _overlayEnabled = false;
+  _overlayDrawMode = false;
+  _overlayLastPoint = null;
   document.getElementById('lv-clipboard-btn').style.display = 'none';
+  document.getElementById('lv-overlay-toggle').style.display = 'none';
+  document.getElementById('lv-draw-toggle').style.display = 'none';
   cerrarPortapapeles();
   document.getElementById('liveview-overlay').classList.remove('show');
-  document.getElementById('liveview-body').classList.remove('control-mode');
+  document.getElementById('liveview-body').classList.remove('control-mode', 'overlay-draw-mode');
   document.getElementById('liveview-img').src = '';
   if (_pc) { _pc.close(); _pc = null; }
   _dc_mouse = null; _dc_kbd = null; _webrtcActivo = false;
@@ -1553,6 +1747,7 @@ function cerrarLiveView() {
   document.getElementById('liveview-img').style.display = 'block';
   document.getElementById('liveview-transport').textContent = 'JPEG';
   document.getElementById('liveview-transport').style.color = 'var(--muted)';
+  _syncOverlayUi();
 }
 
 // ── WebRTC ────────────────────────────────────────────────────────────────
@@ -1652,6 +1847,7 @@ socket.on('webrtc_ice', async (data) => {
 
 function _fallbackJPEG(razon) {
   if (_webrtcActivo) return;
+  const overlayWasEnabled = _overlayEnabled;
   console.log('[WebRTC] Fallback JPEG:', razon);
   const vid = document.getElementById('liveview-video');
   vid.style.display = 'none'; vid.srcObject = null;
@@ -1666,6 +1862,9 @@ function _fallbackJPEG(razon) {
   if (_liveviewSid) {
     socket.emit('stop_view',  { sid: _liveviewSid });
     socket.emit('start_view', { sid: _liveviewSid, mode: _liveviewMode });
+    if (overlayWasEnabled && _liveviewMode === 'control') {
+      setTimeout(() => _emitOverlay({ type: 'overlay_toggle', enabled: true }), 250);
+    }
   }
 }
 
@@ -1699,7 +1898,7 @@ function cerrarPortapapeles() {
 
 function _enviarInput(payload) {
   const tipo = payload.type;
-  const esMouse = tipo === 'mousemove' || tipo === 'mousedown' || tipo === 'mouseup' || tipo === 'scroll';
+  const esMouse = tipo === 'mousemove' || tipo === 'mousedown' || tipo === 'mouseup' || tipo === 'scroll' || tipo === 'overlay_draw';
   if (_webrtcActivo) {
     if (esMouse && _dc_mouse?.readyState === 'open') {
       _dc_mouse.send(JSON.stringify(payload)); return;
@@ -1759,13 +1958,68 @@ function _traducirCoords(e) {
 document.addEventListener('DOMContentLoaded', function () {
   const ov   = document.getElementById('liveview-overlay');
   const body = document.getElementById('liveview-body');
+  const overlayBtn = document.getElementById('lv-overlay-toggle');
+  const drawBtn = document.getElementById('lv-draw-toggle');
+  const toolBrushBtn = document.getElementById('lv-tool-brush');
+  const toolTextBtn = document.getElementById('lv-tool-text');
+  const clearBtn = document.getElementById('lv-overlay-clear');
+  const colorInput = document.getElementById('lv-overlay-color');
+  const sizeInput = document.getElementById('lv-overlay-size');
+  const textInput = document.getElementById('lv-overlay-text');
 
   const _MOD_SET = new Set(['Control', 'Alt', 'Shift', 'Meta']);
 
+  overlayBtn.addEventListener('click', () => {
+    if (_liveviewMode !== 'control' || !_liveviewSid) return;
+    _setOverlayEnabled(!_overlayEnabled);
+    ov.focus();
+  });
+
+  drawBtn.addEventListener('click', () => {
+    if (_liveviewMode !== 'control' || !_liveviewSid || !_overlayEnabled) return;
+    _setOverlayDrawMode(!_overlayDrawMode);
+    ov.focus();
+  });
+
+  toolBrushBtn.addEventListener('click', () => {
+    _overlayTool = 'brush';
+    _syncOverlayUi();
+    ov.focus();
+  });
+  toolTextBtn.addEventListener('click', () => {
+    _overlayTool = 'text';
+    _syncOverlayUi();
+    textInput.focus();
+    textInput.select();
+  });
+  clearBtn.addEventListener('click', () => {
+    if (!_overlayEnabled) return;
+    _emitOverlay({ type: 'overlay_clear' });
+    ov.focus();
+  });
+
+  colorInput.addEventListener('input', () => {
+    _overlayColor = colorInput.value || '#ff3b30';
+  });
+  sizeInput.addEventListener('input', () => {
+    _overlaySize = Math.max(2, Math.min(28, parseInt(sizeInput.value || '6', 10) || 6));
+    sizeInput.value = String(_overlaySize);
+    _syncOverlayUi();
+  });
+  textInput.addEventListener('input', () => {
+    _overlayText = textInput.value;
+  });
+  textInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') e.preventDefault();
+    e.stopPropagation();
+  });
+  textInput.addEventListener('keyup', (e) => e.stopPropagation());
+
   ov.addEventListener('keydown', (e) => {
     if (!_liveviewSid) return;
-    if (e.key === 'Escape') { cerrarLiveView(); return; }
+    if (e.key === 'Escape') { e.preventDefault(); cerrarLiveView(); return; }
     if (_liveviewMode !== 'control') return;
+    if (document.activeElement && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
     if (e.ctrlKey && e.shiftKey && e.key === 'C') { e.preventDefault(); pedirPortapapeles(); return; }
     e.preventDefault();
 
@@ -1810,6 +2064,17 @@ document.addEventListener('DOMContentLoaded', function () {
     if (now - _lastMouseSend < 10) return;   // throttle ≈ 100 eventos/s
     _lastMouseSend = now;
     const { x, y } = _traducirCoords(e);
+    if (_overlayEnabled && _overlayDrawMode && _overlayTool === 'brush' && (e.buttons & 1)) {
+      const p0 = _overlayLastPoint || { x, y };
+      _emitOverlay({
+        type: 'overlay_draw',
+        x0: p0.x, y0: p0.y, x1: x, y1: y,
+        color: _overlayColor,
+        size: _overlaySize,
+      });
+      _overlayLastPoint = { x, y };
+      return;
+    }
     _enviarInput({ sid: _liveviewSid, type: 'mousemove', x, y });
   });
 
@@ -1818,6 +2083,29 @@ document.addEventListener('DOMContentLoaded', function () {
     e.preventDefault();
     ov.focus();
     const { x, y } = _traducirCoords(e);
+    if (_overlayEnabled && _overlayDrawMode) {
+      if (_overlayTool === 'text') {
+        const text = (textInput.value || _overlayText || 'Texto').trim();
+        if (text) {
+          _emitOverlay({
+            type: 'overlay_text',
+            x, y,
+            text,
+            color: _overlayColor,
+            size: _overlaySize,
+          });
+        }
+        return;
+      }
+      _overlayLastPoint = { x, y };
+      _emitOverlay({
+        type: 'overlay_draw',
+        x0: x, y0: y, x1: x, y1: y,
+        color: _overlayColor,
+        size: _overlaySize,
+      });
+      return;
+    }
     const btn = ['left','middle','right'][e.button] || 'left';
     const mods = [];
     if (e.ctrlKey)  mods.push('ctrl');
@@ -1828,6 +2116,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
   body.addEventListener('mouseup', (e) => {
     if (_liveviewMode !== 'control' || !_liveviewSid) return;
+    if (_overlayEnabled && _overlayDrawMode) {
+      _overlayLastPoint = null;
+      return;
+    }
     const { x, y } = _traducirCoords(e);
     const btn = ['left','middle','right'][e.button] || 'left';
     _enviarInput({ sid: _liveviewSid, type: 'mouseup', x, y, button: btn });
@@ -1839,6 +2131,16 @@ document.addEventListener('DOMContentLoaded', function () {
 
   body.addEventListener('wheel', (e) => {
     if (_liveviewMode !== 'control' || !_liveviewSid) return;
+    if (_overlayEnabled && _overlayDrawMode) {
+      e.preventDefault();
+      if (_overlayTool === 'brush') {
+        const delta = e.deltaY < 0 ? 1 : -1;
+        _overlaySize = Math.max(2, Math.min(28, _overlaySize + delta));
+        sizeInput.value = String(_overlaySize);
+        _syncOverlayUi();
+      }
+      return;
+    }
     e.preventDefault();
     const { x, y } = _traducirCoords(e);
     _enviarInput({
@@ -1846,6 +2148,8 @@ document.addEventListener('DOMContentLoaded', function () {
       dy: Math.round(-e.deltaY / 100),
     });
   }, { passive: false });
+
+  _syncOverlayUi();
 
   // ── Listeners adjuntos compose ────────────────────────────────────────────
   const fileInput = document.getElementById('compose-file-input');
@@ -2237,9 +2541,22 @@ socket.on('command_result', (data) => {
       <span id="liveview-transport" style="font-size:0.75rem;color:var(--muted);margin-left:8px;">JPEG</span>
     </div>
     <span id="liveview-fps">…</span>
+    <button id="lv-overlay-toggle" style="display:none" title="Activar/desactivar pizarra en el cliente">🧑‍🏫 Pizarra: OFF</button>
+    <button id="lv-draw-toggle" style="display:none" title="Alternar entre control remoto y dibujar sobre la pizarra">✏ Dibujar: OFF</button>
     <button id="lv-clipboard-btn" onclick="pedirPortapapeles()" style="display:none"
             title="Obtener portapapeles del alumno (Ctrl+Shift+C)">📋 Portapapeles</button>
     <button onclick="cerrarLiveView()">✕ Cerrar (Esc)</button>
+    <div id="liveview-toolbar">
+      <button id="lv-tool-brush" class="lv-tool-btn active" title="Pincel">🖌 Pincel</button>
+      <button id="lv-tool-text" class="lv-tool-btn" title="Texto">T Texto</button>
+      <button id="lv-overlay-clear" class="lv-tool-btn" title="Limpiar la pizarra">🧽 Limpiar</button>
+      <span class="lv-tool-label">Color</span>
+      <input id="lv-overlay-color" type="color" value="#ff3b30" title="Color del pincel" />
+      <span class="lv-tool-label">Grosor</span>
+      <input id="lv-overlay-size" type="range" min="2" max="28" value="6" step="1" title="Grosor del pincel" />
+      <span id="lv-overlay-size-val">6</span>
+      <input id="lv-overlay-text" type="text" maxlength="120" placeholder="Texto a escribir en la pizarra…" />
+    </div>
   </div>
   <div id="liveview-body">
     <img id="liveview-img" draggable="false" alt="Pantalla del alumno" />

@@ -17,6 +17,8 @@ import queue
 import base64
 import shutil
 import subprocess
+import ctypes
+import ctypes.util
 
 # ── Importaciones ────────────────────────────────────────────────────────────
 
@@ -224,6 +226,7 @@ _cola_bloqueo       = queue.Queue(maxsize=10)
 _cola_mensajes      = queue.Queue(maxsize=20)
 _cola_clipboard_req = queue.Queue(maxsize=1)
 _cola_clipboard_res = queue.Queue(maxsize=1)
+_cola_overlay       = queue.Queue(maxsize=300)
 _en_observacion = False
 _webrtc_loop   = None   # event loop asyncio dedicado
 _webrtc_pc     = None   # RTCPeerConnection activa
@@ -452,8 +455,21 @@ _MOUSE_THROTTLE  = 0.01   # 100 Hz maximum for mousemove events
 def on_do_input(data):
     """Encola el evento; el hilo vigia-input lo ejecuta en orden estricto."""
     global _last_mouse_time
-    if not INPUT_OK: return
     tipo = data.get('type', '')
+    if tipo.startswith('overlay_'):
+        if not TK_OK:
+            return
+        try:
+            _cola_overlay.put_nowait(data)
+        except queue.Full:
+            try:
+                _cola_overlay.get_nowait()
+                _cola_overlay.put_nowait(data)
+            except Exception:
+                pass
+        return
+    if not INPUT_OK:
+        return
     if tipo == 'mousemove':
         # Throttle to 100 Hz max; excess events dropped before reaching the queue
         now = time.monotonic()
@@ -489,6 +505,10 @@ def on_viewer_start(data):
 def on_viewer_stop(_data):
     global _en_observacion; _en_observacion = False
     print(f"[*] Fin de observación.")
+    try:
+        _cola_overlay.put_nowait({'type': 'overlay_toggle', 'enabled': False})
+    except Exception:
+        pass
     if WEBRTC_OK:
         _wrtc(_cerrar_webrtc())
 
@@ -679,6 +699,46 @@ if WEBRTC_OK:
         if _webrtc_pc: await _webrtc_pc.close()
         _webrtc_pc = None; _webrtc_activo = False; _webrtc_prof = None
 
+# ── Overlay pizarra (cliente) ───────────────────────────────────────────────
+def _set_clickthrough_x11(window_id: int) -> bool:
+    """Hace una ventana X11 'click-through' (no captura ratón/teclado)."""
+    try:
+        x11_path = ctypes.util.find_library('X11')
+        fix_path = ctypes.util.find_library('Xfixes')
+        if not x11_path or not fix_path:
+            return False
+        x11 = ctypes.cdll.LoadLibrary(x11_path)
+        xfix = ctypes.cdll.LoadLibrary(fix_path)
+
+        x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        x11.XOpenDisplay.restype = ctypes.c_void_p
+        x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+        x11.XCloseDisplay.restype = ctypes.c_int
+        x11.XFlush.argtypes = [ctypes.c_void_p]
+        x11.XFlush.restype = ctypes.c_int
+
+        xfix.XFixesCreateRegion.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
+        xfix.XFixesCreateRegion.restype = ctypes.c_ulong
+        xfix.XFixesSetWindowShapeRegion.argtypes = [
+            ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong
+        ]
+        xfix.XFixesDestroyRegion.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+
+        dpy = x11.XOpenDisplay(None)
+        if not dpy:
+            return False
+        try:
+            empty_region = xfix.XFixesCreateRegion(dpy, None, 0)
+            ShapeInput = 2
+            xfix.XFixesSetWindowShapeRegion(dpy, ctypes.c_ulong(window_id), ShapeInput, 0, 0, empty_region)
+            xfix.XFixesDestroyRegion(dpy, empty_region)
+            x11.XFlush(dpy)
+            return True
+        finally:
+            x11.XCloseDisplay(dpy)
+    except Exception:
+        return False
+
 # ── Interfaz UI ──────────────────────────────────────────────────────────────
 class _VentanaProfesor:
     def __init__(self, root):
@@ -785,10 +845,90 @@ class _VentanaBloqueo:
             except: pass
     def desbloquear(self): self._activa = False; self.top.destroy()
 
+class _VentanaPizarra:
+    """Overlay visual para anotaciones del profesor (click-through en X11)."""
+
+    def __init__(self, root):
+        self.top = tk.Toplevel(root)
+        self.top.overrideredirect(True)
+        self.top.attributes('-topmost', True)
+        self.top.attributes('-fullscreen', True)
+        self._transparent = '#010203'
+        self.top.configure(bg=self._transparent)
+        self.canvas = tk.Canvas(self.top, bg=self._transparent, highlightthickness=0, bd=0)
+        self.canvas.pack(fill='both', expand=True)
+
+        # Transparencia real si está disponible; fallback visual mínimo.
+        try:
+            self.top.wm_attributes('-transparentcolor', self._transparent)
+        except Exception:
+            try:
+                self.top.attributes('-alpha', 0.16)
+            except Exception:
+                pass
+
+        self._clickthrough_checked = False
+        self._clickthrough_ok = False
+        self._visible = False
+        self.top.withdraw()
+
+    def _ensure_clickthrough(self):
+        if self._clickthrough_checked:
+            return self._clickthrough_ok
+        try:
+            self.top.update_idletasks()
+            self._clickthrough_ok = _set_clickthrough_x11(int(self.top.winfo_id()))
+        except Exception:
+            self._clickthrough_ok = False
+        self._clickthrough_checked = True
+        if not self._clickthrough_ok:
+            print("  [!] Pizarra deshabilitada: no se pudo activar modo click-through en X11.")
+        return self._clickthrough_ok
+
+    def mostrar(self):
+        self.top.deiconify()
+        self.top.lift()
+        self.top.attributes('-topmost', True)
+        if not self._ensure_clickthrough():
+            self.top.withdraw()
+            self._visible = False
+            return False
+        self._visible = True
+        return True
+
+    def ocultar(self):
+        self.top.withdraw()
+        self._visible = False
+
+    def visible(self):
+        return self._visible
+
+    def limpiar(self):
+        self.canvas.delete('all')
+
+    def dibujar(self, x0, y0, x1, y1, color='#ff3b30', size=6):
+        if not self._visible:
+            return
+        w = max(1, int(size))
+        self.canvas.create_line(
+            int(x0), int(y0), int(x1), int(y1),
+            fill=color, width=w, capstyle='round', smooth=True, splinesteps=12
+        )
+
+    def texto(self, x, y, text, color='#ff3b30', size=6):
+        if not self._visible or not text:
+            return
+        fs = max(14, int(size) * 3)
+        self.canvas.create_text(
+            int(x), int(y), text=str(text), anchor='nw',
+            fill=color, font=('Segoe UI', fs, 'bold')
+        )
+
 def ejecutar_interfaz():
-    root = tk.Tk(); root.withdraw(); v_prof = None; v_bloq = None
+    root = tk.Tk(); root.withdraw(); v_prof = None; v_bloq = None; v_overlay = None
+    overlay_activa = False
     def check():
-        nonlocal v_prof, v_bloq
+        nonlocal v_prof, v_bloq, v_overlay, overlay_activa
         try:
             while not _cola_profesor.empty():
                 d = _cola_profesor.get_nowait()
@@ -801,6 +941,36 @@ def ejecutar_interfaz():
                     if not v_bloq: v_bloq = _VentanaBloqueo(root)
                 elif v_bloq: v_bloq.desbloquear(); v_bloq = None
             while not _cola_mensajes.empty(): _VentanaMensaje(root, _cola_mensajes.get_nowait())
+            while not _cola_overlay.empty():
+                d = _cola_overlay.get_nowait()
+                tipo = d.get('type', '')
+                if tipo == 'overlay_toggle':
+                    overlay_activa = bool(d.get('enabled', False))
+                    if overlay_activa:
+                        if not v_overlay: v_overlay = _VentanaPizarra(root)
+                        if not v_overlay.mostrar():
+                            overlay_activa = False
+                            v_overlay = None
+                    elif v_overlay:
+                        v_overlay.ocultar()
+                elif tipo == 'overlay_clear':
+                    if v_overlay: v_overlay.limpiar()
+                elif tipo == 'overlay_draw':
+                    if overlay_activa and v_overlay and v_overlay.visible():
+                        v_overlay.dibujar(
+                            d.get('x0', 0), d.get('y0', 0),
+                            d.get('x1', 0), d.get('y1', 0),
+                            d.get('color', '#ff3b30'),
+                            d.get('size', 6),
+                        )
+                elif tipo == 'overlay_text':
+                    if overlay_activa and v_overlay and v_overlay.visible():
+                        v_overlay.texto(
+                            d.get('x', 0), d.get('y', 0),
+                            d.get('text', ''),
+                            d.get('color', '#ff3b30'),
+                            d.get('size', 6),
+                        )
             while not _cola_clipboard_req.empty():
                 _cola_clipboard_req.get_nowait()
                 try:
