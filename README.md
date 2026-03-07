@@ -8,16 +8,19 @@ Software de monitoreo de aula para ver en tiempo real las pantallas de los alumn
 [![Descargar Servidor](https://img.shields.io/badge/⬇%20%20VIGIA%20Servidor-vigia--server__1.1__amd64.deb-0073e6?style=for-the-badge&logo=debian&logoColor=white)](dist/vigia-server_1.1_amd64.deb)
 &nbsp;
 [![Descargar Cliente](https://img.shields.io/badge/⬇%20%20VIGIA%20Cliente-vigia--client__1.1__all.deb-E95420?style=for-the-badge&logo=debian&logoColor=white)](dist/vigia-client_1.1_all.deb)
+&nbsp;
+[![Build Windows EXE](https://img.shields.io/badge/🪟%20Build-Windows%20Installer-0078D6?style=for-the-badge&logo=windows&logoColor=white)](build_windows.ps1)
 
 </div>
 
-> Los paquetes se regeneran automáticamente con `bash build_debs.sh` cada vez que se actualiza el código fuente.
+> Linux: `bash build_debs.sh` genera los `.deb`.  
+> Windows: `.\build_windows.ps1` genera los 2 instaladores `.exe` (cliente y servidor).
 
 ---
 
 ## Instalación rápida
 
-> Los paquetes `.deb` están en la carpeta [`dist/`](dist/). Descárgalos desde los botones al inicio de este documento.
+### Linux (.deb)
 
 VIGIA se distribuye en dos paquetes `.deb` separados: uno para el profesor y otro para los alumnos.
 
@@ -36,6 +39,29 @@ sudo apt install ./vigia-client_1.1_all.deb
 ```
 
 Durante la instalación **se pedirá la IP del servidor** (por defecto se sugiere `x.x.x.2` detectada automáticamente). El cliente arranca solo al iniciar sesión (XDG autostart).
+
+### Windows (.exe)
+
+1. Genera los instaladores en Windows:
+
+```powershell
+.\build_windows.ps1 -Target all
+```
+
+2. Instala en el equipo del profesor:
+
+```text
+dist\windows\installers\vigia-server-1.1-setup.exe
+```
+
+3. Instala en cada equipo alumno:
+
+```text
+dist\windows\installers\vigia-client-1.1-setup.exe
+```
+
+Durante la instalación del cliente en Windows se solicita la IP del servidor y se guarda en:
+`C:\ProgramData\VIGIA\client.conf`.
 
 ---
 
@@ -78,6 +104,18 @@ bash instalar.sh
 
 Abre una ventana tkinter donde elegir Servidor o Cliente y pulsar *Instalar*.
 
+### Windows — ejecución directa sin instalador
+
+```powershell
+python -m pip install -r requirements_servidor.txt
+python server.py
+```
+
+```powershell
+python -m pip install -r requirements_cliente.txt
+python client.py 192.168.X.X
+```
+
 ---
 
 ## Cómo funciona
@@ -94,7 +132,9 @@ Abre una ventana tkinter donde elegir Servidor o Cliente y pulsar *Instalar*.
 
 ---
 
-## Generar los paquetes .deb
+## Generar paquetes (Linux y Windows)
+
+### Linux
 
 ```bash
 bash build_debs.sh
@@ -103,6 +143,22 @@ bash build_debs.sh
 Genera en `dist/`:
 - `vigia-server_1.1_amd64.deb` — paquete del profesor
 - `vigia-client_1.1_all.deb` — paquete del alumno
+
+### Windows
+
+```powershell
+.\build_windows.ps1 -Target all
+```
+
+Genera en `dist/windows/`:
+- `installers/vigia-server-1.1-setup.exe`
+- `installers/vigia-client-1.1-setup.exe`
+
+Opcional: si también quieres conservar los `.exe` portables intermedios, usa:
+
+```powershell
+.\build_windows.ps1 -Target all -KeepPortableApps
+```
 
 ---
 
@@ -121,11 +177,11 @@ Genera en `dist/`:
 
 ## Requisitos del sistema
 
-- **Kubuntu 22.04 / 24.04** (o cualquier Ubuntu/Debian moderno)
+- **Linux**: Kubuntu/Ubuntu/Debian moderno (sesión X11 para captura estable)
+- **Windows 10/11** (cliente y servidor soportados)
 - Python 3.10 o superior
-- Sesión **X11** (no Wayland)
 
-> ⚠️ **La captura de pantalla (`mss`) solo funciona en X11.**
+> ⚠️ En Linux, recomienda sesión **X11** (no Wayland) para captura y control remoto más estables.
 >
 > Comprueba tu sesión con: `echo $XDG_SESSION_TYPE`
 >
@@ -199,6 +255,10 @@ Todos los equipos deben estar en la **misma red local**. Si la WiFi tiene AP iso
 - Verifica que el servidor está en marcha: `systemctl --user status vigia-servidor`
 - Abre el puerto: `sudo ufw allow 5000/tcp`
 
+**Windows bloquea conexiones del cliente**
+- Permite `VIGIA-Server.exe` y `VIGIA-Client.exe` en el Firewall de Windows.
+- Verifica que ambos equipos estén en la misma red y que la IP configurada en `C:\ProgramData\VIGIA\client.conf` sea correcta.
+
 **"No module named pip"**
 ```bash
 sudo apt install python3-pip
@@ -223,6 +283,10 @@ VIGIA/
 ├── instalar_servidor.sh       ← Instalación servidor (deps + desktop + systemd)
 ├── instalar_cliente.sh        ← Instalación cliente (deps + desktop + autostart)
 ├── build_debs.sh              ← Genera ambos .deb en dist/
+├── build_windows.ps1          ← Genera .exe de cliente/servidor en Windows
+├── windows/
+│   ├── installer_server.iss   ← Script Inno Setup (instalador .exe servidor)
+│   └── installer_client.iss   ← Script Inno Setup (instalador .exe cliente)
 ├── templates/
 │   └── dashboard.html         ← Panel SPA del profesor (JS vanilla + Socket.IO)
 └── img/

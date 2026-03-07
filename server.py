@@ -15,7 +15,9 @@ import threading
 import subprocess
 import webbrowser
 
-async_mode = 'eventlet'
+IS_LINUX = sys.platform.startswith('linux')
+BASE_DIR = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+async_mode = 'eventlet' if IS_LINUX else 'threading'
 
 import socket
 from datetime import datetime
@@ -24,7 +26,7 @@ from flask_socketio import SocketIO, emit, join_room
 
 print(f"[*] Iniciando servidor VIGIA (modo: {async_mode})")
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder=os.path.join(BASE_DIR, 'templates'))
 app.config['SECRET_KEY'] = 'vigia-aula-2024'
 
 socketio = SocketIO(
@@ -75,7 +77,7 @@ def dashboard():
 @app.route('/img/<path:filename>')
 def serve_img(filename):
     from flask import send_from_directory
-    img_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'img')
+    img_dir = os.path.join(BASE_DIR, 'img')
     return send_from_directory(img_dir, filename)
 
 
@@ -240,6 +242,8 @@ def on_lock_student(data):
 
 def _get_window_list():
     """Devuelve ventanas visibles usando xprop (_NET_CLIENT_LIST + _NET_WM_NAME)."""
+    if not IS_LINUX:
+        return []
     try:
         r = subprocess.run(['xprop', '-root', '-notype', '_NET_CLIENT_LIST'],
                            capture_output=True, text=True, timeout=3)
@@ -285,6 +289,8 @@ def _get_window_list():
 
 def _get_window_region(wid):
     """Devuelve la región actual de una ventana vía xdotool."""
+    if not IS_LINUX:
+        return None
     try:
         gr = subprocess.run(['xdotool', 'getwindowgeometry', '--shell', wid],
                             capture_output=True, text=True, timeout=2)
@@ -317,7 +323,10 @@ def _teacher_capture_loop():
                         continue
                     cap = sct.grab(region)
                 else:
-                    mon = sct.monitors[_teacher_capture.get('monitor', 1)]
+                    monitor_idx = int(_teacher_capture.get('monitor', 1))
+                    if monitor_idx < 0 or monitor_idx >= len(sct.monitors):
+                        monitor_idx = 1 if len(sct.monitors) > 1 else 0
+                    mon = sct.monitors[monitor_idx]
                     cap = sct.grab(mon)
                 img = Image.frombytes('RGB', (cap.width, cap.height), cap.rgb)
                 max_w = 1920
@@ -358,6 +367,8 @@ def _capture_window_thumb(wid_hex, max_w=192):
     """Captura thumbnail de ventana via Xlib GetImage.
     En compositors (KWin, Mutter) obtiene el contenido real de la ventana
     aunque esté oculta detrás de otras ventanas."""
+    if not IS_LINUX:
+        return None
     try:
         from Xlib import display as xlib_display, X
         from PIL import Image
@@ -383,6 +394,8 @@ def _capture_window_thumb(wid_hex, max_w=192):
 
 def _find_desktop_icon(classes):
     """Devuelve el nombre de icono de la app buscando en archivos .desktop por WM_CLASS."""
+    if not IS_LINUX:
+        return None
     lower = [c.lower() for c in classes]
     dirs = [
         '/usr/share/applications',
@@ -419,6 +432,8 @@ def _find_desktop_icon(classes):
 
 def _find_icon_path(name, preferred_size=48):
     """Resuelve un nombre de icono a la ruta del archivo usando GTK IconTheme."""
+    if not IS_LINUX:
+        return None
     if not name:
         return None
     if os.path.isabs(name):
@@ -465,6 +480,8 @@ def _icon_to_b64(path):
 
 def _get_window_app_icon(wid_hex):
     """Obtiene el icono de la aplicación de una ventana via WM_CLASS y .desktop."""
+    if not IS_LINUX:
+        return None
     try:
         r = subprocess.run(['xprop', '-id', wid_hex, '-notype', 'WM_CLASS'],
                            capture_output=True, text=True, timeout=1)
@@ -515,7 +532,10 @@ def on_start_teacher_capture(data=None):
     data = data or {}
     _teacher_capture['sid'] = request.sid
     _teacher_capture['type'] = data.get('type', 'monitor')
-    _teacher_capture['monitor'] = data.get('monitor', 1)
+    try:
+        _teacher_capture['monitor'] = int(data.get('monitor', 1))
+    except (TypeError, ValueError):
+        _teacher_capture['monitor'] = 1
     _teacher_capture['wid'] = data.get('wid')
     _teacher_capture['sids'] = data.get('sids') or None  # lista de sids destino (None = todos)
     _teacher_capture['running'] = True

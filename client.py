@@ -19,6 +19,57 @@ import shutil
 import subprocess
 
 # ── Importaciones ────────────────────────────────────────────────────────────
+IS_WINDOWS = os.name == 'nt'
+IS_LINUX = sys.platform.startswith('linux')
+
+
+def _pip_install_flags():
+    flags = ['install', '--user', '-q']
+    if IS_LINUX:
+        flags.insert(2, '--break-system-packages')
+    return flags
+
+
+def _open_file(path):
+    try:
+        if IS_WINDOWS:
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        elif sys.platform == 'darwin':
+            subprocess.Popen(['open', str(path)])
+        else:
+            subprocess.Popen(['xdg-open', str(path)])
+    except Exception:
+        pass
+
+
+def _candidate_client_conf_paths():
+    paths = []
+    if IS_WINDOWS:
+        program_data = os.environ.get('PROGRAMDATA')
+        if program_data:
+            paths.append(os.path.join(program_data, 'VIGIA', 'client.conf'))
+    paths.append('/etc/vigia/client.conf')
+    base_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
+    paths.append(os.path.join(base_dir, 'client.conf'))
+    return paths
+
+
+def _read_server_ip_from_conf():
+    for path in _candidate_client_conf_paths():
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                ip = f.read().strip()
+            if ip:
+                return ip
+        except Exception:
+            continue
+    return None
+
+
+def _machine_user():
+    return os.environ.get('USER') or os.environ.get('USERNAME') or 'alumno'
 
 def _pip_disponible():
     try:
@@ -34,12 +85,12 @@ def _instalar(paquete):
     print(f"  [VIGIA] Instalando {paquete}...")
     import importlib
     pip_cmd = _pip_disponible()
-    if not pip_cmd:
+    if not pip_cmd and IS_LINUX:
         os.system('sudo apt-get update -qq 2>/dev/null && sudo apt-get install -y python3-pip -qq 2>/dev/null')
         pip_cmd = _pip_disponible()
     if pip_cmd:
         try:
-            res = subprocess.run(pip_cmd + ['install', '--user', '--break-system-packages', '-q'] + paquete.split(), timeout=60)
+            res = subprocess.run(pip_cmd + _pip_install_flags() + paquete.split(), timeout=60)
             if res.returncode == 0:
                 importlib.invalidate_caches()
                 return True
@@ -75,13 +126,14 @@ if TK_OK:
         from PIL import ImageTk
         IMGTK_OK = True
     except ImportError:
-        print("  [*] Falta ImageTk (PIL). Intentando instalar dependencias de sistema...")
-        os.system('sudo apt-get update -qq 2>/dev/null && sudo apt-get install -y python3-pil.imagetk -qq 2>/dev/null')
+        print("  [*] Falta ImageTk (PIL). Intentando resolver dependencias...")
+        if IS_LINUX:
+            os.system('sudo apt-get update -qq 2>/dev/null && sudo apt-get install -y python3-pil.imagetk -qq 2>/dev/null')
         try:
             from PIL import ImageTk
             IMGTK_OK = True
         except ImportError:
-            print("  [*] No se pudo cargar ImageTk vía apt. Reinstalando Pillow...")
+            print("  [*] No se pudo cargar ImageTk. Reinstalando Pillow...")
             _instalar("--force-reinstall Pillow")
             try:
                 # Forzar relectura de PIL
@@ -149,7 +201,7 @@ def _init_input():
 
     # Precalcular entorno para xdotool (se reutiliza en cada evento)
     _xdo_env = dict(os.environ)
-    if 'DISPLAY' not in _xdo_env:
+    if IS_LINUX and 'DISPLAY' not in _xdo_env:
         _xdo_env['DISPLAY'] = ':0'
 
     return (_mouse_ctrl is not None) or (_XDO_CMD is not None)
@@ -471,7 +523,7 @@ def on_do_input(data):
 @sio.event
 def connect():
     print(f"[✓] Conectado al servidor.")
-    sio.emit('register', {'name': f"{os.environ.get('USER','alumno')} - {socket.gethostname()}"})
+    sio.emit('register', {'name': f"{_machine_user()} - {socket.gethostname()}"})
 
 @sio.on('viewer_start')
 def on_viewer_start(data):
@@ -495,7 +547,12 @@ def on_viewer_stop(_data):
 @sio.on('quit_app')
 def on_quit_app(_data):
     try:
-        subprocess.run(['sudo', 'shutdown', '-h', 'now'], check=False, timeout=5)
+        if IS_WINDOWS:
+            subprocess.run(['shutdown', '/s', '/t', '0'], check=False, timeout=5)
+        elif IS_LINUX:
+            subprocess.run(['sudo', 'shutdown', '-h', 'now'], check=False, timeout=5)
+        else:
+            subprocess.run(['shutdown', '-h', 'now'], check=False, timeout=5)
     except Exception:
         os._exit(0)
 
@@ -522,7 +579,10 @@ def on_exec_command(data):
     cmd_id = data.get('cmd_id', '')
     if not cmd:
         return
-    env = {**os.environ, 'DEBIAN_FRONTEND': 'noninteractive', 'TERM': 'xterm'}
+    env = dict(os.environ)
+    if IS_LINUX:
+        env['DEBIAN_FRONTEND'] = 'noninteractive'
+    env.setdefault('TERM', 'xterm')
     try:
         result = subprocess.run(
             cmd, shell=True,
@@ -556,19 +616,32 @@ def on_exec_command(data):
 @sio.on('get_clipboard')
 def on_get_clipboard(_data):
     text = ''
-    _env = _xdo_env  # ya calculado en _init_input()
-    # Intentar con xclip / xsel (requieren DISPLAY)
-    for cmd in [
-        ['xclip', '-o', '-selection', 'clipboard'],
-        ['xsel',  '--clipboard', '--output'],
-    ]:
-        try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=2, env=_env)
-            if r.returncode == 0:
-                text = r.stdout
-                break
-        except Exception:
-            continue
+    if IS_WINDOWS:
+        for cmd in [
+            ['powershell', '-NoProfile', '-Command', 'Get-Clipboard -Raw'],
+            ['pwsh', '-NoProfile', '-Command', 'Get-Clipboard -Raw'],
+        ]:
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+                if r.returncode == 0:
+                    text = r.stdout
+                    break
+            except Exception:
+                continue
+    else:
+        _env = _xdo_env  # ya calculado en _init_input()
+        # Intentar con xclip / xsel (requieren DISPLAY)
+        for cmd in [
+            ['xclip', '-o', '-selection', 'clipboard'],
+            ['xsel',  '--clipboard', '--output'],
+        ]:
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=2, env=_env)
+                if r.returncode == 0:
+                    text = r.stdout
+                    break
+            except Exception:
+                continue
     # Fallback: portapapeles X11 vía tkinter (hilo principal)
     if not text and TK_OK:
         try:
@@ -683,7 +756,14 @@ if WEBRTC_OK:
 class _VentanaProfesor:
     def __init__(self, root):
         self.top = tk.Toplevel(root); self.top.title("📺 Pantalla del Profesor"); self.top.configure(bg='#0f1117')
-        self.top.attributes('-zoomed', True); self.top.attributes('-topmost', True)
+        try:
+            self.top.state('zoomed')
+        except Exception:
+            try:
+                self.top.attributes('-zoomed', True)
+            except Exception:
+                pass
+        self.top.attributes('-topmost', True)
         self._label = tk.Label(self.top, bg='#0f1117', text="⏳ Esperando imagen…", fg='#718096', font=('Segoe UI', 12))
         self._label.pack(expand=True, fill='both')
         self._foto = None
@@ -753,10 +833,7 @@ class _VentanaMensaje:
                         counter += 1
                     dest.write_bytes(base64.b64decode(att['data']))
                     def _abrir(p=dest):
-                        try:
-                            subprocess.Popen(['xdg-open', str(p)])
-                        except Exception:
-                            pass
+                        _open_file(p)
                     fila = tk.Frame(c, bg='#1a1d27')
                     fila.pack(fill='x', pady=2)
                     tk.Button(fila, text=f'📄 {att["name"]}', bg='#252840', fg='#e2e8f0',
@@ -817,11 +894,10 @@ if __name__ == '__main__':
     ip = None
     if len(sys.argv) > 1:
         ip = sys.argv[1]
-    elif os.path.exists('/etc/vigia/client.conf'):
-        try:
-            with open('/etc/vigia/client.conf', 'r') as f:
-                ip = f.read().strip()
-        except: pass
+    elif os.environ.get('VIGIA_SERVER_IP'):
+        ip = os.environ.get('VIGIA_SERVER_IP', '').strip()
+    else:
+        ip = _read_server_ip_from_conf()
     
     if not ip:
         try:
