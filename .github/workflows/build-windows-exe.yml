@@ -1,0 +1,112 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches:
+      - 'claude/rebuild-windows-exe-*'
+    paths:
+      - 'server.py'
+      - 'client.py'
+      - 'templates/**'
+      - 'img/**'
+      - 'requirements_*.txt'
+      - 'windows/**'
+      - 'build_windows.ps1'
+      - '.github/workflows/build-windows-exe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Inno Setup 6
+        run: choco install innosetup --version=6.2.2 -y --no-progress
+        shell: pwsh
+
+      - name: Install build dependencies
+        run: python -m pip install --upgrade pip pyinstaller
+        shell: pwsh
+
+      - name: Install server dependencies
+        run: python -m pip install -r requirements_servidor_windows.txt
+        shell: pwsh
+
+      - name: Install client dependencies
+        run: python -m pip install -r requirements_cliente.txt
+        shell: pwsh
+
+      - name: Build VIGIA-Server
+        run: |
+          python -m PyInstaller `
+            --noconfirm `
+            --clean `
+            --noconsole `
+            --name VIGIA-Server `
+            --distpath dist/windows/bin `
+            --workpath dist/windows/build `
+            --specpath dist/windows/build/spec `
+            --add-data "templates;templates" `
+            --add-data "img;img" `
+            server.py
+        shell: pwsh
+
+      - name: Build VIGIA-Client
+        run: |
+          python -m PyInstaller `
+            --noconfirm `
+            --clean `
+            --noconsole `
+            --name VIGIA-Client `
+            --distpath dist/windows/bin `
+            --workpath dist/windows/build `
+            --specpath dist/windows/build/spec `
+            client.py
+        shell: pwsh
+
+      - name: Add Inno Setup to PATH
+        run: |
+          $iscc = @(
+            "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          echo "ISCC=$iscc" >> $env:GITHUB_ENV
+        shell: pwsh
+
+      - name: Generate Server installer
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/windows/installers | Out-Null
+          & "$env:ISCC" "/DSourceDir=$pwd\dist\windows\bin\VIGIA-Server" "/DOutputDir=$pwd\dist\windows\installers" "/DAppVersion=1.1" "windows\installer_server.iss"
+        shell: pwsh
+
+      - name: Generate Client installer
+        run: |
+          & "$env:ISCC" "/DSourceDir=$pwd\dist\windows\bin\VIGIA-Client" "/DOutputDir=$pwd\dist\windows\installers" "/DAppVersion=1.1" "windows\installer_client.iss"
+        shell: pwsh
+
+      - name: Remove intermediate build artifacts
+        run: Remove-Item -Recurse -Force dist/windows/build -ErrorAction SilentlyContinue
+        shell: pwsh
+
+      - name: Commit and push updated EXEs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add dist/windows/
+          git diff --cached --quiet && echo "No changes" || git commit -m "ci: rebuild Windows EXE installers [skip ci]"
+          git push origin HEAD
+        shell: bash

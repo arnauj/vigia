@@ -82,7 +82,8 @@ python -m pip install --upgrade pip pyinstaller
 
 if ($Target -in @('all', 'server')) {
     Step 'Instalando dependencias del servidor...'
-    python -m pip install -r requirements_servidor.txt
+    $srvReq = if (Test-Path 'requirements_servidor_windows.txt') { 'requirements_servidor_windows.txt' } else { 'requirements_servidor.txt' }
+    python -m pip install -r $srvReq
     Build-App -Name 'VIGIA-Server' -Entry 'server.py' -AddData @('templates;templates', 'img;img')
 }
 

@@ -1,0 +1,4 @@
+flask>=3.0
+flask-socketio>=5.3
+mss>=9.0
+Pillow>=10.0
