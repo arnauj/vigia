@@ -1,4 +1,10 @@
 __pycache__/*
 vigia-dashboard/src-tauri/target/
 dist/build/
+dist/windows/bin/*/python/
+dist/windows/bin/*/templates/
+dist/windows/bin/*/img/
+dist/windows/bin/*/server.py
+dist/windows/bin/*/client.py
+dist/windows/build/
 ejecutar.txt
