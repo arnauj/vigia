@@ -238,7 +238,7 @@ if [ ! -d "$VIGIA_DIR/venv" ]; then
     python3 -m venv --system-site-packages "$VIGIA_DIR/venv"
 fi
 echo "Instalando dependencias en venv..."
-"$VIGIA_DIR/venv/bin/pip" install --no-warn-script-location --ignore-installed mss pynput "python-socketio[client]" websocket-client Pillow
+"$VIGIA_DIR/venv/bin/pip" install --no-warn-script-location --ignore-installed mss pynput "python-socketio[client]" websocket-client Pillow "websockets>=12.0"
 
 # ── Script lanzador global ────────────────────────────────────
 # Lee la IP del servidor en tiempo de ejecución desde /etc/vigia/client.conf,
