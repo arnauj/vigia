@@ -46,7 +46,7 @@ Architecture: amd64
 Maintainer: VIGIA
 Section: education
 Priority: optional
-Depends: python3, python3-pip, python3-gi, python3-tk, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, libwebkit2gtk-4.1-0, libgtk-3-0
+Depends: python3, python3-pip, python3-venv, python3-gi, python3-tk, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, libwebkit2gtk-4.1-0, libgtk-3-0
 Description: VIGIA Server - Classroom Monitoring System (Teacher)
  VIGIA allows teachers to monitor student screens in real-time.
  This package installs the teacher's dashboard and relay server.
@@ -59,13 +59,17 @@ VIGIA_DIR=/opt/vigia-server
 
 REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
 REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
-PYTHON3="$(command -v python3 || echo python3)"
+PYTHON3="/opt/vigia-server/venv/bin/python3"
 
 chmod +x "$VIGIA_DIR"/*.py 2>/dev/null || true
 
-# ── Dependencias Python ───────────────────────────────────────
-echo "Instalando dependencias Python del servidor..."
-pip3 install --break-system-packages flask flask-socketio eventlet mss Pillow
+# ── Dependencias Python (Virtual Environment) ────────────────
+echo "Configurando entorno virtual Python del servidor..."
+if [ ! -d "$VIGIA_DIR/venv" ]; then
+    python3 -m venv --system-site-packages "$VIGIA_DIR/venv"
+fi
+echo "Instalando dependencias en venv..."
+"$VIGIA_DIR/venv/bin/pip" install --no-warn-script-location --ignore-installed flask flask-socketio eventlet mss Pillow
 
 # ── Acceso directo en el menú inicio ─────────────────────────
 APPS_DIR=/usr/share/applications
@@ -74,7 +78,7 @@ cat > "$APPS_DIR/vigia-server.desktop" <<EOD
 Type=Application
 Name=VIGIA Servidor
 Comment=Panel del profesor — supervisión de aula
-Exec=python3 /opt/vigia-server/vigia-launcher.py
+Exec=$PYTHON3 /opt/vigia-server/vigia-launcher.py
 Icon=vigia-server
 Terminal=false
 Categories=Education;
@@ -168,7 +172,7 @@ Architecture: all
 Maintainer: VIGIA
 Section: education
 Priority: optional
-Depends: python3, python3-pip, python3-tk, python3-pil, python3-pil.imagetk, xdotool, python3-numpy, debconf
+Depends: python3, python3-pip, python3-venv, python3-tk, python3-pil, python3-pil.imagetk, xdotool, python3-numpy, debconf
 Description: VIGIA Client - Classroom Monitoring System (Student)
  VIGIA allows teachers to monitor student screens in real-time.
  This package installs the student client.
@@ -220,7 +224,7 @@ SERVER_IP="$RET"
 VIGIA_DIR=/opt/vigia-client
 REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
 REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
-PYTHON3="$(command -v python3 || echo python3)"
+PYTHON3="/opt/vigia-client/venv/bin/python3"
 
 chmod +x "$VIGIA_DIR"/*.py 2>/dev/null || true
 
@@ -228,9 +232,13 @@ chmod +x "$VIGIA_DIR"/*.py 2>/dev/null || true
 mkdir -p /etc/vigia
 echo "$SERVER_IP" > /etc/vigia/client.conf
 
-# ── Dependencias Python ───────────────────────────────────────
-echo "Instalando dependencias Python del cliente..."
-pip3 install --break-system-packages mss pynput "python-socketio[client]" websocket-client Pillow
+# ── Dependencias Python (Virtual Environment) ────────────────
+echo "Configurando entorno virtual Python del cliente..."
+if [ ! -d "$VIGIA_DIR/venv" ]; then
+    python3 -m venv --system-site-packages "$VIGIA_DIR/venv"
+fi
+echo "Instalando dependencias en venv..."
+"$VIGIA_DIR/venv/bin/pip" install --no-warn-script-location --ignore-installed mss pynput "python-socketio[client]" websocket-client Pillow
 
 # ── Script lanzador global ────────────────────────────────────
 # Lee la IP del servidor en tiempo de ejecución desde /etc/vigia/client.conf,
