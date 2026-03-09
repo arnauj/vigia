@@ -65,9 +65,7 @@ chmod +x "$VIGIA_DIR"/*.py 2>/dev/null || true
 
 # ── Dependencias Python ───────────────────────────────────────
 echo "Instalando dependencias Python del servidor..."
-su - "$REAL_USER" -c \
-  "pip3 install --break-system-packages --user -q flask flask-socketio eventlet mss Pillow 2>/dev/null" \
-  || pip3 install --break-system-packages -q flask flask-socketio eventlet mss Pillow 2>/dev/null || true
+pip3 install --break-system-packages flask flask-socketio eventlet mss Pillow
 
 # ── Acceso directo en el menú inicio ─────────────────────────
 APPS_DIR=/usr/share/applications
@@ -232,7 +230,7 @@ echo "$SERVER_IP" > /etc/vigia/client.conf
 
 # ── Dependencias Python ───────────────────────────────────────
 echo "Instalando dependencias Python del cliente..."
-pip3 install --break-system-packages mss pynput "python-socketio[client]" websocket-client Pillow 2>/dev/null || true
+pip3 install --break-system-packages mss pynput "python-socketio[client]" websocket-client Pillow
 
 # ── Script lanzador global ────────────────────────────────────
 # Lee la IP del servidor en tiempo de ejecución desde /etc/vigia/client.conf,
