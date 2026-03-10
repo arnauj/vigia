@@ -329,8 +329,7 @@
     }
     .msg-ind-btn:hover { border-color: var(--accent); color: var(--accent); }
 
-    /* ── Barra de mensajes ── */
-    #msg-bar { padding: 0 20px 12px; }
+    /* ── Botón nuevo mensaje ── */
     #btn-enviar-msg {
       background: var(--accent);
       color: #fff;
@@ -918,6 +917,7 @@
   <button id="btn-select-mode" onclick="toggleSelectionMode()">☑ Seleccionar</button>
   <button id="btn-terminal" onclick="abrirTerminal()">⌨ Terminal</button>
   <button id="btn-compartir" onclick="toggleCompartir()">📺 Compartir mi pantalla</button>
+  <button id="btn-enviar-msg" onclick="abrirCompose()">✉ Nuevo mensaje</button>
   <button id="btn-cerrar-todos" onclick="quitAll()"
           style="background:none;border:1px solid var(--card-border);color:var(--muted);border-radius:8px;padding:6px 14px;font-size:0.85rem;cursor:pointer;transition:border-color .15s,color .15s"
           onmouseover="this.style.borderColor='#fc8181';this.style.color='#fc8181'"
@@ -934,11 +934,6 @@
   <button class="sel-btn primary" onclick="compartirConSeleccionados()">📺 Compartir con seleccionados</button>
   <button class="sel-btn primary" onclick="abrirTerminalSeleccion()" style="background:#1a3320;border-color:var(--green);color:var(--green)">⌨ Comando a seleccionados</button>
   <button class="sel-btn cancel" onclick="cancelarSeleccion()">✕ Cancelar selección</button>
-</div>
-
-<!-- ── Barra de mensajes ── -->
-<div id="msg-bar">
-  <button id="btn-enviar-msg" onclick="abrirCompose()">✉ Nuevo mensaje</button>
 </div>
 
 <!-- ── Cuadrícula de alumnos ── -->
