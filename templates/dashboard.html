@@ -2091,7 +2091,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const ft = document.getElementById('lv-floating-text');
     ft.style.left = '10px';
     ft.style.top  = '10px';
-    ft.style.display = '';
+    ft.style.display = 'block';
     ft.value = '';
     ft.focus();
   });
@@ -2208,7 +2208,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const text = ft.value.trim();
         if (!text) {
           // Sin texto: enfocar el input para que el usuario escriba
-          ft.style.display = '';
+          ft.style.display = 'block';
           ft.focus();
           return;
         }
