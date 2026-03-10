@@ -2165,21 +2165,21 @@ document.addEventListener('DOMContentLoaded', function () {
     const { x, y } = _traducirCoords(e);
     if (_overlayEnabled && _overlayDrawMode) {
       if (_overlayTool === 'text') {
-        let text = (textInput.value || _overlayText || '').trim();
+        const text = (textInput.value || _overlayText || '').trim();
         if (!text) {
-          const resp = window.prompt('Escribe el texto para insertar en la pizarra:');
-          text = resp ? resp.trim() : '';
+          // Campo vacío: enfocar el input para que el profesor escriba el texto
+          textInput.focus();
+          textInput.select();
+          return;
         }
-        if (text) {
-          _emitOverlay({
-            type: 'overlay_text',
-            x, y,
-            text,
-            color: _overlayColor,
-            size: _overlaySize,
-          });
-          _localText(x, y, text, _overlayColor, _overlaySize);
-        }
+        _emitOverlay({
+          type: 'overlay_text',
+          x, y,
+          text,
+          color: _overlayColor,
+          size: _overlaySize,
+        });
+        _localText(x, y, text, _overlayColor, _overlaySize);
         return;
       }
       _overlayLastPoint = { x, y };

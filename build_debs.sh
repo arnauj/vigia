@@ -160,7 +160,8 @@ mkdir -p "$CLIENT_BUILD_DIR/DEBIAN"
 mkdir -p "$CLIENT_BUILD_DIR/opt/vigia-client/img"
 mkdir -p "$CLIENT_BUILD_DIR/usr/share/pixmaps"
 
-cp "$SCRIPT_DIR/client.py" "$CLIENT_BUILD_DIR/opt/vigia-client/"
+cp "$SCRIPT_DIR/client.py"        "$CLIENT_BUILD_DIR/opt/vigia-client/"
+cp "$SCRIPT_DIR/vigia_overlay.py" "$CLIENT_BUILD_DIR/opt/vigia-client/"
 cp "$SCRIPT_DIR/img/logo2_mini.png" "$CLIENT_BUILD_DIR/opt/vigia-client/img/"
 cp "$SCRIPT_DIR/img/logo2_mini.png" "$CLIENT_BUILD_DIR/usr/share/pixmaps/vigia-client.png"
 
@@ -172,7 +173,7 @@ Architecture: all
 Maintainer: VIGIA
 Section: education
 Priority: optional
-Depends: python3, python3-pip, python3-venv, python3-tk, python3-pil, python3-pil.imagetk, xdotool, python3-numpy, debconf
+Depends: python3, python3-pip, python3-venv, python3-tk, python3-pil, python3-pil.imagetk, xdotool, python3-numpy, python3-gi, gir1.2-gtk-3.0, debconf
 Description: VIGIA Client - Classroom Monitoring System (Student)
  VIGIA allows teachers to monitor student screens in real-time.
  This package installs the student client.

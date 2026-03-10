@@ -118,6 +118,64 @@ _xdo_env    = None   # entorno precalculado para xdotool (evita copiar os.enviro
 _mon_left   = 0      # offset X del monitor capturado en el espacio virtual X11
 _mon_top    = 0      # offset Y del monitor capturado en el espacio virtual X11
 
+# ── Pizarra overlay (subproceso GTK+Cairo) ────────────────────────────────────
+_overlay_proc = None   # subprocess.Popen del proceso vigia_overlay.py
+
+def _send_overlay_cmd(cmd: dict):
+    """Envía un comando JSON al subproceso de la pizarra vía stdin."""
+    global _overlay_proc
+    if _overlay_proc is None or _overlay_proc.poll() is not None:
+        return
+    try:
+        _overlay_proc.stdin.write(json.dumps(cmd) + '\n')
+        _overlay_proc.stdin.flush()
+    except Exception:
+        _overlay_proc = None
+
+def _start_overlay_proc() -> bool:
+    """Inicia vigia_overlay.py si no está ya corriendo. Retorna True si OK."""
+    global _overlay_proc
+    if _overlay_proc and _overlay_proc.poll() is None:
+        return True
+    try:
+        with mss.mss() as _s:
+            mon = _s.monitors[1]
+            l = mon.get('left', 0); t = mon.get('top', 0)
+            w = mon['width'];       h = mon['height']
+    except Exception:
+        l = t = 0; w = 1920; h = 1080
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vigia_overlay.py')
+    if not os.path.exists(script):
+        print(f"  [!] vigia_overlay.py no encontrado en {script}")
+        return False
+    env = dict(os.environ)
+    env.setdefault('DISPLAY', ':0')
+    try:
+        _overlay_proc = subprocess.Popen(
+            [sys.executable, script, str(l), str(t), str(w), str(h)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            env=env,
+        )
+        print(f"  [✓] Pizarra GTK iniciada (pid {_overlay_proc.pid}).")
+        return True
+    except Exception as e:
+        print(f"  [!] No se pudo iniciar pizarra: {e}")
+        return False
+
+def _stop_overlay_proc():
+    """Cierra el subproceso de la pizarra si está corriendo."""
+    global _overlay_proc
+    if _overlay_proc and _overlay_proc.poll() is None:
+        try:
+            _overlay_proc.stdin.close()
+        except Exception:
+            pass
+    _overlay_proc = None
+# ─────────────────────────────────────────────────────────────────────────────
+
 def _xdo_sync(*args):
     """Ejecuta xdotool de forma síncrona (bloqueante). Usar solo desde el hilo de entrada."""
     try:
@@ -950,10 +1008,10 @@ class _VentanaPizarra:
         )
 
 def ejecutar_interfaz():
-    root = tk.Tk(); root.withdraw(); v_prof = None; v_bloq = None; v_overlay = None
+    root = tk.Tk(); root.withdraw(); v_prof = None; v_bloq = None
     overlay_activa = False
     def check():
-        nonlocal v_prof, v_bloq, v_overlay, overlay_activa
+        nonlocal v_prof, v_bloq, overlay_activa
         try:
             while not _cola_profesor.empty():
                 d = _cola_profesor.get_nowait()
@@ -972,30 +1030,16 @@ def ejecutar_interfaz():
                 if tipo == 'overlay_toggle':
                     overlay_activa = bool(d.get('enabled', False))
                     if overlay_activa:
-                        if not v_overlay: v_overlay = _VentanaPizarra(root)
-                        if not v_overlay.mostrar():
+                        if _start_overlay_proc():
+                            _send_overlay_cmd(d)   # toggle enabled=True → show()
+                        else:
                             overlay_activa = False
-                            v_overlay = None
-                    elif v_overlay:
-                        v_overlay.ocultar()
-                elif tipo == 'overlay_clear':
-                    if v_overlay: v_overlay.limpiar()
-                elif tipo == 'overlay_draw':
-                    if overlay_activa and v_overlay and v_overlay.visible():
-                        v_overlay.dibujar(
-                            d.get('x0', 0), d.get('y0', 0),
-                            d.get('x1', 0), d.get('y1', 0),
-                            d.get('color', '#ff3b30'),
-                            d.get('size', 6),
-                        )
-                elif tipo == 'overlay_text':
-                    if overlay_activa and v_overlay and v_overlay.visible():
-                        v_overlay.texto(
-                            d.get('x', 0), d.get('y', 0),
-                            d.get('text', ''),
-                            d.get('color', '#ff3b30'),
-                            d.get('size', 6),
-                        )
+                    else:
+                        _send_overlay_cmd(d)        # toggle enabled=False → hide()
+                        _stop_overlay_proc()
+                else:
+                    if overlay_activa:
+                        _send_overlay_cmd(d)
             while not _cola_clipboard_req.empty():
                 _cola_clipboard_req.get_nowait()
                 try:
