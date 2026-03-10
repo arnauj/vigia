@@ -1028,7 +1028,6 @@
   <button id="btn-enviar-msg" onclick="abrirCompose()">✉ Nuevo mensaje</button>
   <button id="btn-terminal" onclick="abrirTerminal()">⌨ Terminal</button>
   <button id="btn-compartir" onclick="toggleCompartir()">📺 Compartir mi pantalla</button>
-  <button id="btn-enviar-msg" onclick="abrirCompose()">✉ Nuevo mensaje</button>
   <button id="btn-cerrar-todos" onclick="quitAll()"
           style="background:none;border:1px solid var(--card-border);color:var(--muted);border-radius:8px;padding:6px 14px;font-size:0.85rem;cursor:pointer;transition:border-color .15s,color .15s"
           onmouseover="this.style.borderColor='#fc8181';this.style.color='#fc8181'"
@@ -2166,7 +2165,11 @@ document.addEventListener('DOMContentLoaded', function () {
     const { x, y } = _traducirCoords(e);
     if (_overlayEnabled && _overlayDrawMode) {
       if (_overlayTool === 'text') {
-        const text = (textInput.value || _overlayText || 'Texto').trim();
+        let text = (textInput.value || _overlayText || '').trim();
+        if (!text) {
+          const resp = window.prompt('Escribe el texto para insertar en la pizarra:');
+          text = resp ? resp.trim() : '';
+        }
         if (text) {
           _emitOverlay({
             type: 'overlay_text',

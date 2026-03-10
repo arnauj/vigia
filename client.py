@@ -866,21 +866,13 @@ class _VentanaPizarra:
     def __init__(self, root):
         self.top = tk.Toplevel(root)
         self.top.overrideredirect(True)
-        self.top.attributes('-topmost', True)
-        self.top.attributes('-fullscreen', True)
+        # NO usar -fullscreen: con overrideredirect el WM no gestiona la ventana
+        # y el hint se ignora, dejando la ventana en su tamaño por defecto (300×150).
+        # La geometría se establece explícitamente en mostrar().
         self._transparent = '#010203'
         self.top.configure(bg=self._transparent)
         self.canvas = tk.Canvas(self.top, bg=self._transparent, highlightthickness=0, bd=0)
         self.canvas.pack(fill='both', expand=True)
-
-        # Transparencia real si está disponible; fallback visual mínimo.
-        try:
-            self.top.wm_attributes('-transparentcolor', self._transparent)
-        except Exception:
-            try:
-                self.top.attributes('-alpha', 0.16)
-            except Exception:
-                pass
 
         self._clickthrough_checked = False
         self._clickthrough_ok = False
@@ -901,18 +893,31 @@ class _VentanaPizarra:
         return self._clickthrough_ok
 
     def mostrar(self):
+        # Posicionar la ventana sobre el monitor que se está capturando
+        try:
+            with mss.mss() as _s:
+                mon = _s.monitors[1]
+                w = mon['width']; h = mon['height']
+                l = mon.get('left', 0); t = mon.get('top', 0)
+        except Exception:
+            l, t = 0, 0
+            w = self.top.winfo_screenwidth()
+            h = self.top.winfo_screenheight()
+        self.top.geometry(f"{w}x{h}+{l}+{t}")
         self.top.deiconify()
         self.top.lift()
         self.top.attributes('-topmost', True)
+        # La transparencia debe aplicarse con la ventana ya visible para que
+        # el compositor del WM (KWin/Mutter) la tenga en cuenta.
+        try:
+            self.top.wm_attributes('-transparentcolor', self._transparent)
+        except Exception:
+            pass
+        self.top.update_idletasks()
         if not self._ensure_clickthrough():
-            # Click-through no disponible: mostrar igualmente con alfa reducido
-            # para que los trazos sean visibles. El modo dibujo bloquea el control
-            # remoto desde el dashboard, así que el overlay no interferirá.
-            print("  [!] Click-through no disponible; pizarra visible en modo semi-transparente.")
-            try:
-                self.top.attributes('-alpha', 0.85)
-            except Exception:
-                pass
+            self.top.withdraw()
+            self._visible = False
+            return False
         self._visible = True
         return True
 
