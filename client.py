@@ -115,6 +115,8 @@ _kbd_ctrl   = None
 _PBtn       = None
 _XDO_CMD    = shutil.which('xdotool')
 _xdo_env    = None   # entorno precalculado para xdotool (evita copiar os.environ en cada evento)
+_mon_left   = 0      # offset X del monitor capturado en el espacio virtual X11
+_mon_top    = 0      # offset Y del monitor capturado en el espacio virtual X11
 
 def _xdo_sync(*args):
     """Ejecuta xdotool de forma síncrona (bloqueante). Usar solo desde el hilo de entrada."""
@@ -270,6 +272,10 @@ if WEBRTC_OK:
                 if self._sct is None:
                     self._sct = mss.mss()
                 mon = self._sct.monitors[1]
+                # Mantener offset sincronizado para el mapeo de coordenadas
+                global _mon_left, _mon_top
+                _mon_left = mon.get('left', 0)
+                _mon_top  = mon.get('top',  0)
                 cap = self._sct.grab(mon)
                 bgra = np.frombuffer(cap.bgra, np.uint8).reshape(cap.height, cap.width, 4)
                 rgb  = bgra[:, :, [2, 1, 0]]   # BGRA → RGB
@@ -313,6 +319,10 @@ def bucle_capturas():
         try:
             monitor = sct.monitors[1]
             orig_w, orig_h = monitor['width'], monitor['height']
+            # Actualizar offset global del monitor para el mapeo de coordenadas
+            global _mon_left, _mon_top
+            _mon_left = monitor.get('left', 0)
+            _mon_top  = monitor.get('top',  0)
             
             if (now - _ultimo_screenshot) >= INTERVALO_SEG:
                 captura = sct.grab(monitor)
@@ -345,8 +355,10 @@ def _procesar_input(data):
     """Ejecuta un evento de entrada. Llamar SOLO desde el hilo _input_worker."""
     tipo = data.get('type', '')
     try:
-        x = int(data.get('x', 0))
-        y = int(data.get('y', 0))
+        # Sumar offset del monitor para convertir coords relativas al monitor
+        # capturado en coordenadas absolutas del espacio virtual X11
+        x = int(data.get('x', 0)) + _mon_left
+        y = int(data.get('y', 0)) + _mon_top
     except:
         x = y = 0
 
@@ -497,6 +509,9 @@ def on_viewer_start(data):
     try:
         with mss.mss() as _sct:
             _mon = _sct.monitors[1]
+            global _mon_left, _mon_top
+            _mon_left = _mon.get('left', 0)
+            _mon_top  = _mon.get('top',  0)
             sio.emit('screen_info', {'w': _mon['width'], 'h': _mon['height']})
     except Exception:
         pass
