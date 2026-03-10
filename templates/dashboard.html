@@ -2161,13 +2161,12 @@ document.addEventListener('DOMContentLoaded', function () {
   body.addEventListener('mousedown', (e) => {
     if (_liveviewMode !== 'control' || !_liveviewSid) return;
     e.preventDefault();
-    ov.focus();
     const { x, y } = _traducirCoords(e);
     if (_overlayEnabled && _overlayDrawMode) {
       if (_overlayTool === 'text') {
         const text = (textInput.value || _overlayText || '').trim();
         if (!text) {
-          // Campo vacío: enfocar el input para que el profesor escriba el texto
+          // Campo vacío: enfocar el input para que el profesor escriba
           textInput.focus();
           textInput.select();
           return;
@@ -2180,8 +2179,13 @@ document.addEventListener('DOMContentLoaded', function () {
           size: _overlaySize,
         });
         _localText(x, y, text, _overlayColor, _overlaySize);
+        // Limpiar campo para facilitar la siguiente inserción
+        textInput.value = '';
+        _overlayText = '';
+        textInput.focus();
         return;
       }
+      ov.focus();
       _overlayLastPoint = { x, y };
       _emitOverlay({
         type: 'overlay_draw',
@@ -2192,6 +2196,7 @@ document.addEventListener('DOMContentLoaded', function () {
       _localDraw(x, y, x, y, _overlayColor, _overlaySize);
       return;
     }
+    ov.focus();
     const btn = ['left','middle','right'][e.button] || 'left';
     const mods = [];
     if (e.ctrlKey)  mods.push('ctrl');

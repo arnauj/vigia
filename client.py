@@ -527,8 +527,7 @@ def on_do_input(data):
     global _last_mouse_time
     tipo = data.get('type', '')
     if tipo.startswith('overlay_'):
-        if not TK_OK:
-            return
+        # El overlay usa subproceso GTK independiente de TK_OK
         try:
             _cola_overlay.put_nowait(data)
         except queue.Full:
