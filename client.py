@@ -897,7 +897,7 @@ class _VentanaPizarra:
             self._clickthrough_ok = False
         self._clickthrough_checked = True
         if not self._clickthrough_ok:
-            print("  [!] Pizarra deshabilitada: no se pudo activar modo click-through en X11.")
+            print("  [!] No se pudo activar click-through X11 (libXfixes); pizarra en modo degradado.")
         return self._clickthrough_ok
 
     def mostrar(self):
@@ -905,9 +905,14 @@ class _VentanaPizarra:
         self.top.lift()
         self.top.attributes('-topmost', True)
         if not self._ensure_clickthrough():
-            self.top.withdraw()
-            self._visible = False
-            return False
+            # Click-through no disponible: mostrar igualmente con alfa reducido
+            # para que los trazos sean visibles. El modo dibujo bloquea el control
+            # remoto desde el dashboard, así que el overlay no interferirá.
+            print("  [!] Click-through no disponible; pizarra visible en modo semi-transparente.")
+            try:
+                self.top.attributes('-alpha', 0.85)
+            except Exception:
+                pass
         self._visible = True
         return True
 

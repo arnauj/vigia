@@ -597,6 +597,7 @@
     #liveview-body {
       flex: 1; min-height: 0; overflow: hidden;
       display: flex; align-items: center; justify-content: center;
+      position: relative;
     }
     #liveview-body.control-mode { cursor: default; }
     #liveview-img {
@@ -1586,6 +1587,7 @@ let _overlayColor = '#ff3b30';
 let _overlaySize = 6;
 let _overlayText = '';
 let _overlayLastPoint = null;
+let _overlayCtx = null;
 const _STUN = [{ urls:'stun:stun.l.google.com:19302' },
                { urls:'stun:stun1.l.google.com:19302' }];
 
@@ -1593,6 +1595,65 @@ function _emitOverlay(payload) {
   if (!_liveviewSid || _liveviewMode !== 'control') return;
   _enviarInput({ sid: _liveviewSid, ...payload });
 }
+
+// ── Canvas local del profesor (feedback visual de la pizarra) ─────────────────
+function _resizeOverlayCanvas() {
+  const canvas = document.getElementById('liveview-canvas');
+  if (!canvas) return;
+  const body = document.getElementById('liveview-body');
+  const r = body.getBoundingClientRect();
+  canvas.width  = Math.round(r.width)  || 1;
+  canvas.height = Math.round(r.height) || 1;
+  _overlayCtx = canvas.getContext('2d');
+}
+
+function _canvasCoords(x, y) {
+  const body = document.getElementById('liveview-body');
+  const r = body.getBoundingClientRect();
+  const contentAR = _liveOrigW / _liveOrigH;
+  const boxAR = r.width / r.height;
+  let cw, ch, cx, cy;
+  if (boxAR > contentAR) {
+    ch = r.height; cw = ch * contentAR;
+    cx = (r.width - cw) / 2; cy = 0;
+  } else {
+    cw = r.width; ch = cw / contentAR;
+    cx = 0; cy = (r.height - ch) / 2;
+  }
+  return { px: cx + x / _liveOrigW * cw, py: cy + y / _liveOrigH * ch };
+}
+
+function _localDraw(x0, y0, x1, y1, color, size) {
+  if (!_overlayCtx) _resizeOverlayCanvas();
+  if (!_overlayCtx) return;
+  const p0 = _canvasCoords(x0, y0);
+  const p1 = _canvasCoords(x1, y1);
+  _overlayCtx.beginPath();
+  _overlayCtx.moveTo(p0.px, p0.py);
+  _overlayCtx.lineTo(p1.px, p1.py);
+  _overlayCtx.strokeStyle = color;
+  _overlayCtx.lineWidth   = size;
+  _overlayCtx.lineCap     = 'round';
+  _overlayCtx.lineJoin    = 'round';
+  _overlayCtx.stroke();
+}
+
+function _localText(x, y, text, color, size) {
+  if (!_overlayCtx) _resizeOverlayCanvas();
+  if (!_overlayCtx) return;
+  const p = _canvasCoords(x, y);
+  const fs = Math.max(14, size * 3);
+  _overlayCtx.font      = `bold ${fs}px "Segoe UI", sans-serif`;
+  _overlayCtx.fillStyle = color;
+  _overlayCtx.fillText(text, p.px, p.py);
+}
+
+function _localClear() {
+  const canvas = document.getElementById('liveview-canvas');
+  if (!canvas || !_overlayCtx) return;
+  _overlayCtx.clearRect(0, 0, canvas.width, canvas.height);
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 function _syncOverlayUi() {
   const overlayBtn = document.getElementById('lv-overlay-toggle');
@@ -1634,7 +1695,16 @@ function _syncOverlayUi() {
 
 function _setOverlayEnabled(value) {
   _overlayEnabled = !!value;
-  if (!_overlayEnabled) _overlayDrawMode = false;
+  if (!_overlayEnabled) {
+    _overlayDrawMode = false;
+    _localClear();
+    const canvas = document.getElementById('liveview-canvas');
+    if (canvas) canvas.style.display = 'none';
+    _overlayCtx = null;
+  } else {
+    const canvas = document.getElementById('liveview-canvas');
+    if (canvas) { canvas.style.display = ''; _resizeOverlayCanvas(); }
+  }
   _overlayLastPoint = null;
   _emitOverlay({ type: 'overlay_toggle', enabled: _overlayEnabled });
   _syncOverlayUi();
@@ -1738,6 +1808,10 @@ function cerrarLiveView() {
   _overlayEnabled = false;
   _overlayDrawMode = false;
   _overlayLastPoint = null;
+  _localClear();
+  const _cvClose = document.getElementById('liveview-canvas');
+  if (_cvClose) { _cvClose.style.display = 'none'; }
+  _overlayCtx = null;
   document.getElementById('lv-clipboard-btn').style.display = 'none';
   document.getElementById('lv-overlay-toggle').style.display = 'none';
   document.getElementById('lv-draw-toggle').style.display = 'none';
@@ -2000,6 +2074,7 @@ document.addEventListener('DOMContentLoaded', function () {
   clearBtn.addEventListener('click', () => {
     if (!_overlayEnabled) return;
     _emitOverlay({ type: 'overlay_clear' });
+    _localClear();
     ov.focus();
   });
 
@@ -2077,6 +2152,7 @@ document.addEventListener('DOMContentLoaded', function () {
         color: _overlayColor,
         size: _overlaySize,
       });
+      _localDraw(p0.x, p0.y, x, y, _overlayColor, _overlaySize);
       _overlayLastPoint = { x, y };
       return;
     }
@@ -2099,6 +2175,7 @@ document.addEventListener('DOMContentLoaded', function () {
             color: _overlayColor,
             size: _overlaySize,
           });
+          _localText(x, y, text, _overlayColor, _overlaySize);
         }
         return;
       }
@@ -2109,6 +2186,7 @@ document.addEventListener('DOMContentLoaded', function () {
         color: _overlayColor,
         size: _overlaySize,
       });
+      _localDraw(x, y, x, y, _overlayColor, _overlaySize);
       return;
     }
     const btn = ['left','middle','right'][e.button] || 'left';
@@ -2155,6 +2233,11 @@ document.addEventListener('DOMContentLoaded', function () {
   }, { passive: false });
 
   _syncOverlayUi();
+
+  // Redimensionar el canvas de la pizarra cuando cambia el tamaño del liveview-body
+  new ResizeObserver(() => {
+    if (_overlayEnabled) _resizeOverlayCanvas();
+  }).observe(document.getElementById('liveview-body'));
 
   // ── Listeners adjuntos compose ────────────────────────────────────────────
   const fileInput = document.getElementById('compose-file-input');
@@ -2567,6 +2650,7 @@ socket.on('command_result', (data) => {
     <img id="liveview-img" draggable="false" alt="Pantalla del alumno" />
     <video id="liveview-video" autoplay playsinline muted
            style="display:none;max-width:100%;max-height:100%;"></video>
+    <canvas id="liveview-canvas" style="position:absolute;inset:0;pointer-events:none;display:none;"></canvas>
   </div>
 </div>
 
