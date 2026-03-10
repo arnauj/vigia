@@ -148,6 +148,16 @@ rm -f "/etc/sudoers.d/vigia-${REAL_USER}" 2>/dev/null || true
 EOF
 chmod 755 "$SERVER_BUILD_DIR/DEBIAN/prerm"
 
+cat > "$SERVER_BUILD_DIR/DEBIAN/postrm" <<'EOF'
+#!/bin/bash
+case "$1" in
+    remove|purge)
+        rm -rf /opt/vigia-server 2>/dev/null || true
+        ;;
+esac
+EOF
+chmod 755 "$SERVER_BUILD_DIR/DEBIAN/postrm"
+
 dpkg-deb --root-owner-group --build "$SERVER_BUILD_DIR" "$DIST_DIR/${SERVER_PKG_NAME}_${VERSION}_amd64.deb"
 
 
@@ -173,7 +183,7 @@ Architecture: all
 Maintainer: VIGIA
 Section: education
 Priority: optional
-Depends: python3, python3-pip, python3-venv, python3-tk, python3-pil, python3-pil.imagetk, xdotool, python3-numpy, python3-gi, gir1.2-gtk-3.0, debconf
+Depends: python3, python3-pip, python3-venv, python3-tk, python3-pil, python3-pil.imagetk, xdotool, python3-numpy, python3-gi, python3-gi-cairo, gir1.2-gtk-3.0, debconf
 Description: VIGIA Client - Classroom Monitoring System (Student)
  VIGIA allows teachers to monitor student screens in real-time.
  This package installs the student client.
@@ -335,6 +345,24 @@ rm -f "/etc/sudoers.d/vigia-${REAL_USER}" 2>/dev/null || true
 EOF
 chmod 755 "$CLIENT_BUILD_DIR/DEBIAN/prerm"
 
+cat > "$CLIENT_BUILD_DIR/DEBIAN/postrm" <<'EOF'
+#!/bin/bash
+case "$1" in
+    remove|purge)
+        rm -rf /opt/vigia-client 2>/dev/null || true
+        ;;
+esac
+EOF
+chmod 755 "$CLIENT_BUILD_DIR/DEBIAN/postrm"
+
 dpkg-deb --root-owner-group --build "$CLIENT_BUILD_DIR" "$DIST_DIR/${CLIENT_PKG_NAME}_${VERSION}_all.deb"
 
+# Dar permisos de lectura universal a los .deb para evitar el aviso de sandbox de apt.
+# La forma correcta de instalarlos es con dpkg, que no usa el sandbox _apt:
+#   sudo dpkg -i dist/vigia-server_1.1_amd64.deb
+#   sudo dpkg -i dist/vigia-client_1.1_all.deb
+chmod 644 "$DIST_DIR"/*.deb
+
 echo "Build finished. Packages are in $DIST_DIR"
+echo "Instalar: sudo dpkg -i $DIST_DIR/vigia-server_${VERSION}_amd64.deb"
+echo "Instalar: sudo dpkg -i $DIST_DIR/vigia-client_${VERSION}_all.deb"
