@@ -569,6 +569,20 @@
       display: none;
     }
     #lv-overlay-text:focus { border-color: var(--accent); }
+    #lv-floating-text {
+      position: absolute;
+      display: none;
+      z-index: 50;
+      background: rgba(0,0,0,.8);
+      color: #fff;
+      border: 2px solid #ff3b30;
+      padding: 3px 8px;
+      font-size: 16px;
+      border-radius: 3px;
+      outline: none;
+      min-width: 200px;
+      pointer-events: auto;
+    }
     #liveview-body.overlay-draw-mode { cursor: crosshair; }
     #clipboard-overlay {
       display: none; position: fixed; inset: 0; z-index: 1200;
@@ -1700,6 +1714,8 @@ function _setOverlayEnabled(value) {
     const canvas = document.getElementById('liveview-canvas');
     if (canvas) canvas.style.display = 'none';
     _overlayCtx = null;
+    const ftEl = document.getElementById('lv-floating-text');
+    if (ftEl) { ftEl.style.display = 'none'; ftEl.value = ''; }
   } else {
     const canvas = document.getElementById('liveview-canvas');
     if (canvas) { canvas.style.display = ''; _resizeOverlayCanvas(); }
@@ -1810,6 +1826,8 @@ function cerrarLiveView() {
   _localClear();
   const _cvClose = document.getElementById('liveview-canvas');
   if (_cvClose) { _cvClose.style.display = 'none'; }
+  const _ftClose = document.getElementById('lv-floating-text');
+  if (_ftClose) { _ftClose.style.display = 'none'; _ftClose.value = ''; }
   _overlayCtx = null;
   document.getElementById('lv-clipboard-btn').style.display = 'none';
   document.getElementById('lv-overlay-toggle').style.display = 'none';
@@ -2096,6 +2114,34 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   textInput.addEventListener('keyup', (e) => e.stopPropagation());
 
+  // Input flotante para la herramienta de texto: aparece donde el profesor hace clic
+  const floatText = document.getElementById('lv-floating-text');
+  floatText.addEventListener('mousedown', (e) => e.stopPropagation());
+  floatText.addEventListener('keyup',     (e) => e.stopPropagation());
+  floatText.addEventListener('keydown',   (e) => {
+    e.stopPropagation();
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      floatText.style.display = 'none';
+      floatText.value = '';
+      ov.focus();
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const text = floatText.value.trim();
+      if (text) {
+        const fx = parseFloat(floatText.dataset.pendingX) || 0;
+        const fy = parseFloat(floatText.dataset.pendingY) || 0;
+        _emitOverlay({ type: 'overlay_text', x: fx, y: fy, text, color: _overlayColor, size: _overlaySize });
+        _localText(fx, fy, text, _overlayColor, _overlaySize);
+      }
+      floatText.style.display = 'none';
+      floatText.value = '';
+      ov.focus();
+    }
+  });
+
   ov.addEventListener('keydown', (e) => {
     if (!_liveviewSid) return;
     if (e.key === 'Escape') { e.preventDefault(); cerrarLiveView(); return; }
@@ -2166,25 +2212,16 @@ document.addEventListener('DOMContentLoaded', function () {
     const { x, y } = _traducirCoords(e);
     if (_overlayEnabled && _overlayDrawMode) {
       if (_overlayTool === 'text') {
-        const text = (textInput.value || _overlayText || '').trim();
-        if (!text) {
-          // Campo vacío: enfocar el input para que el profesor escriba
-          textInput.focus();
-          textInput.select();
-          return;
-        }
-        _emitOverlay({
-          type: 'overlay_text',
-          x, y,
-          text,
-          color: _overlayColor,
-          size: _overlaySize,
-        });
-        _localText(x, y, text, _overlayColor, _overlaySize);
-        // Limpiar campo para facilitar la siguiente inserción
-        textInput.value = '';
-        _overlayText = '';
-        textInput.focus();
+        // Mostrar input flotante en la posición exacta donde hizo clic
+        const ft = document.getElementById('lv-floating-text');
+        const { px, py } = _canvasCoords(x, y);
+        ft.style.left = Math.min(px, body.clientWidth - 215) + 'px';
+        ft.style.top  = Math.max(py - 34, 2) + 'px';
+        ft.dataset.pendingX = String(x);
+        ft.dataset.pendingY = String(y);
+        ft.style.display = '';
+        ft.value = '';
+        ft.focus();
         return;
       }
       ov.focus();
@@ -2661,6 +2698,7 @@ socket.on('command_result', (data) => {
     <video id="liveview-video" autoplay playsinline muted
            style="display:none;max-width:100%;max-height:100%;"></video>
     <canvas id="liveview-canvas" style="position:absolute;inset:0;pointer-events:none;display:none;"></canvas>
+    <input id="lv-floating-text" type="text" maxlength="200" placeholder="Escribe y pulsa Enter…" autocomplete="off" />
   </div>
 </div>
 

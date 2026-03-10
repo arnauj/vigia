@@ -60,22 +60,41 @@ def _set_clickthrough(xid):
 
 class PizarraOverlay:
     def __init__(self, l, t, w, h):
+        self.l, self.t, self.w, self.h = l, t, w, h
         self.win = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
         self.win.set_decorated(False)
+        self.win.set_skip_taskbar_hint(True)
+        self.win.set_skip_pager_hint(True)
+        self.win.set_type_hint(Gdk.WindowTypeHint.NOTIFICATION)
+
         screen = self.win.get_screen()
         visual = screen.get_rgba_visual()
         if visual and screen.is_composited():
             self.win.set_visual(visual)
+            print("[vigia_overlay] RGBA visual activado (compositor detectado).", file=sys.stderr)
         else:
-            print("[vigia_overlay] Sin compositor RGBA; fondo puede no ser transparente.", file=sys.stderr)
+            print("[vigia_overlay] Sin compositor RGBA; transparencia limitada.", file=sys.stderr)
+
+        # Forzar fondo transparente via CSS (evita que el tema GTK pinte fondo opaco)
+        css = Gtk.CssProvider()
+        css.load_from_data(b"window { background-color: transparent; background: transparent; }")
+        Gtk.StyleContext.add_provider_for_screen(
+            screen, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
         self.win.set_app_paintable(True)
         self.win.connect('draw', self._on_draw)
+
+        # Realizar la ventana ANTES de moverla/redimensionarla para que el WM
+        # respete la posición y el tamaño solicitados.
+        self.win.realize()
         self.win.move(l, t)
         self.win.resize(w, h)
-        self._items = []   # lista de trazos/textos
+
+        self._items = []
+        print(f"[vigia_overlay] Overlay creado en ({l},{t}) {w}×{h}.", file=sys.stderr)
 
     def _on_draw(self, _widget, ctx):
-        # Limpiar a totalmente transparente
         ctx.set_operator(cairo.OPERATOR_CLEAR)
         ctx.paint()
         ctx.set_operator(cairo.OPERATOR_OVER)
@@ -103,12 +122,17 @@ class PizarraOverlay:
     def show(self):
         self.win.show_all()
         self.win.set_keep_above(True)
-        # Aplicar click-through en el siguiente idle (ventana ya mapeada)
+        # Reaplicar posición tras mostrar (el WM puede moverla al mapear)
+        self.win.move(self.l, self.t)
+        self.win.resize(self.w, self.h)
         GLib.idle_add(self._apply_clickthrough)
 
     def _apply_clickthrough(self):
+        # Volver a poner encima y aplicar click-through tras el primer ciclo del WM
+        self.win.set_keep_above(True)
         gdk_win = self.win.get_window()
         if gdk_win:
+            gdk_win.raise_()
             _set_clickthrough(gdk_win.get_xid())
         return False
 
@@ -149,7 +173,7 @@ def _handle(cmd):
                  cmd.get('color', '#ff3b30'), cmd.get('size', 6))
     elif t == 'overlay_clear' and _ov:
         _ov.clear()
-    return False  # eliminar del idle_add
+    return False
 
 
 def _read_stdin():
@@ -162,7 +186,6 @@ def _read_stdin():
             GLib.idle_add(_handle, cmd)
         except Exception:
             pass
-    # stdin cerrado → salir
     GLib.idle_add(Gtk.main_quit)
 
 
