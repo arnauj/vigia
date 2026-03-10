@@ -357,12 +357,19 @@ chmod 755 "$CLIENT_BUILD_DIR/DEBIAN/postrm"
 
 dpkg-deb --root-owner-group --build "$CLIENT_BUILD_DIR" "$DIST_DIR/${CLIENT_PKG_NAME}_${VERSION}_all.deb"
 
-# Dar permisos de lectura universal a los .deb para evitar el aviso de sandbox de apt.
-# La forma correcta de instalarlos es con dpkg, que no usa el sandbox _apt:
-#   sudo dpkg -i dist/vigia-server_1.1_amd64.deb
-#   sudo dpkg -i dist/vigia-client_1.1_all.deb
 chmod 644 "$DIST_DIR"/*.deb
 
+# Copiar los .deb a /tmp para que apt pueda acceder a ellos sin el aviso
+# «_apt no puede leer el archivo en home/» (el sandbox _apt no puede
+# atravesar directorios de usuario con permisos 750).
+TMP_VIGIA="/tmp/vigia-dist"
+mkdir -p "$TMP_VIGIA"
+cp "$DIST_DIR/${SERVER_PKG_NAME}_${VERSION}_amd64.deb" "$TMP_VIGIA/"
+cp "$DIST_DIR/${CLIENT_PKG_NAME}_${VERSION}_all.deb"   "$TMP_VIGIA/"
+chmod 644 "$TMP_VIGIA"/*.deb
+
 echo "Build finished. Packages are in $DIST_DIR"
-echo "Instalar: sudo dpkg -i $DIST_DIR/vigia-server_${VERSION}_amd64.deb"
-echo "Instalar: sudo dpkg -i $DIST_DIR/vigia-client_${VERSION}_all.deb"
+echo ""
+echo "Para instalar sin avisos de permisos:"
+echo "  sudo apt install $TMP_VIGIA/${SERVER_PKG_NAME}_${VERSION}_amd64.deb"
+echo "  sudo apt install $TMP_VIGIA/${CLIENT_PKG_NAME}_${VERSION}_all.deb"

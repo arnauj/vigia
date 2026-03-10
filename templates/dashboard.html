@@ -2087,8 +2087,13 @@ document.addEventListener('DOMContentLoaded', function () {
     _overlayTool = 'text';
     if (_overlayEnabled && !_overlayDrawMode) _setOverlayDrawMode(true);
     _syncOverlayUi();
-    textInput.focus();
-    textInput.select();
+    // Mostrar el input flotante inmediatamente en la esquina superior del canvas
+    const ft = document.getElementById('lv-floating-text');
+    ft.style.left = '10px';
+    ft.style.top  = '10px';
+    ft.style.display = '';
+    ft.value = '';
+    ft.focus();
   });
   clearBtn.addEventListener('click', () => {
     if (!_overlayEnabled) return;
@@ -2125,21 +2130,8 @@ document.addEventListener('DOMContentLoaded', function () {
       floatText.style.display = 'none';
       floatText.value = '';
       ov.focus();
-      return;
     }
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const text = floatText.value.trim();
-      if (text) {
-        const fx = parseFloat(floatText.dataset.pendingX) || 0;
-        const fy = parseFloat(floatText.dataset.pendingY) || 0;
-        _emitOverlay({ type: 'overlay_text', x: fx, y: fy, text, color: _overlayColor, size: _overlaySize });
-        _localText(fx, fy, text, _overlayColor, _overlaySize);
-      }
-      floatText.style.display = 'none';
-      floatText.value = '';
-      ov.focus();
-    }
+    if (e.key === 'Enter') e.preventDefault(); // evitar submit accidental
   });
 
   ov.addEventListener('keydown', (e) => {
@@ -2212,16 +2204,19 @@ document.addEventListener('DOMContentLoaded', function () {
     const { x, y } = _traducirCoords(e);
     if (_overlayEnabled && _overlayDrawMode) {
       if (_overlayTool === 'text') {
-        // Mostrar input flotante en la posición exacta donde hizo clic
         const ft = document.getElementById('lv-floating-text');
-        const { px, py } = _canvasCoords(x, y);
-        ft.style.left = Math.min(px, body.clientWidth - 215) + 'px';
-        ft.style.top  = Math.max(py - 34, 2) + 'px';
-        ft.dataset.pendingX = String(x);
-        ft.dataset.pendingY = String(y);
-        ft.style.display = '';
+        const text = ft.value.trim();
+        if (!text) {
+          // Sin texto: enfocar el input para que el usuario escriba
+          ft.style.display = '';
+          ft.focus();
+          return;
+        }
+        // Colocar el texto donde hizo clic
+        _emitOverlay({ type: 'overlay_text', x, y, text, color: _overlayColor, size: _overlaySize });
+        _localText(x, y, text, _overlayColor, _overlaySize);
         ft.value = '';
-        ft.focus();
+        ft.focus();  // Listo para escribir el siguiente texto
         return;
       }
       ov.focus();
