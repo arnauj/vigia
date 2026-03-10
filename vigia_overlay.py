@@ -60,7 +60,8 @@ def _set_clickthrough(xid):
 
 class PizarraOverlay:
     def __init__(self, l, t, w, h):
-        self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        self.win = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
+        self.win.set_decorated(False)
         screen = self.win.get_screen()
         visual = screen.get_rgba_visual()
         if visual and screen.is_composited():

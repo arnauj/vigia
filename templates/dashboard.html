@@ -2061,11 +2061,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
   toolBrushBtn.addEventListener('click', () => {
     _overlayTool = 'brush';
+    if (_overlayEnabled && !_overlayDrawMode) _setOverlayDrawMode(true);
     _syncOverlayUi();
     ov.focus();
   });
   toolTextBtn.addEventListener('click', () => {
     _overlayTool = 'text';
+    if (_overlayEnabled && !_overlayDrawMode) _setOverlayDrawMode(true);
     _syncOverlayUi();
     textInput.focus();
     textInput.select();

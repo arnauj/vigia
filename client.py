@@ -155,7 +155,7 @@ def _start_overlay_proc() -> bool:
             [sys.executable, script, str(l), str(t), str(w), str(h)],
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=open('/tmp/vigia_pizarra.log', 'w'),
             text=True,
             env=env,
         )
