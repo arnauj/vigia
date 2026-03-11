@@ -32,6 +32,13 @@ cp "$SCRIPT_DIR/img/logo2_mini.png" "$SERVER_BUILD_DIR/usr/share/pixmaps/vigia-s
 [ -f "$SCRIPT_DIR/img/icon-192.png" ] && cp "$SCRIPT_DIR/img/icon-192.png" "$SERVER_BUILD_DIR/opt/vigia-server/img/"
 [ -f "$SCRIPT_DIR/img/icon-512.png" ] && cp "$SCRIPT_DIR/img/icon-512.png" "$SERVER_BUILD_DIR/opt/vigia-server/img/"
 
+# Pre-build Python wheels for offline installation (works even in apt sandbox)
+echo "Construyendo wheels Python para servidor (instalación offline)..."
+mkdir -p "$SERVER_BUILD_DIR/opt/vigia-server/wheels"
+pip3 wheel --wheel-dir "$SERVER_BUILD_DIR/opt/vigia-server/wheels/" \
+    flask flask-socketio eventlet mss Pillow \
+    2>/dev/null || echo "[!] Aviso: no se pudieron pre-construir wheels; la instalación requerirá red."
+
 # Copy Tauri binary if exists
 TAURI_BINARY="$SCRIPT_DIR/vigia-dashboard/src-tauri/target/release/vigia"
 if [ -f "$TAURI_BINARY" ]; then
@@ -69,7 +76,16 @@ if [ ! -d "$VIGIA_DIR/venv" ]; then
     python3 -m venv --system-site-packages "$VIGIA_DIR/venv"
 fi
 echo "Instalando dependencias en venv..."
-"$VIGIA_DIR/venv/bin/pip" install --no-warn-script-location --ignore-installed flask flask-socketio eventlet mss Pillow
+if [ -d "$VIGIA_DIR/wheels" ] && [ "$(ls -A "$VIGIA_DIR/wheels" 2>/dev/null)" ]; then
+    "$VIGIA_DIR/venv/bin/pip" install --no-warn-script-location --ignore-installed \
+        --no-index --find-links "$VIGIA_DIR/wheels/" \
+        flask flask-socketio eventlet mss Pillow || \
+    "$VIGIA_DIR/venv/bin/pip" install --no-warn-script-location --ignore-installed \
+        flask flask-socketio eventlet mss Pillow
+else
+    "$VIGIA_DIR/venv/bin/pip" install --no-warn-script-location --ignore-installed \
+        flask flask-socketio eventlet mss Pillow
+fi
 
 # ── Acceso directo en el menú inicio ─────────────────────────
 APPS_DIR=/usr/share/applications
@@ -175,6 +191,13 @@ cp "$SCRIPT_DIR/vigia_overlay.py" "$CLIENT_BUILD_DIR/opt/vigia-client/"
 cp "$SCRIPT_DIR/img/logo2_mini.png" "$CLIENT_BUILD_DIR/opt/vigia-client/img/"
 cp "$SCRIPT_DIR/img/logo2_mini.png" "$CLIENT_BUILD_DIR/usr/share/pixmaps/vigia-client.png"
 
+# Pre-build Python wheels for offline installation (works even in apt sandbox)
+echo "Construyendo wheels Python para cliente (instalación offline)..."
+mkdir -p "$CLIENT_BUILD_DIR/opt/vigia-client/wheels"
+pip3 wheel --wheel-dir "$CLIENT_BUILD_DIR/opt/vigia-client/wheels/" \
+    mss pynput "python-socketio[client]" websocket-client Pillow "websockets>=12.0" \
+    2>/dev/null || echo "[!] Aviso: no se pudieron pre-construir wheels; la instalación requerirá red."
+
 # Control file
 cat > "$CLIENT_BUILD_DIR/DEBIAN/control" <<EOF
 Package: $CLIENT_PKG_NAME
@@ -249,7 +272,16 @@ if [ ! -d "$VIGIA_DIR/venv" ]; then
     python3 -m venv --system-site-packages "$VIGIA_DIR/venv"
 fi
 echo "Instalando dependencias en venv..."
-"$VIGIA_DIR/venv/bin/pip" install --no-warn-script-location --ignore-installed mss pynput "python-socketio[client]" websocket-client Pillow "websockets>=12.0"
+if [ -d "$VIGIA_DIR/wheels" ] && [ "$(ls -A "$VIGIA_DIR/wheels" 2>/dev/null)" ]; then
+    "$VIGIA_DIR/venv/bin/pip" install --no-warn-script-location --ignore-installed \
+        --no-index --find-links "$VIGIA_DIR/wheels/" \
+        mss pynput "python-socketio[client]" websocket-client Pillow "websockets>=12.0" || \
+    "$VIGIA_DIR/venv/bin/pip" install --no-warn-script-location --ignore-installed \
+        mss pynput "python-socketio[client]" websocket-client Pillow "websockets>=12.0"
+else
+    "$VIGIA_DIR/venv/bin/pip" install --no-warn-script-location --ignore-installed \
+        mss pynput "python-socketio[client]" websocket-client Pillow "websockets>=12.0"
+fi
 
 # ── Script lanzador global ────────────────────────────────────
 # Lee la IP del servidor en tiempo de ejecución desde /etc/vigia/client.conf,
