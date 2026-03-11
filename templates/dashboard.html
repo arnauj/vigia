@@ -2523,9 +2523,19 @@ async function _addFiles(fileList) {
 
 // ── Terminal remoto ───────────────────────────────────────────────────────
 let _termTarget = null;  // null = todos | string = sid individual | string[] = selección
+const _termCwd = {};     // {sid: cwd} — directorio actual por alumno
 
 function abrirTerminal(target = null) {
   _termTarget = target;
+  // Restaurar el prompt según el cwd conocido del alumno
+  const promptEl = document.getElementById('terminal-prompt');
+  if (promptEl) {
+    if (typeof target === 'string' && _termCwd[target]) {
+      _actualizarPrompt(_termCwd[target]);
+    } else {
+      promptEl.textContent = '$';
+    }
+  }
   let paraText;
   if (target === null) {
     paraText = 'Todos los alumnos';
@@ -2597,7 +2607,7 @@ function ejecutarComando() {
 }
 
 socket.on('command_result', (data) => {
-  const { cmd_id, sid, stdout, stderr, returncode } = data;
+  const { cmd_id, sid, stdout, stderr, returncode, cwd } = data;
   const outEl   = document.getElementById(`term-out-${cmd_id}-${sid}`);
   const errEl   = document.getElementById(`term-err-${cmd_id}-${sid}`);
   const badgeEl = document.getElementById(`term-badge-${cmd_id}-${sid}`);
@@ -2608,9 +2618,24 @@ socket.on('command_result', (data) => {
   }
   if (stdout) outEl.textContent = stdout;
   if (stderr) errEl.textContent = stderr;
+  // Actualizar directorio actual del alumno y el prompt si es sesión individual
+  if (cwd) {
+    _termCwd[sid] = cwd;
+    if (typeof _termTarget === 'string' && _termTarget === sid) {
+      _actualizarPrompt(cwd);
+    }
+  }
   const wrap = document.getElementById('terminal-output-wrap');
   if (wrap) wrap.scrollTop = wrap.scrollHeight;
 });
+
+function _actualizarPrompt(cwd) {
+  const el = document.getElementById('terminal-prompt');
+  if (!el) return;
+  // Abreviar el home con ~ para legibilidad
+  const display = cwd.replace(/^\/home\/[^/]+/, '~');
+  el.textContent = display + ' $';
+}
 </script>
 
 <!-- ── Modal redactar mensaje ── -->

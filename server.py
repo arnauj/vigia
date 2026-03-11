@@ -573,6 +573,7 @@ def on_command_output(data):
         'stdout': data.get('stdout', ''),
         'stderr': data.get('stderr', ''),
         'returncode': data.get('returncode', -1),
+        'cwd': data.get('cwd', ''),
     }, to='professors')
 
 

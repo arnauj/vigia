@@ -118,6 +118,9 @@ _xdo_env    = None   # entorno precalculado para xdotool (evita copiar os.enviro
 _mon_left   = 0      # offset X del monitor capturado en el espacio virtual X11
 _mon_top    = 0      # offset Y del monitor capturado en el espacio virtual X11
 
+# ── Terminal remoto: directorio de trabajo persistente ────────────────────────
+_term_cwd = os.path.expanduser('~')   # cwd actual del terminal del profesor
+
 # ── Pizarra overlay (subproceso GTK+Cairo) ────────────────────────────────────
 _overlay_proc = None   # subprocess.Popen del proceso vigia_overlay.py
 
@@ -610,23 +613,44 @@ def on_teacher_screen(data):
 
 @sio.on('exec_command')
 def on_exec_command(data):
+    global _term_cwd
     cmd = data.get('command', '').strip()
     cmd_id = data.get('cmd_id', '')
     if not cmd:
         return
     env = {**os.environ, 'DEBIAN_FRONTEND': 'noninteractive', 'TERM': 'xterm'}
+    # Marcador único para extraer el nuevo cwd del stdout sin colisiones
+    marker = '__VIGIA_PWD_7f3a9b2c__'
+    # Ejecutamos el comando dentro del cwd actual y capturamos el pwd resultante
+    wrapped = f'cd {_term_cwd!r} 2>/dev/null; {cmd}; echo "{marker}:$(pwd)"'
     try:
         result = subprocess.run(
-            cmd, shell=True,
+            wrapped, shell=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, timeout=60, env=env
         )
+        stdout = result.stdout
+        new_cwd = _term_cwd
+        # Extraer la línea del marcador y obtener el nuevo cwd
+        lines = stdout.split('\n')
+        clean_lines = []
+        for line in lines:
+            if line.startswith(f'{marker}:'):
+                candidate = line[len(f'{marker}:'):]
+                if os.path.isdir(candidate):
+                    new_cwd = candidate
+            else:
+                clean_lines.append(line)
+        _term_cwd = new_cwd
+        # Reconstruir stdout sin la línea del marcador (quitar posible \n final extra)
+        clean_stdout = '\n'.join(clean_lines).rstrip('\n')
         sio.emit('command_output', {
             'cmd_id': cmd_id,
             'command': cmd,
-            'stdout': result.stdout[-6000:],
+            'stdout': clean_stdout[-6000:],
             'stderr': result.stderr[-3000:],
             'returncode': result.returncode,
+            'cwd': _term_cwd,
         })
     except subprocess.TimeoutExpired:
         sio.emit('command_output', {
@@ -635,6 +659,7 @@ def on_exec_command(data):
             'stdout': '',
             'stderr': 'Timeout (60s): el comando tardó demasiado.',
             'returncode': -1,
+            'cwd': _term_cwd,
         })
     except Exception as e:
         sio.emit('command_output', {
@@ -643,6 +668,7 @@ def on_exec_command(data):
             'stdout': '',
             'stderr': str(e),
             'returncode': -1,
+            'cwd': _term_cwd,
         })
 
 @sio.on('get_clipboard')
