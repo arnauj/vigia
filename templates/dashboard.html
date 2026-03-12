@@ -11,6 +11,8 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
   <!-- Socket.IO -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
 
   <style>
     :root {
@@ -1016,6 +1018,14 @@
       object-fit: contain;
     }
     #share-preview.show { display: block; }
+
+    .spin {
+      animation: lucide-spin 2s linear infinite;
+    }
+    @keyframes lucide-spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
   </style>
 </head>
 <body>
@@ -1038,14 +1048,25 @@
     <input type="range" id="size-slider" min="180" max="520" value="280" step="20" />
   </label>
   <input type="text" id="search-input" placeholder="🔍 Buscar alumno…" />
-  <button id="btn-select-mode" onclick="toggleSelectionMode()">☑ Seleccionar</button>
-  <button id="btn-enviar-msg" onclick="abrirCompose()">✉ Nuevo mensaje</button>
-  <button id="btn-terminal" onclick="abrirTerminal()">⌨ Terminal</button>
-  <button id="btn-compartir" onclick="toggleCompartir()">📺 Compartir mi pantalla</button>
+  <button id="btn-select-mode" onclick="toggleSelectionMode()" class="d-flex align-items-center gap-2">
+    <i data-lucide="check-square" size="12"></i> Seleccionar
+  </button>
+  <button id="btn-enviar-msg" onclick="abrirCompose()" class="d-flex align-items-center gap-2">
+    <i data-lucide="mail" size="2"></i> Nuevo mensaje
+  </button>
+  <button id="btn-terminal" onclick="abrirTerminal()" class="d-flex align-items-center gap-2">
+    <i data-lucide="terminal" size="12"></i> Terminal
+  </button>
+  <button id="btn-compartir" onclick="toggleCompartir()" class="d-flex align-items-center gap-2">
+    <i data-lucide="tv" size="12"></i> Compartir mi pantalla
+  </button>
   <button id="btn-cerrar-todos" onclick="quitAll()"
+          class="d-flex align-items-center gap-2"
           style="background:none;border:1px solid var(--card-border);color:var(--muted);border-radius:8px;padding:6px 14px;font-size:0.85rem;cursor:pointer;transition:border-color .15s,color .15s"
           onmouseover="this.style.borderColor='#fc8181';this.style.color='#fc8181'"
-          onmouseout="this.style.borderColor='var(--card-border)';this.style.color='var(--muted)'">⏻ Apagar todos</button>
+          onmouseout="this.style.borderColor='var(--card-border)';this.style.color='var(--muted)'">
+    <i data-lucide="power" size="12"></i> Apagar todos
+  </button>
 
   <img id="share-preview" alt="Previsualización" title="Lo que ven los alumnos" />
 </div>
@@ -1053,18 +1074,30 @@
 <!-- ── Barra de selección múltiple ── -->
 <div id="selection-bar">
   <span id="sel-count">Ningún alumno seleccionado</span>
-  <button class="sel-btn" onclick="seleccionarTodos()">Seleccionar todos</button>
-  <button class="sel-btn" onclick="deseleccionarTodos()">Ninguno</button>
-  <button class="sel-btn primary" onclick="abrirComposeSeleccion()">✉ Mensaje a seleccionados</button>
-  <button class="sel-btn primary" onclick="compartirConSeleccionados()">📺 Compartir con seleccionados</button>
-  <button class="sel-btn primary" onclick="abrirTerminalSeleccion()" style="background:#1a3320;border-color:var(--green);color:var(--green)">⌨ Comando a seleccionados</button>
-  <button class="sel-btn cancel" onclick="cancelarSeleccion()">✕ Cancelar selección</button>
+  <button class="sel-btn d-inline-flex align-items-center gap-1" onclick="seleccionarTodos()">
+    <i data-lucide="check-check" size="12"></i> Seleccionar todos
+  </button>
+  <button class="sel-btn d-inline-flex align-items-center gap-1" onclick="deseleccionarTodos()">
+    <i data-lucide="square" size="12"></i> Ninguno
+  </button>
+  <button class="sel-btn primary d-inline-flex align-items-center gap-1" onclick="abrirComposeSeleccion()">
+    <i data-lucide="mail" size="12"></i> Mensaje a seleccionados
+  </button>
+  <button class="sel-btn primary d-inline-flex align-items-center gap-1" onclick="compartirConSeleccionados()">
+    <i data-lucide="tv" size="12"></i> Compartir con seleccionados
+  </button>
+  <button class="sel-btn primary d-inline-flex align-items-center gap-1" onclick="abrirTerminalSeleccion()" style="background:#1a3320;border-color:var(--green);color:var(--green)">
+    <i data-lucide="terminal" size="12"></i> Comando a seleccionados
+  </button>
+  <button class="sel-btn cancel d-inline-flex align-items-center gap-1" onclick="cancelarSeleccion()">
+    <i data-lucide="x" size="12"></i> Cancelar selección
+  </button>
 </div>
 
 <!-- ── Cuadrícula de alumnos ── -->
 <div id="grid"></div>
 <div id="empty-msg">
-  <span class="icon">📡</span>
+  <span class="icon"><i data-lucide="radio" size="48"></i></span>
   Esperando que los alumnos se conecten…<br />
   <small>Asegúrate de que ejecutan <code>client.py</code> con la IP de este equipo.</small>
 </div>
@@ -1076,7 +1109,7 @@
       <div id="modal-name">—</div>
       <div id="modal-meta">—</div>
     </div>
-    <button id="modal-close" title="Cerrar (Esc)">✕</button>
+    <button id="modal-close" title="Cerrar (Esc)"><i data-lucide="x" size="18"></i></button>
   </div>
   <img id="modal-img" src="" alt="Pantalla del alumno" />
   <div id="modal-timestamp"></div>
@@ -1185,42 +1218,42 @@ function renderCard(sid) {
       <span class="card-meta" id="meta-${sid}">${escHtml(s.ip)}</span>
     </div>
     <div class="card-screen" id="screen-${sid}">
-      <div class="placeholder"><span class="icon">⏳</span>Esperando captura…</div>
+      <div class="placeholder"><span class="icon"><i data-lucide="loader" size="28" class="spin"></i></span><br/>Esperando captura…</div>
       <div class="lock-overlay" id="lock-overlay-${sid}">
-        <span class="lock-icon">🔒</span>BLOQUEADO
+        <span class="lock-icon"><i data-lucide="lock" size="28"></i></span><br/>BLOQUEADO
       </div>
-      <div class="card-select-check">✓</div>
+      <div class="card-select-check"><i data-lucide="check" size="12"></i></div>
     </div>
     <div class="card-info">
       <button class="msg-ind-btn"
               title="Enviar mensaje a este alumno"
-              onclick="event.stopPropagation(); abrirMsgInd('${sid}')">✉</button>
+              onclick="event.stopPropagation(); abrirMsgInd('${sid}')"><i data-lucide="mail" size="12"></i></button>
       <button class="term-ind-btn"
               title="Ejecutar comando en este alumno"
-              onclick="event.stopPropagation(); abrirTerminal('${sid}')">⌨</button>
+              onclick="event.stopPropagation(); abrirTerminal('${sid}')"><i data-lucide="terminal" size="12"></i></button>
       <button class="view-btn"
               title="Ver pantalla en directo (solo ver)"
-              onclick="event.stopPropagation(); abrirLiveView('${sid}','view')">👁</button>
+              onclick="event.stopPropagation(); abrirLiveView('${sid}','view')"><i data-lucide="eye" size="12"></i></button>
       <button class="ctrl-btn"
               title="Control remoto"
-              onclick="event.stopPropagation(); abrirLiveView('${sid}','control')">🖱</button>
+              onclick="event.stopPropagation(); abrirLiveView('${sid}','control')"><i data-lucide="mouse-pointer" size="12"></i></button>
       <button class="lock-btn" id="lock-btn-${sid}"
               title="Bloquear pantalla"
-              onclick="event.stopPropagation(); toggleLock('${sid}')">🔒</button>
+              onclick="event.stopPropagation(); toggleLock('${sid}')"><i data-lucide="lock" size="12"></i></button>
       <button class="quit-btn"
               title="Apagar equipo del alumno"
-              onclick="event.stopPropagation(); quitStudent('${sid}')">⏻</button>
+              onclick="event.stopPropagation(); quitStudent('${sid}')"><i data-lucide="power" size="12"></i></button>
     </div>`;
   div.addEventListener('click', () => {
-    if (_selectionMode) { toggleSelectCard(sid); return; }
-    openModal(sid);
+  if (_selectionMode) { toggleSelectCard(sid); return; }
+  openModal(sid);
   });
   document.getElementById('grid').appendChild(div);
+  lucide.createIcons();
 
   if (s.image) updateCardImage(sid, s.image, s.last_seen);
   applySearch();
-}
-
+  }
 function updateCardImage(sid, image, last_seen) {
   const screen = document.getElementById(`screen-${sid}`);
   if (!screen) return;
@@ -1258,15 +1291,16 @@ function toggleSelectionMode() {
   const bar = document.getElementById('selection-bar');
   if (_selectionMode) {
     btn.classList.add('active');
-    btn.textContent = '✓ Seleccionando';
+    btn.innerHTML = '<i data-lucide="check-square" size="12"></i> Seleccionando';
     bar.classList.add('show');
     updateSelectionBar();
   } else {
     btn.classList.remove('active');
-    btn.textContent = '☑ Seleccionar';
+    btn.innerHTML = '<i data-lucide="check-square" size="12"></i> Seleccionar';
     bar.classList.remove('show');
     clearSelection();
   }
+  lucide.createIcons();
 }
 
 function toggleSelectCard(sid) {
@@ -1316,9 +1350,10 @@ function cancelarSeleccion() {
   _selectionMode = false;
   const btn = document.getElementById('btn-select-mode');
   btn.classList.remove('active');
-  btn.textContent = '☑ Seleccionar';
+  btn.innerHTML = '<i data-lucide="check-square" size="12"></i> Seleccionar';
   document.getElementById('selection-bar').classList.remove('show');
   clearSelection();
+  lucide.createIcons();
 }
 
 function abrirComposeSeleccion() {
@@ -1578,11 +1613,21 @@ function updateLockState(sid, locked) {
   if (locked) {
     card.classList.add('locked');
     overlay?.classList.add('show');
-    if (btn) { btn.classList.add('locked'); btn.title = 'Desbloquear pantalla'; btn.textContent = '🔓'; }
+    if (btn) { 
+      btn.classList.add('locked'); 
+      btn.title = 'Desbloquear pantalla'; 
+      btn.innerHTML = '<i data-lucide="lock-open" size="12"></i>';
+      lucide.createIcons();
+    }
   } else {
     card.classList.remove('locked');
     overlay?.classList.remove('show');
-    if (btn) { btn.classList.remove('locked'); btn.title = 'Bloquear pantalla'; btn.textContent = '🔒'; }
+    if (btn) { 
+      btn.classList.remove('locked'); 
+      btn.title = 'Bloquear pantalla'; 
+      btn.innerHTML = '<i data-lucide="lock" size="12"></i>';
+      lucide.createIcons();
+    }
   }
 }
 
@@ -1687,16 +1732,17 @@ function _syncOverlayUi() {
   const toolText = document.getElementById('lv-tool-text');
 
   if (overlayBtn) {
-    overlayBtn.textContent = `🧑‍🏫 Pizarra: ${_overlayEnabled ? 'ON' : 'OFF'}`;
+    overlayBtn.innerHTML = `<i data-lucide="presentation" size="12"></i> Pizarra: ${_overlayEnabled ? 'ON' : 'OFF'}`;
     overlayBtn.classList.toggle('active', _overlayEnabled);
   }
   if (drawBtn) {
-    drawBtn.textContent = `✏ Dibujar: ${_overlayDrawMode ? 'ON' : 'OFF'}`;
+    drawBtn.innerHTML = `<i data-lucide="pencil" size="12"></i> Dibujar: ${_overlayDrawMode ? 'ON' : 'OFF'}`;
     drawBtn.classList.toggle('active', _overlayDrawMode);
     drawBtn.disabled = !_overlayEnabled;
     drawBtn.style.opacity = _overlayEnabled ? '1' : '.5';
     drawBtn.style.cursor = _overlayEnabled ? 'pointer' : 'not-allowed';
   }
+  lucide.createIcons();
   if (toolbar) {
     const showTools = _liveviewMode === 'control' && _overlayEnabled;
     toolbar.classList.toggle('show', showTools);
@@ -1800,18 +1846,19 @@ function abrirLiveView(sid, mode) {
   const sizeInput = document.getElementById('lv-overlay-size');
   const textInput = document.getElementById('lv-overlay-text');
   if (mode === 'control') {
-    badge.textContent = '🖱 Control remoto';
-    badge.className   = 'lv-badge control';
+    badge.innerHTML = '<i data-lucide="mouse-pointer" size="12"></i> Control remoto';
+    badge.className   = 'lv-badge control d-flex align-items-center gap-1';
     body.classList.add('control-mode');
     overlayBtn.style.display = '';
     drawBtn.style.display = '';
   } else {
-    badge.textContent = '👁 Solo ver';
-    badge.className   = 'lv-badge view';
+    badge.innerHTML = '<i data-lucide="eye" size="12"></i> Solo ver';
+    badge.className   = 'lv-badge view d-flex align-items-center gap-1';
     body.classList.remove('control-mode');
     overlayBtn.style.display = 'none';
     drawBtn.style.display = 'none';
   }
+  lucide.createIcons();
   colorInput.value = _overlayColor;
   sizeInput.value = String(_overlaySize);
   textInput.value = '';
@@ -2073,6 +2120,7 @@ function _traducirCoords(e) {
 // Listeners del overlay de live view
 // (el div #liveview-overlay está después del <\/script>, se registra al estar listo el DOM)
 document.addEventListener('DOMContentLoaded', function () {
+  lucide.createIcons();
   const ov   = document.getElementById('liveview-overlay');
   const body = document.getElementById('liveview-body');
   const overlayBtn = document.getElementById('lv-overlay-toggle');
@@ -2320,8 +2368,7 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 // ── Compartir pantalla del profesor ───────────────────────────────────────
-// IS_LAUNCHER lo inyecta Flask según la variable de entorno VIGIA_TAURI=1.
-// Así la detección es 100% fiable sin depender de URLs ni inyecciones JS.
+// IS_LAUNCHER lo inyecta Flask.
 const IS_LAUNCHER = {{ 'true' if is_launcher else 'false' }};
 
 let _sharing     = false;
@@ -2380,7 +2427,7 @@ socket.on('screens_list', data => {
       b.appendChild(img);
     } else {
       const ph = document.createElement('div');
-      ph.className = 's-thumb-placeholder'; ph.textContent = icon;
+      ph.className = 's-thumb-placeholder'; ph.innerHTML = icon;
       b.appendChild(ph);
     }
     const footer = document.createElement('div');
@@ -2402,15 +2449,16 @@ socket.on('screens_list', data => {
     const h = document.createElement('p');
     h.className = 'screen-section-header'; h.textContent = 'Pantallas';
     list.appendChild(h);
-    monitors.forEach(s => list.appendChild(makeCard(s, '🖥', { type: 'monitor', monitor: s.index })));
+    monitors.forEach(s => list.appendChild(makeCard(s, '<i data-lucide="monitor" size="28"></i>', { type: 'monitor', monitor: s.index })));
   }
   if (windows.length) {
     const h = document.createElement('p');
     h.className = 'screen-section-header'; h.textContent = 'Ventanas';
     list.appendChild(h);
-    windows.forEach(s => list.appendChild(makeCard(s, '🪟', { type: 'window', wid: s.wid })));
+    windows.forEach(s => list.appendChild(makeCard(s, '<i data-lucide="window" size="28"></i>', { type: 'window', wid: s.wid })));
   }
   document.getElementById('screen-overlay').classList.add('show');
+  lucide.createIcons();
 });
 
 function cerrarScreenModal() {
@@ -2470,12 +2518,13 @@ function _actualizarBoton(compartiendo) {
   const btn = document.getElementById('btn-compartir');
   const badge = document.getElementById('live-badge');
   if (compartiendo) {
-    btn.textContent = '⏹ Dejar de compartir';
+    btn.innerHTML = '<i data-lucide="square" size="12"></i> Dejar de compartir';
     btn.classList.add('sharing'); badge.classList.add('show');
   } else {
-    btn.textContent = '📺 Compartir mi pantalla';
+    btn.innerHTML = '<i data-lucide="tv" size="12"></i> Compartir mi pantalla';
     btn.classList.remove('sharing'); badge.classList.remove('show');
   }
+  lucide.createIcons();
 }
 
 window.addEventListener('beforeunload', () => { if (_sharing) detenerCompartir(); });
@@ -2487,6 +2536,7 @@ window.addEventListener('beforeunload', () => { if (_sharing) detenerCompartir()
 // Listeners modal hipervínculo y compose — diferidos a DOMContentLoaded
 // porque esos elementos están definidos después del bloque script y aún no existen aquí.
 document.addEventListener('DOMContentLoaded', () => {
+  lucide.createIcons();
   document.getElementById('link-url').addEventListener('keydown', (e) => {
     if (e.key === 'Enter')  insertarLink();
     if (e.key === 'Escape') cerrarLink();
@@ -2510,10 +2560,11 @@ function _renderFileList() {
   el.innerHTML = '';
   _composeFiles.forEach((f, i) => {
     const chip = document.createElement('span');
-    chip.className = 'attach-chip';
-    chip.innerHTML = `📄 ${escHtml(f.name)}\u00a0<button class="attach-chip-remove" onclick="_removeFile(${i})" title="Eliminar adjunto">✕</button>`;
+    chip.className = 'attach-chip d-inline-flex align-items-center gap-1';
+    chip.innerHTML = `<i data-lucide="file" size="12"></i> ${escHtml(f.name)}\u00a0<button class="attach-chip-remove" onclick="_removeFile(${i})" title="Eliminar adjunto"><i data-lucide="x" size="12"></i></button>`;
     el.appendChild(chip);
   });
+  lucide.createIcons();
 }
 
 function _removeFile(idx) {
@@ -2606,21 +2657,21 @@ function ejecutarComando() {
   if (empty) empty.remove();
 
   sids.forEach(sid => {
-    const name = students[sid]?.name || sid;
-    const el = document.createElement('div');
-    el.className = 'term-result';
-    el.id = `term-result-${cmdId}-${sid}`;
-    el.innerHTML =
-      `<div class="term-result-header">` +
-        `<span class="term-result-name">${escHtml(name)}</span>` +
-        `<span class="term-badge-run" id="term-badge-${cmdId}-${sid}">⏳ ejecutando</span>` +
-      `</div>` +
-      `<div class="term-stdout" id="term-out-${cmdId}-${sid}"></div>` +
-      `<div class="term-stderr" id="term-err-${cmdId}-${sid}"></div>`;
-    wrap.appendChild(el);
+  const name = students[sid]?.name || sid;
+  const el = document.createElement('div');
+  el.className = 'term-result';
+  el.id = `term-result-${cmdId}-${sid}`;
+  el.innerHTML =
+    `<div class="term-result-header">` +
+      `<span class="term-result-name">${escHtml(name)}</span>` +
+      `<span class="term-badge-run" id="term-badge-${cmdId}-${sid}"><i data-lucide="loader" size="12" class="spin"></i> ejecutando</span>` +
+    `</div>` +
+    `<div class="term-stdout" id="term-out-${cmdId}-${sid}"></div>` +
+    `<div class="term-stderr" id="term-err-${cmdId}-${sid}"></div>`;
+  wrap.appendChild(el);
   });
   wrap.scrollTop = wrap.scrollHeight;
-
+  lucide.createIcons();
   socket.emit('run_command', { sids, command: cmd, cmd_id: cmdId });
   document.getElementById('terminal-cmd').value = '';
   document.getElementById('terminal-cmd').focus();
@@ -2635,7 +2686,10 @@ socket.on('command_result', (data) => {
   if (!outEl) return;  // resultado de un comando ya limpiado o anterior
   if (badgeEl) {
     badgeEl.className = returncode === 0 ? 'term-badge-ok' : 'term-badge-err';
-    badgeEl.textContent = returncode === 0 ? `✓ ${returncode}` : `✗ ${returncode}`;
+    badgeEl.innerHTML = returncode === 0 
+      ? `<i data-lucide="check" size="12"></i> ${returncode}` 
+      : `<i data-lucide="x" size="12"></i> ${returncode}`;
+    lucide.createIcons();
   }
   if (stdout) outEl.textContent = stdout;
   if (stderr) errEl.textContent = stderr;
@@ -2663,8 +2717,8 @@ function _actualizarPrompt(cwd) {
 <div id="compose-overlay">
   <div id="compose-box">
     <div id="compose-header">
-      <span>✉ Nuevo mensaje</span>
-      <button onclick="cerrarCompose()">✕</button>
+      <span class="d-flex align-items-center gap-2"><i data-lucide="mail" size="12"></i> Nuevo mensaje</span>
+      <button onclick="cerrarCompose()"><i data-lucide="x" size="18"></i></button>
     </div>
     <div class="compose-row">
       <span class="compose-label">Para:</span>
@@ -2676,26 +2730,26 @@ function _actualizarPrompt(cwd) {
              value="Mensaje del profesor" maxlength="120" />
     </div>
     <div class="compose-toolbar">
-      <button class="tb-btn" onclick="fmt('bold')"    title="Negrita (Ctrl+B)"><b>N</b></button>
-      <button class="tb-btn" onclick="fmt('italic')"  title="Cursiva (Ctrl+I)"><i>K</i></button>
-      <button class="tb-btn" onclick="fmt('underline')" title="Subrayado (Ctrl+U)"><u>S</u></button>
+      <button class="tb-btn" onclick="fmt('bold')"    title="Negrita (Ctrl+B)"><i data-lucide="bold" size="12"></i></button>
+      <button class="tb-btn" onclick="fmt('italic')"  title="Cursiva (Ctrl+I)"><i data-lucide="italic" size="12"></i></button>
+      <button class="tb-btn" onclick="fmt('underline')" title="Subrayado (Ctrl+U)"><i data-lucide="underline" size="12"></i></button>
       <span class="tb-sep"></span>
-      <button class="tb-btn" onclick="fmt('insertUnorderedList')" title="Lista con viñetas">• —</button>
-      <button class="tb-btn" onclick="fmt('insertOrderedList')"  title="Lista numerada">1. —</button>
+      <button class="tb-btn" onclick="fmt('insertUnorderedList')" title="Lista con viñetas"><i data-lucide="list" size="12"></i></button>
+      <button class="tb-btn" onclick="fmt('insertOrderedList')"  title="Lista numerada"><i data-lucide="list-ordered" size="12"></i></button>
       <span class="tb-sep"></span>
-      <button class="tb-btn" onclick="fmt('removeFormat')" title="Quitar formato">✕ fmt</button>
+      <button class="tb-btn d-inline-flex align-items-center gap-1" onclick="fmt('removeFormat')" title="Quitar formato"><i data-lucide="eraser" size="12"></i></button>
       <span class="tb-sep"></span>
-      <button class="tb-btn" id="btn-link"   onclick="abrirLink()"    title="Insertar hipervínculo">🔗 Enlace</button>
-      <button class="tb-btn" id="btn-source" onclick="toggleSource()" title="Editar HTML fuente">&lt;/&gt; HTML</button>
+      <button class="tb-btn d-inline-flex align-items-center gap-1" id="btn-link"   onclick="abrirLink()"    title="Insertar hipervínculo"><i data-lucide="link" size="12"></i> Enlace</button>
+      <button class="tb-btn d-inline-flex align-items-center gap-1" id="btn-source" onclick="toggleSource()" title="Editar HTML fuente"><i data-lucide="code" size="12"></i> HTML</button>
     </div>
     <div id="compose-body" contenteditable="true" spellcheck="true"
          data-placeholder="Escribe el cuerpo del mensaje aquí…"></div>
     <textarea id="compose-source" spellcheck="false"
               placeholder="<!-- HTML del mensaje -->"></textarea>
     <div id="compose-attach-area">
-      <div id="compose-drop-zone">
-        <span>📎 Arrastra archivos aquí o</span>
-        <button id="compose-drop-zone-btn"
+        <div id="compose-drop-zone">
+          <span class="d-flex align-items-center justify-content-center gap-2"><i data-lucide="paperclip" size="12"></i> Arrastra archivos aquí o</span>
+          <button id="compose-drop-zone-btn"
                 onclick="document.getElementById('compose-file-input').click()">Seleccionar archivos</button>
         <input type="file" id="compose-file-input" multiple style="display:none">
       </div>
@@ -2713,19 +2767,19 @@ function _actualizarPrompt(cwd) {
   <div id="liveview-header">
     <div id="liveview-header-left">
       <span id="liveview-name">—</span>
-      <span id="liveview-badge" class="lv-badge view">👁 Solo ver</span>
+      <span id="liveview-badge" class="lv-badge view d-flex align-items-center gap-1"><i data-lucide="eye" size="12"></i> Solo ver</span>
       <span id="liveview-transport" style="font-size:0.75rem;color:var(--muted);margin-left:8px;">JPEG</span>
     </div>
     <span id="liveview-fps">…</span>
-    <button id="lv-overlay-toggle" style="display:none" title="Activar/desactivar pizarra en el cliente">🧑‍🏫 Pizarra: OFF</button>
-    <button id="lv-draw-toggle" style="display:none" title="Alternar entre control remoto y dibujar sobre la pizarra">✏ Dibujar: OFF</button>
-    <button id="lv-clipboard-btn" onclick="pedirPortapapeles()" style="display:none"
-            title="Obtener portapapeles del alumno (Ctrl+Shift+C)">📋 Portapapeles</button>
-    <button onclick="cerrarLiveView()">✕ Cerrar (Esc)</button>
+    <button id="lv-overlay-toggle" class="d-flex align-items-center gap-2" style="display:none" title="Activar/desactivar pizarra en el cliente"><i data-lucide="presentation" size="12"></i> Pizarra: OFF</button>
+    <button id="lv-draw-toggle" class="d-flex align-items-center gap-2" style="display:none" title="Alternar entre control remoto y dibujar sobre la pizarra"><i data-lucide="pencil" size="12"></i> Dibujar: OFF</button>
+    <button id="lv-clipboard-btn" onclick="pedirPortapapeles()" class="d-flex align-items-center gap-2" style="display:none"
+            title="Obtener portapapeles del alumno (Ctrl+Shift+C)"><i data-lucide="clipboard" size="12"></i> Portapapeles</button>
+    <button onclick="cerrarLiveView()" class="d-flex align-items-center gap-2"><i data-lucide="x" size="12"></i> Cerrar (Esc)</button>
     <div id="liveview-toolbar">
-      <button id="lv-tool-brush" class="lv-tool-btn active" title="Pincel">🖌 Pincel</button>
-      <button id="lv-tool-text" class="lv-tool-btn" title="Texto">T Texto</button>
-      <button id="lv-overlay-clear" class="lv-tool-btn" title="Limpiar la pizarra">🧽 Limpiar</button>
+      <button id="lv-tool-brush" class="lv-tool-btn active d-inline-flex align-items-center gap-1" title="Pincel"><i data-lucide="brush" size="12"></i> Pincel</button>
+      <button id="lv-tool-text" class="lv-tool-btn d-inline-flex align-items-center gap-1" title="Texto"><i data-lucide="type" size="12"></i> Texto</button>
+      <button id="lv-overlay-clear" class="lv-tool-btn d-inline-flex align-items-center gap-1" title="Limpiar la pizarra"><i data-lucide="eraser" size="12"></i> Limpiar</button>
       <span class="lv-tool-label">Color</span>
       <input id="lv-overlay-color" type="color" value="#ff3b30" title="Color del pincel" />
       <span class="lv-tool-label">Grosor</span>
@@ -2746,7 +2800,7 @@ function _actualizarPrompt(cwd) {
 <!-- ── Popup portapapeles remoto ── -->
 <div id="clipboard-overlay">
   <div id="clipboard-box">
-    <h3>📋 Portapapeles del alumno</h3>
+    <h3 class="d-flex align-items-center gap-2"><i data-lucide="clipboard" size="12"></i> Portapapeles del alumno</h3>
     <textarea id="clipboard-textarea" readonly placeholder="Esperando contenido…"></textarea>
     <div class="cb-footer">
       <button id="clipboard-copy-btn" onclick="copiarPortapapeles()">Copiar al servidor</button>
@@ -2758,7 +2812,7 @@ function _actualizarPrompt(cwd) {
 <!-- ── Modal selección de pantalla ── -->
 <div id="screen-overlay">
   <div id="screen-box">
-    <h3>📺 Selecciona qué compartir</h3>
+    <h3 class="d-flex align-items-center gap-2"><i data-lucide="tv" size="12"></i> Selecciona qué compartir</h3>
     <div id="screen-list"><!-- se rellena dinámicamente --></div>
     <button id="screen-cancel" onclick="cerrarScreenModal()">Cancelar</button>
   </div>
@@ -2768,8 +2822,8 @@ function _actualizarPrompt(cwd) {
 <div id="terminal-overlay">
   <div id="terminal-box">
     <div id="terminal-header">
-      <span>⌨ Terminal remoto</span>
-      <button onclick="cerrarTerminal()" title="Cerrar (Esc)">✕</button>
+      <span class="d-flex align-items-center gap-2"><i data-lucide="terminal" size="12"></i> Terminal remoto</span>
+      <button onclick="cerrarTerminal()" title="Cerrar (Esc)"><i data-lucide="x" size="18"></i></button>
     </div>
     <div id="terminal-para-row">
       <span style="color:var(--muted);min-width:52px;font-size:0.88rem">Para:</span>
@@ -2785,10 +2839,10 @@ function _actualizarPrompt(cwd) {
       <div class="term-empty" id="terminal-empty">Ejecuta un comando para ver la salida aquí.</div>
     </div>
     <div id="terminal-footer">
-      <button class="term-clear-btn" onclick="limpiarTerminal()">🗑 Limpiar salida</button>
+      <button class="term-clear-btn d-flex align-items-center gap-2" onclick="limpiarTerminal()"><i data-lucide="trash-2" size="12"></i> Limpiar salida</button>
       <div style="display:flex;gap:8px">
         <button class="term-cancel-btn" onclick="cerrarTerminal()">Cerrar</button>
-        <button class="term-exec-btn"   onclick="ejecutarComando()">▶ Ejecutar</button>
+        <button class="term-exec-btn d-flex align-items-center gap-2" onclick="ejecutarComando()"><i data-lucide="play" size="12"></i> Ejecutar</button>
       </div>
     </div>
   </div>
@@ -2797,7 +2851,7 @@ function _actualizarPrompt(cwd) {
 <!-- ── Mini modal hipervínculo ── -->
 <div id="link-overlay">
   <div id="link-box">
-    <h3>🔗 Insertar hipervínculo</h3>
+    <h3 class="d-flex align-items-center gap-2"><i data-lucide="link" size="12"></i> Insertar hipervínculo</h3>
     <div class="link-field">
       <label>Texto del enlace</label>
       <input id="link-text" type="text" placeholder="Texto visible…" maxlength="200" />
