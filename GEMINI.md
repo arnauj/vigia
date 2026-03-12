@@ -4,7 +4,7 @@ This file provides guidance to Gemini CLI when working with code in this reposit
 
 ## What is VIGIA
 
-Classroom monitoring software for Linux (Kubuntu/Ubuntu). The teacher runs a Flask server that displays a live grid of student screens in a native desktop window. The window is opened by `vigia-launcher.py`, which prefers Chrome/Chromium in `--app` mode and falls back to GTK+WebKit2GTK (with GPU disabled). Each student runs `client.py`, which captures the screen and streams it to the server. Inspired by Epoptes.
+Classroom monitoring software for Linux (Kubuntu/Ubuntu). The teacher runs a Flask server that displays a live grid of student screens in a native desktop window. The window is opened by `vigia-launcher.py`, which prefers Chrome/Chromium in `--app` mode and falls back to GTK+WebKit2GTK (with GPU disabled). Each student runs `client.py`, which captures the screen and streams it to the server.
 
 **Critical constraint:** Only works under X11 sessions. The `mss` screen-capture library does not support Wayland.
 
@@ -92,7 +92,7 @@ build_debs.sh       Builds vigia-server_1.1_amd64.deb and vigia-client_1.1_all.d
 - **WebRTC fallback timeout:** 4 seconds (dashboard side). If ICE does not connect, or if the P2P video track is established but ICE later drops, `_fallbackJPEG` resets `_webrtcActivo` and switches back to JPEG.
 - **Chrome --app is the preferred UI.** It supports `getDisplayMedia()` natively and avoids GPU/KWin conflicts. An isolated temporary profile is used so it does not interfere with the user's Chrome.
 - **WebKit2GTK GPU must be disabled** (`WEBKIT_DISABLE_DMABUF_RENDERER=1`, `WEBKIT_DISABLE_COMPOSITING_MODE=1`, `LIBGL_ALWAYS_SOFTWARE=1`) before initializing GTK; otherwise KWin/KDE deadlocks the compositor causing a black screen.
-- **`instalar_servidor.sh` always uses `vigia-launcher.py`**, never the Tauri binary, even if it exists.
+- **`instalar_servidor.sh` always uses `vigia-launcher.py`.**
 - **Tkinter in client.py** is used only for floating windows (messages, lock screen, teacher screen). The client works without it but has no UI.
 - **xdotool** is the primary remote-control backend; `pynput` is the automatic fallback if xdotool is not installed.
 - **Attachments in messages** are base64-encoded (10 MB total limit), sent with `show_message`, saved to `~/Descargas` on the student machine, and opened with `xdg-open`.

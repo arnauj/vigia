@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is VIGIA
 
-Classroom monitoring software for Linux (Kubuntu/Ubuntu). The teacher runs a server (Flask) that displays a live grid of student screens. The teacher's dashboard appears as a **native desktop window** launched by `vigia-launcher.py` (Chrome/Chromium `--app` mode as primary, GTK+WebKit2GTK as fallback). Each student runs a client that captures and streams their screen. Inspired by Epoptes.
+Classroom monitoring software for Linux (Kubuntu/Ubuntu). The teacher runs a server (Flask) that displays a live grid of student screens. The teacher's dashboard appears as a **native desktop window** launched by `vigia-launcher.py` (Chrome/Chromium `--app` mode as primary, GTK+WebKit2GTK as fallback). Each student runs a client that captures and streams their screen.
 
 **Critical constraint:** Only works under X11 sessions. The `mss` screen-capture library does not support Wayland. Always keep this limitation in mind.
 
@@ -14,7 +14,7 @@ Classroom monitoring software for Linux (Kubuntu/Ubuntu). The teacher runs a ser
 # Servidor — lanzador nativo (Chrome --app → WebKit2GTK → navegador)
 python3 vigia-launcher.py [puerto]
 
-# Servidor — solo el servidor Flask (sin ventana, abre http://localhost:5000)
+# Servidor — solo el servidor Flask (sin ventana)
 python3 server.py [puerto]
 
 # Cliente (equipo del alumno)
@@ -101,7 +101,7 @@ instalar.py ──────────────────────�
 instalar_servidor.sh ───────────────────────────────────────────────
   Instala deps Python (flask, flask-socketio, eventlet…) con pip.
   Crea ~/.local/share/applications/vigia-servidor.desktop con
-  Exec apuntando a vigia-launcher.py (nunca al binario Tauri).
+  Exec apuntando a vigia-launcher.py.
   Crea ~/.config/systemd/user/vigia-servidor.service y lo habilita
   (arranca automáticamente con la sesión del usuario).
   loginctl enable-linger permite arranque sin sesión gráfica activa.
@@ -170,7 +170,6 @@ Dashboard → Cliente            : eventos teclado (RTCDataChannel 'vigia-input'
 - **Lanzador Chrome --app.** `vigia-launcher.py` usa un perfil temporal aislado (`tempfile.mkdtemp`) para no interferir con el Chrome del usuario. `--class=vigia` hace que KDE asocie la ventana al `.desktop` y muestre el icono correcto.
 - **Detección de Flask ya activo.** `vigia-launcher.py` sondea el puerto 5000 durante 1,5 s antes de arrancar Flask. Si ya corre (servicio systemd), lo reutiliza y no lo mata al cerrar la ventana.
 - **GPU desactivado en WebKit2GTK.** Las variables `WEBKIT_DISABLE_DMABUF_RENDERER=1`, `WEBKIT_DISABLE_COMPOSITING_MODE=1`, `LIBGL_ALWAYS_SOFTWARE=1` se fijan antes de importar GTK para evitar el deadlock con KWin/KDE que produce pantalla negra.
-- **instalar_servidor.sh siempre usa vigia-launcher.py.** No usa el binario Tauri aunque exista, ya que Tauri puede causar pantalla negra en KWin.
 - **`_instalar()` en client.py** detecta si pip falta, lo instala vía `apt-get python3-pip` y hace fallback a `pip3` si `python -m pip` falla. aiortc NO se auto-instala (requiere apt por las libs nativas).
 - **Tkinter en client.py** se usa solo para ventanas flotantes (pantalla del profesor, mensajes, bloqueo). Si no está disponible el cliente sigue funcionando pero sin UI.
 - **Bloqueo de pantalla** usa `grab_set_global()` de Tkinter (XGrabPointer + XGrabKeyboard) para capturar todos los eventos X11.

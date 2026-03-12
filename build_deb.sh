@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
 # ────────────────────────────────────────────────────────────────
-#  VIGIA — Generador del paquete .deb
-#  Uso: bash build_deb.sh
-#  Resultado: dist/vigia_1.0_amd64.deb
+#  VIGIA — Generador del paquete .deb (Legacy/Server-only)
 # ────────────────────────────────────────────────────────────────
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PKG_NAME="vigia-server"
 PKG_VER="1.0"
-TAURI_BINARY="$SCRIPT_DIR/vigia-dashboard/src-tauri/target/release/vigia"
 
 # ── Comprobar dpkg-deb ────────────────────────────────────────
 if ! command -v dpkg-deb >/dev/null 2>&1; then
@@ -18,21 +15,7 @@ if ! command -v dpkg-deb >/dev/null 2>&1; then
   exit 1
 fi
 
-# ── Compilar binario Tauri si no existe (opcional) ────────────
-if [ -f "$TAURI_BINARY" ]; then
-  echo "[✓] Binario Tauri: $TAURI_BINARY"
-elif bash "$SCRIPT_DIR/vigia-dashboard/build.sh" 2>/dev/null; then
-  echo "[✓] Binario Tauri compilado"
-else
-  echo "[i] Binario Tauri no disponible — el paquete usará vigia-launcher.py (GTK/WebKit2)"
-fi
-
-# ── Arquitectura: amd64 si hay binario Tauri, all si solo Python ──
-if [ -f "$TAURI_BINARY" ]; then
-  PKG_ARCH="amd64"
-else
-  PKG_ARCH="all"
-fi
+PKG_ARCH="all"
 PKG_FULL="${PKG_NAME}_${PKG_VER}_${PKG_ARCH}"
 BUILD_DIR="$SCRIPT_DIR/dist/build/$PKG_FULL"
 VIGIA_DST="$BUILD_DIR/opt/vigia-server"
@@ -72,11 +55,6 @@ cp "$SCRIPT_DIR/img/logo2_mini.png"   "$BUILD_DIR/usr/share/pixmaps/vigia.png"
 # ── Copiar lanzador Python nativo ────────────────────────────
 cp "$SCRIPT_DIR/vigia-launcher.py" "$VIGIA_DST/"
 
-# ── Copiar binario Tauri si existe (mejora opcional) ─────────
-if [ -f "$TAURI_BINARY" ]; then
-  cp "$TAURI_BINARY" "$VIGIA_DST/vigia"
-  chmod +x "$VIGIA_DST/vigia"
-fi
 chmod +x "$VIGIA_DST"/*.sh "$VIGIA_DST"/*.py
 
 # ── DEBIAN/control ────────────────────────────────────────────
@@ -93,7 +71,7 @@ Description: Sistema de supervisión de aula para Linux
  alumnos conectados en la misma red local. Incluye servidor (equipo
  del profesor) y cliente (equipo del alumno).
  .
- El panel del profesor se muestra como ventana nativa (Tauri/WebKit).
+ El panel del profesor se muestra como ventana nativa (Chrome/WebKit).
  .
  Sólo compatible con sesiones X11.
 EOF
@@ -108,7 +86,7 @@ VIGIA_DIR=/opt/vigia-server
 REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
 REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
 
-chmod +x "$VIGIA_DIR"/*.sh "$VIGIA_DIR"/*.py "$VIGIA_DIR/vigia" 2>/dev/null || true
+chmod +x "$VIGIA_DIR"/*.sh "$VIGIA_DIR"/*.py 2>/dev/null || true
 
 echo ""
 echo "╔══════════════════════════════════════════╗"

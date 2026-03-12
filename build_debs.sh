@@ -39,13 +39,6 @@ pip3 wheel --wheel-dir "$SERVER_BUILD_DIR/opt/vigia-server/wheels/" \
     flask flask-socketio eventlet mss Pillow \
     2>/dev/null || echo "[!] Aviso: no se pudieron pre-construir wheels; la instalación requerirá red."
 
-# Copy Tauri binary if exists
-TAURI_BINARY="$SCRIPT_DIR/vigia-dashboard/src-tauri/target/release/vigia"
-if [ -f "$TAURI_BINARY" ]; then
-  cp "$TAURI_BINARY" "$SERVER_BUILD_DIR/opt/vigia-server/vigia"
-  chmod +x "$SERVER_BUILD_DIR/opt/vigia-server/vigia"
-fi
-
 cat > "$SERVER_BUILD_DIR/DEBIAN/control" <<EOF
 Package: $SERVER_PKG_NAME
 Version: $VERSION
@@ -116,7 +109,6 @@ After=network.target
 Type=simple
 ExecStart=$PYTHON3 $VIGIA_DIR/server.py 5000
 WorkingDirectory=$VIGIA_DIR
-Environment=VIGIA_TAURI=1
 Environment=PYTHONUNBUFFERED=1
 Restart=on-failure
 RestartSec=5

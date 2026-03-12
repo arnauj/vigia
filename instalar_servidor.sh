@@ -140,7 +140,6 @@ After=network.target
 Type=simple
 ExecStart=$PYTHON3 $SCRIPT_DIR/server.py 5000
 WorkingDirectory=$SCRIPT_DIR
-Environment=VIGIA_TAURI=1
 Environment=PYTHONUNBUFFERED=1
 Restart=on-failure
 RestartSec=5

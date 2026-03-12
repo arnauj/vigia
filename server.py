@@ -715,14 +715,4 @@ if __name__ == '__main__':
     print(f"  Alumnos se conectan a IP: {ip}  puerto: {port}")
     print(f"{sep}\n")
 
-    # Solo abrir navegador cuando no está corriendo dentro de Tauri
-    if not os.environ.get('VIGIA_TAURI'):
-        def _abrir_navegador():
-            time.sleep(1.5)
-            try:
-                webbrowser.open(f"http://localhost:{port}")
-            except Exception:
-                pass
-
-        threading.Thread(target=_abrir_navegador, daemon=True).start()
     socketio.run(app, host='0.0.0.0', port=port, debug=False)

@@ -1,6 +1,10 @@
 # VIGIA
 ### Vigilancia e Integración para la Gestión Inteligente de Aulas
 
+<div align="center">
+  <img src="img/logo2.png" alt="VIGIA Logo" width="100">
+</div>
+
 > Software de monitoreo de aula en tiempo real para Linux. El profesor ve, controla y gestiona todos los equipos del aula desde una sola ventana.
 
 <div align="center">
@@ -276,4 +280,4 @@ Genera en `dist/`:
 
 ---
 
-*Inspirado en [Epoptes](https://epoptes.org/). Desarrollado para aulas Linux con Kubuntu.*
+*Desarrollado para aulas Linux con Kubuntu.*

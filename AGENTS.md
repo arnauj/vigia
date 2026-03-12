@@ -4,7 +4,7 @@ Este archivo guía a AGENTS Code (AGENTS.ai/code) al trabajar en este repositori
 
 ## Qué es VIGIA
 
-Software de monitoreo de aulas para Linux (Kubuntu/Ubuntu). El profesor ejecuta un servidor Flask que muestra una cuadrícula en vivo de pantallas. El panel del profesor se abre como **ventana nativa** mediante `vigia-launcher.py` (Chrome/Chromium `--app` como primera opción, GTK+WebKit2GTK como fallback). Cada alumno ejecuta `client.py`, que captura pantalla y la transmite al servidor. Inspirado en Epoptes.
+Software de monitoreo de aulas para Linux (Kubuntu/Ubuntu). El profesor ejecuta un servidor Flask que muestra una cuadrícula en vivo de pantallas. El panel del profesor se abre como **ventana nativa** mediante `vigia-launcher.py` (Chrome/Chromium `--app` como primera opción, GTK+WebKit2GTK como fallback). Cada alumno ejecuta `client.py`, que captura pantalla y la transmite al servidor.
 
 **Restricción crítica:** solo funciona en sesiones X11. La librería `mss` no soporta Wayland.
 
@@ -14,7 +14,7 @@ Software de monitoreo de aulas para Linux (Kubuntu/Ubuntu). El profesor ejecuta 
 # Servidor — lanzador nativo (Chrome --app → WebKit2GTK → navegador)
 python3 vigia-launcher.py [puerto]
 
-# Servidor — solo Flask (sin ventana, abre http://localhost:5000)
+# Servidor — solo Flask (sin ventana)
 python3 server.py [puerto]
 
 # Cliente (alumno)
@@ -83,13 +83,8 @@ test_client.py
 requirements_servidor.txt / requirements_cliente.txt
   Listas de paquetes pip (si existen).
 
-vigia-dashboard/
-  App Tauri 2 opcional (ventana nativa). build.sh compila con Rust.
-  frontend/index.html es un splash sencillo.
-  NOTA: el instalador y el launcher no usan Tauri por defecto.
-
 build_deb.sh
-  Script legacy para un único .deb del servidor con Tauri opcional.
+  Script legacy para un único .deb del servidor.
   El flujo principal actual usa build_debs.sh (dos paquetes separados).
 ```
 
@@ -124,7 +119,7 @@ build_deb.sh
 - **Chrome --app prioritario.** Perfil temporal y `--class=vigia` para icono KDE.
 - **WebKit2GTK sin GPU.** Variables `WEBKIT_DISABLE_DMABUF_RENDERER`,
   `WEBKIT_DISABLE_COMPOSITING_MODE`, `LIBGL_ALWAYS_SOFTWARE` antes de GTK.
-- **instalar_servidor.sh** siempre usa `vigia-launcher.py`, no Tauri.
+- **instalar_servidor.sh** siempre usa `vigia-launcher.py`.
 
 ## Dependencias
 

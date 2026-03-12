@@ -194,7 +194,6 @@ def main() -> None:
     else:
         proc = subprocess.Popen(
             [sys.executable, server_py, str(port)],
-            env={**os.environ, 'VIGIA_TAURI': '1'},
             cwd=SCRIPT_DIR,
         )
         if not wait_for_port(port, 30):
