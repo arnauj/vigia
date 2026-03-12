@@ -53,7 +53,7 @@ Architecture: amd64
 Maintainer: VIGIA
 Section: education
 Priority: optional
-Depends: python3, python3-pip, python3-venv, python3-gi, python3-tk, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, libwebkit2gtk-4.1-0, libgtk-3-0
+Depends: python3, python3-venv, python3-gi, python3-tk, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, libwebkit2gtk-4.1-0, libgtk-3-0
 Description: VIGIA Server - Classroom Monitoring System (Teacher)
  VIGIA allows teachers to monitor student screens in real-time.
  This package installs the teacher's dashboard and relay server.
@@ -206,7 +206,7 @@ Architecture: all
 Maintainer: VIGIA
 Section: education
 Priority: optional
-Depends: python3, python3-pip, python3-venv, python3-tk, python3-pil, python3-pil.imagetk, xdotool, python3-numpy, python3-gi, python3-gi-cairo, gir1.2-gtk-3.0, debconf
+Depends: python3, python3-venv, python3-tk, python3-pil, python3-pil.imagetk, xdotool, python3-numpy, python3-gi, python3-gi-cairo, gir1.2-gtk-3.0, debconf
 Description: VIGIA Client - Classroom Monitoring System (Student)
  VIGIA allows teachers to monitor student screens in real-time.
  This package installs the student client.
