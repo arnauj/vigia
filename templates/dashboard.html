@@ -1621,17 +1621,25 @@ function _resizeOverlayCanvas() {
 }
 
 function _canvasCoords(x, y) {
+  // Usar el mismo elemento de referencia que _traducirCoords para coherencia.
+  const el   = _webrtcActivo
+    ? document.getElementById('liveview-video')
+    : document.getElementById('liveview-img');
   const body = document.getElementById('liveview-body');
-  const r = body.getBoundingClientRect();
+  const r    = el.getBoundingClientRect();
+  const br   = body.getBoundingClientRect();
+  // Calcular área de contenido con corrección letterbox/pillarbox (igual que _traducirCoords).
   const contentAR = _liveOrigW / _liveOrigH;
-  const boxAR = r.width / r.height;
+  const boxAR     = r.width / r.height;
   let cw, ch, cx, cy;
   if (boxAR > contentAR) {
     ch = r.height; cw = ch * contentAR;
-    cx = (r.width - cw) / 2; cy = 0;
+    cx = (r.left - br.left) + (r.width - cw) / 2;
+    cy = (r.top  - br.top);
   } else {
     cw = r.width; ch = cw / contentAR;
-    cx = 0; cy = (r.height - ch) / 2;
+    cx = (r.left - br.left);
+    cy = (r.top  - br.top) + (r.height - ch) / 2;
   }
   return { px: cx + x / _liveOrigW * cw, py: cy + y / _liveOrigH * ch };
 }
