@@ -1892,26 +1892,34 @@ async function _iniciarWebRTC(sid, mode) {
           if (s.height) _liveOrigH = s.height;
         }
       };
-      vid.style.display = 'block';
-      document.getElementById('liveview-img').style.display = 'none';
-      _webrtcActivo = true;  // P2P de vídeo establecido (view y control)
-      document.getElementById('liveview-transport').textContent = 'WebRTC P2P';
-      document.getElementById('liveview-transport').style.color = 'var(--green)';
-      // Contador de FPS real del stream WebRTC
-      _liveFps = 0; _liveFpsTs = Date.now();
-      if ('requestVideoFrameCallback' in vid) {
-        const _rvfc = (now, meta) => {
-          if (!_webrtcActivo) return;
-          _liveFps++;
-          const elapsed = Date.now() - _liveFpsTs;
-          if (elapsed >= 1000) {
-            document.getElementById('liveview-fps').textContent = `${_liveFps} fps`;
-            _liveFps = 0; _liveFpsTs = Date.now();
-          }
+      // NO activar WebRTC ni ocultar el JPEG hasta que el vídeo esté reproduciendo de verdad.
+      // ontrack dispara al procesar el SDP, ANTES de que ICE conecte y lleguen frames.
+      // Si activamos aquí, el vídeo muestra negro y el JPEG fallback queda bloqueado.
+      const _activarVideo = () => {
+        if (_liveviewSid !== sid || _webrtcActivo) return;
+        vid.style.display = 'block';
+        document.getElementById('liveview-img').style.display = 'none';
+        _webrtcActivo = true;  // P2P de vídeo establecido (view y control)
+        document.getElementById('liveview-transport').textContent = 'WebRTC P2P';
+        document.getElementById('liveview-transport').style.color = 'var(--green)';
+        // Contador de FPS real del stream WebRTC
+        _liveFps = 0; _liveFpsTs = Date.now();
+        if ('requestVideoFrameCallback' in vid) {
+          const _rvfc = () => {
+            if (!_webrtcActivo) return;
+            _liveFps++;
+            if (Date.now() - _liveFpsTs >= 1000) {
+              document.getElementById('liveview-fps').textContent = `${_liveFps} fps`;
+              _liveFps = 0; _liveFpsTs = Date.now();
+            }
+            vid.requestVideoFrameCallback(_rvfc);
+          };
           vid.requestVideoFrameCallback(_rvfc);
-        };
-        vid.requestVideoFrameCallback(_rvfc);
-      }
+        }
+      };
+      // onplaying se dispara cuando el vídeo empieza a reproducir frames reales.
+      vid.onplaying = () => { vid.onplaying = null; _activarVideo(); };
+      vid.play().catch(() => {});
     };
 
     _pc.onicecandidate = (ev) => {
@@ -1935,8 +1943,8 @@ async function _iniciarWebRTC(sid, mode) {
     await _pc.setLocalDescription(offer);
     socket.emit('webrtc_offer', { sid, sdp: { sdp:_pc.localDescription.sdp, type:_pc.localDescription.type } });
 
-    // Fallback si en 4s no hay vídeo
-    setTimeout(() => { if (!_webrtcActivo && _liveviewSid === sid) _fallbackJPEG('timeout'); }, 4000);
+    // Fallback si en 8s no hay vídeo WebRTC (onplaying no ha disparado aún)
+    setTimeout(() => { if (!_webrtcActivo && _liveviewSid === sid) _fallbackJPEG('timeout'); }, 8000);
   } catch(e) {
     _fallbackJPEG(e.message);
   }
