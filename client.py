@@ -308,9 +308,10 @@ if WEBRTC_OK:
 
         def __init__(self):
             super().__init__()
-            self._sct = None
-            self._ts  = 0
-            self._t0  = None
+            self._sct      = None
+            self._ts       = 0
+            self._t0       = None
+            self._last_rgb = None   # último frame válido; se sirve si mss falla
 
         async def recv(self):
             if self._t0 is None:
@@ -346,6 +347,7 @@ if WEBRTC_OK:
                     new_w, new_h = 1920, int(h * 1920 / w)
                     img = Image.fromarray(rgb).resize((new_w, new_h), Image.BILINEAR)
                     rgb = np.array(img)
+                self._last_rgb = rgb
                 return rgb
             except Exception as e:
                 print(f"  [WebRTC] Captura: {e}")
@@ -353,6 +355,9 @@ if WEBRTC_OK:
                     try: self._sct.close()
                     except: pass
                     self._sct = None
+                # Devolver el último frame válido (imagen congelada) en lugar de negro
+                if self._last_rgb is not None:
+                    return self._last_rgb
                 return np.zeros((1080, 1920, 3), dtype=np.uint8)
 
 def _asyncio_runner():

@@ -1718,7 +1718,7 @@ function _setOverlayEnabled(value) {
     if (ftEl) { ftEl.style.display = 'none'; ftEl.value = ''; }
   } else {
     const canvas = document.getElementById('liveview-canvas');
-    if (canvas) { canvas.style.display = ''; _resizeOverlayCanvas(); }
+    if (canvas) { canvas.style.display = 'block'; _resizeOverlayCanvas(); }
   }
   _overlayLastPoint = null;
   _emitOverlay({ type: 'overlay_toggle', enabled: _overlayEnabled });
@@ -1777,6 +1777,11 @@ function abrirLiveView(sid, mode) {
   _overlaySize = 6;
   _overlayText = '';
   _overlayLastPoint = null;
+  // Garantizar estado visual limpio: img visible, vídeo oculto
+  document.getElementById('liveview-img').style.display = 'block';
+  const _vidReset = document.getElementById('liveview-video');
+  _vidReset.style.display = 'none'; _vidReset.srcObject = null;
+  _webrtcActivo = false;
 
   document.getElementById('liveview-name').textContent = students[sid]?.name || sid;
   const badge = document.getElementById('liveview-badge');
@@ -1912,7 +1917,7 @@ async function _iniciarWebRTC(sid, mode) {
 
     _pc.oniceconnectionstatechange = () => {
       const state = _pc?.iceConnectionState;
-      if (['failed','disconnected'].includes(state)) {
+      if (['failed','disconnected','closed'].includes(state)) {
         _webrtcActivo = false;  // permitir que _fallbackJPEG actúe aunque el vídeo estuviera activo
         _fallbackJPEG('ICE ' + state);
       }
@@ -2309,7 +2314,7 @@ let _shareRunning = false;
 let _shareTimeout = null;
 const _shareVideo  = document.createElement('video');
 const _shareCanvas = document.createElement('canvas');
-const _shareCtx    = _shareCanvas.getContext('2d');
+const _shareCtx    = _shareCanvas.getContext('2d', { willReadFrequently: true });
 _shareVideo.autoplay = true; _shareVideo.muted = true; _shareVideo.playsInline = true;
 const FPS_SHARE     = 10;
 const CALIDAD_SHARE = 0.70;
