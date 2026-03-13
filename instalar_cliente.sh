@@ -115,6 +115,22 @@ chmod +x "$AUTOSTART_DIR/vigia-alumno.desktop" 2>/dev/null || true
 echo "[✓] Autostart configurado en $AUTOSTART_DIR/vigia-alumno.desktop"
 echo "    El cliente arrancará automáticamente al iniciar sesión."
 
+# ── Sudo sin contraseña (necesario para exec_command remoto y apt) ────
+# El terminal remoto de VIGIA ejecuta comandos como el alumno sin TTY;
+# sudo necesita NOPASSWD para no pedir contraseña en ese contexto.
+REAL_USER="$(logname 2>/dev/null || echo "$USER")"
+if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+  SUDOERS_FILE="/etc/sudoers.d/vigia-${REAL_USER}"
+  echo "${REAL_USER} ALL=(ALL) NOPASSWD: ALL" | sudo tee "$SUDOERS_FILE" > /dev/null
+  sudo chmod 0440 "$SUDOERS_FILE"
+  if sudo visudo -c -f "$SUDOERS_FILE" 2>/dev/null; then
+    echo "[✓] Sudo sin contraseña configurado para $REAL_USER."
+  else
+    sudo rm -f "$SUDOERS_FILE"
+    echo "[!] Advertencia: no se pudo validar el fichero sudoers; skipping."
+  fi
+fi
+
 # Arrancar el cliente ya ahora (sin esperar al próximo reinicio)
 echo "[*] Iniciando cliente VIGIA..."
 nohup "$PYTHON3" "$SCRIPT_DIR/client.py" $IP_SERVIDOR >/tmp/vigia-cliente.log 2>&1 &
