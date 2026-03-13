@@ -208,7 +208,7 @@ EOF
 cat > "$CLIENT_BUILD_DIR/DEBIAN/templates" <<EOF
 Template: vigia-client/server_ip
 Type: string
-_Description: IP del Servidor VIGIA:
+Description: IP del Servidor VIGIA:
  Por favor, introduce la dirección IP del equipo del profesor.
 EOF
 
