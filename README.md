@@ -9,9 +9,9 @@
 
 <div align="center">
 
-[![Descargar Servidor](https://img.shields.io/badge/⬇%20%20VIGIA%20Servidor-vigia--server__1.1__amd64.deb-0073e6?style=for-the-badge&logo=debian&logoColor=white)](dist/vigia-server_1.1_amd64.deb)
+[![Descargar Servidor](https://img.shields.io/badge/⬇%20%20VIGIA%20Servidor-vigia--server__1.1__amd64.deb-0073e6?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/arnauj/vigia/raw/master/dist/vigia-server_1.1_amd64.deb)
 &nbsp;
-[![Descargar Cliente](https://img.shields.io/badge/⬇%20%20VIGIA%20Cliente-vigia--client__1.1__all.deb-E95420?style=for-the-badge&logo=debian&logoColor=white)](dist/vigia-client_1.1_amd64.deb)
+[![Descargar Cliente](https://img.shields.io/badge/⬇%20%20VIGIA%20Cliente-vigia--client__1.1__all.deb-E95420?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/arnauj/vigia/raw/master/dist/vigia-client_1.1_all.deb)
 
 </div>
 
