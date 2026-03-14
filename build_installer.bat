@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
 
 :: ────────────────────────────────────────────────────────────────
@@ -17,9 +18,9 @@ set "VERSION=1.1"
 set "DIST_DIR=%SCRIPT_DIR%\dist_win"
 
 echo.
-echo ===============================================
-echo   VIGIA v%VERSION% - Construyendo instaladores Windows
-echo ===============================================
+echo ═══════════════════════════════════════════════
+echo   VIGIA v%VERSION% — Construyendo instaladores Windows
+echo ═══════════════════════════════════════════════
 echo.
 
 :: Limpiar distribución anterior
@@ -195,10 +196,10 @@ if not errorlevel 1 (
 :skip_compile
 
 echo.
-echo ===============================================
+echo ═══════════════════════════════════════════════
 echo   [OK] Build completado.
 echo   Paquetes en: %DIST_DIR%
-echo ===============================================
+echo ═══════════════════════════════════════════════
 echo.
 echo   Contenido:
 echo     vigia-server\       Directorio servidor (copiar + ejecutar INSTALAR.bat)
