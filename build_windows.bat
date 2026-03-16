@@ -82,9 +82,7 @@ python -m PyInstaller ^
     %ICON_PARAM% ^
     --add-data "img;img" ^
     --add-data "platform_utils.py;." ^
-    --hidden-import pynput ^
-    --hidden-import pynput.mouse._win32 ^
-    --hidden-import pynput.keyboard._win32 ^
+    --collect-all pynput ^
     --distpath dist\windows ^
     client.py
 

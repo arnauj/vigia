@@ -216,6 +216,7 @@ def _init_input():
         print("  [✓] pynput inicializado.")
     except Exception as e:
         print(f"  [!] pynput no disponible: {e}")
+        import traceback; traceback.print_exc()
 
     # 2. xdotool (solo Linux)
     if platform_utils.IS_LINUX:
@@ -459,7 +460,7 @@ def _procesar_input(data):
         dy = int(data.get('dy', 0))
         if _mouse_ctrl:
             try: _mouse_ctrl.position = (x, y); _mouse_ctrl.scroll(0, dy); return
-            except: pass
+            except Exception as e: print(f"  [!] pynput scroll: {e}")
         if _XDO_CMD:
             btn = 4 if dy > 0 else 5
             _xdo_sync('mousemove', x, y)
@@ -473,7 +474,7 @@ def _procesar_input(data):
         mods = data.get('mods', [])
         if _mouse_ctrl and _PBtn:
             try: _mouse_ctrl.position = (x, y); _mouse_ctrl.press(_btn_map_pyn.get(button, _PBtn.left)); return
-            except: pass
+            except Exception as e: print(f"  [!] pynput mousedown: {e}")
         if _XDO_CMD:
             _xdo_sync('mousemove', x, y)
             for m in mods: _xdo_sync('keydown', m)
@@ -484,7 +485,7 @@ def _procesar_input(data):
     if tipo == 'mouseup':
         if _mouse_ctrl and _PBtn:
             try: _mouse_ctrl.position = (x, y); _mouse_ctrl.release(_btn_map_pyn.get(button, _PBtn.left)); return
-            except: pass
+            except Exception as e: print(f"  [!] pynput mouseup: {e}")
         if _XDO_CMD:
             _xdo_sync('mousemove', x, y)
             _xdo_sync('mouseup', _BTN_MAP_XDO.get(button, 1))
@@ -498,7 +499,7 @@ def _procesar_input(data):
             _xdo_sync('type', '--clearmodifiers', '--delay', '0', '--', char); return
         if _kbd_ctrl:
             try: _kbd_ctrl.type(char)
-            except: pass
+            except Exception as e: print(f"  [!] pynput type: {e}")
         return
 
     if tipo == 'keypress':
@@ -508,7 +509,7 @@ def _procesar_input(data):
         if _kbd_ctrl:
             pk = _get_pynput_key(data.get('key'))
             try: _kbd_ctrl.press(pk); _kbd_ctrl.release(pk)
-            except: pass
+            except Exception as e: print(f"  [!] pynput keypress: {e}")
         return
 
     if tipo == 'keycombo':
@@ -522,7 +523,7 @@ def _procesar_input(data):
             try:
                 for k in keys:            _kbd_ctrl.press(k)
                 for k in reversed(keys): _kbd_ctrl.release(k)
-            except: pass
+            except Exception as e: print(f"  [!] pynput keycombo: {e}")
         return
 
     if tipo == 'keydown':
@@ -531,7 +532,7 @@ def _procesar_input(data):
             _xdo_sync('keydown', k); return
         if _kbd_ctrl:
             try: _kbd_ctrl.press(_get_pynput_key(data.get('key')))
-            except: pass
+            except Exception as e: print(f"  [!] pynput keydown: {e}")
         return
 
     if tipo == 'keyup':
@@ -540,7 +541,7 @@ def _procesar_input(data):
             _xdo_sync('keyup', k); return
         if _kbd_ctrl:
             try: _kbd_ctrl.release(_get_pynput_key(data.get('key')))
-            except: pass
+            except Exception as e: print(f"  [!] pynput keyup: {e}")
 
 
 _last_mouse_time = 0.0
@@ -956,10 +957,10 @@ class _VentanaPizarra:
         )
 
 def ejecutar_interfaz():
-    root = tk.Tk(); root.withdraw(); v_prof = None; v_bloq = None
+    root = tk.Tk(); root.withdraw(); v_prof = None; v_bloq = None; v_pizarra = None
     overlay_activa = False
     def check():
-        nonlocal v_prof, v_bloq, overlay_activa
+        nonlocal v_prof, v_bloq, v_pizarra, overlay_activa
         try:
             while not _cola_profesor.empty():
                 d = _cola_profesor.get_nowait()
@@ -979,15 +980,37 @@ def ejecutar_interfaz():
                     overlay_activa = bool(d.get('enabled', False))
                     if overlay_activa:
                         if _start_overlay_proc():
-                            _send_overlay_cmd(d)   # toggle enabled=True → show()
+                            _send_overlay_cmd(d)   # Linux GTK: toggle enabled=True → show()
+                        elif platform_utils.IS_WINDOWS:
+                            # Fallback: pizarra tkinter en Windows
+                            if not v_pizarra:
+                                v_pizarra = _VentanaPizarra(root)
+                            v_pizarra.mostrar()
                         else:
                             overlay_activa = False
                     else:
+                        if v_pizarra and v_pizarra.visible():
+                            v_pizarra.ocultar()
+                            v_pizarra.limpiar()
                         _send_overlay_cmd(d)        # toggle enabled=False → hide()
                         _stop_overlay_proc()
                 else:
                     if overlay_activa:
-                        _send_overlay_cmd(d)
+                        if v_pizarra and v_pizarra.visible():
+                            # Procesar comandos de dibujo en pizarra tkinter (Windows)
+                            if tipo == 'overlay_draw':
+                                v_pizarra.dibujar(
+                                    d.get('x0', 0), d.get('y0', 0),
+                                    d.get('x1', 0), d.get('y1', 0),
+                                    d.get('color', '#ff3b30'), d.get('size', 6))
+                            elif tipo == 'overlay_text':
+                                v_pizarra.texto(
+                                    d.get('x', 0), d.get('y', 0),
+                                    d.get('text', ''), d.get('color', '#ff3b30'), d.get('size', 6))
+                            elif tipo == 'overlay_clear':
+                                v_pizarra.limpiar()
+                        else:
+                            _send_overlay_cmd(d)     # Linux GTK
             while not _cola_clipboard_req.empty():
                 _cola_clipboard_req.get_nowait()
                 try:

@@ -1831,6 +1831,12 @@ function abrirLiveView(sid, mode) {
   _overlaySize = 6;
   _overlayText = '';
   _overlayLastPoint = null;
+  // Garantizar canvas de pizarra oculto (puede quedar visible de sesión anterior)
+  const _cvReset = document.getElementById('liveview-canvas');
+  if (_cvReset) { _cvReset.style.display = 'none'; }
+  _overlayCtx = null;
+  const _ftReset = document.getElementById('lv-floating-text');
+  if (_ftReset) { _ftReset.style.display = 'none'; _ftReset.value = ''; }
   // Garantizar estado visual limpio: img visible, vídeo oculto
   document.getElementById('liveview-img').style.display = 'block';
   const _vidReset = document.getElementById('liveview-video');
@@ -2383,14 +2389,20 @@ const FPS_SHARE     = 10;
 const CALIDAD_SHARE = 0.70;
 const ANCHO_SHARE   = 1920;
 
+function _canGetDisplayMedia() {
+  // getDisplayMedia requiere contexto seguro (HTTPS o localhost).
+  // En HTTP con IP (ej. http://192.168.x.x:5000) el navegador lo bloquea.
+  return !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+}
+
 function toggleCompartir() {
   if (_sharing) { detenerCompartir(); return; }
 
-  if (IS_LAUNCHER) {
-    // Launcher WebKit2GTK: getDisplayMedia no funciona → selector de servidor
+  if (IS_LAUNCHER || !_canGetDisplayMedia()) {
+    // Launcher WebKit2GTK o contexto no seguro: usar captura del servidor con mss
     socket.emit('get_screens');
   } else {
-    // Chrome / Firefox: diálogo nativo del navegador
+    // Chrome / Firefox en contexto seguro: diálogo nativo del navegador
     navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
       .then(stream => {
         _sharing = true;
@@ -2404,8 +2416,10 @@ function toggleCompartir() {
           _shareVideo.addEventListener('loadedmetadata', go, { once: true });
       })
       .catch(err => {
-        if (err.name !== 'NotAllowedError')
-          alert('No se pudo compartir la pantalla:\n' + err.message);
+        if (err.name === 'NotAllowedError') return;
+        // Si getDisplayMedia falla (permisos, etc.), intentar captura del servidor
+        console.warn('[VIGIA] getDisplayMedia falló, usando captura del servidor:', err.message);
+        socket.emit('get_screens');
       });
   }
 }

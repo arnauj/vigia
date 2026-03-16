@@ -31,7 +31,12 @@
       "Bash(rm -rf dist/windows/vigia-servidor build/vigia-servidor)",
       "Bash(python -m PyInstaller --noconfirm --onedir --name vigia-servidor --icon img/logo2.ico --add-data \"templates;templates\" --add-data \"img;img\" --add-data \"platform_utils.py;.\" --collect-all eventlet --collect-all dns --collect-all engineio --collect-all socketio --collect-all flask_socketio --distpath dist/windows server.py)",
       "Bash(rm -f _test_eventlet.py _test_eventlet.spec dist/_test_eventlet.exe)",
-      "Bash(rm -rf build/_test_eventlet)"
+      "Bash(rm -rf build/_test_eventlet)",
+      "Bash(grep -E \"\\\\.\\(py|html|sh\\)$\")",
+      "Bash(python -m PyInstaller --noconfirm --onedir --name vigia-cliente --icon img/logo2.ico --add-data \"img;img\" --add-data \"platform_utils.py;.\" --collect-all pynput --distpath dist/windows client.py)",
+      "Bash(rm -f dist/installers/vigia-server-setup.exe dist/installers/vigia-client-setup.exe)",
+      "Bash('/c/Program Files \\(x86\\)/Inno Setup 6/ISCC.exe' vigia-server.iss)",
+      "Bash(bash build_debs.sh)"
     ]
   }
 }

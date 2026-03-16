@@ -16,6 +16,14 @@ import subprocess
 import webbrowser
 import platform_utils
 
+# Reconfigurar stdout/stderr para UTF-8 en Windows (cp1252 no soporta emojis)
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 async_mode = 'eventlet'
 
 import socket
