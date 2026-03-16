@@ -10,6 +10,14 @@ import os
 import io
 import re
 import json
+
+# Forzar salida UTF-8 en Windows (cp1252 no soporta emojis/símbolos Unicode)
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 import time
 import socket
 import threading
@@ -19,6 +27,7 @@ import shutil
 import subprocess
 import ctypes
 import ctypes.util
+import platform_utils
 
 # ── Importaciones ────────────────────────────────────────────────────────────
 
@@ -37,7 +46,8 @@ def _instalar(paquete):
     import importlib
     pip_cmd = _pip_disponible()
     if not pip_cmd:
-        os.system('sudo apt-get update -qq 2>/dev/null && sudo apt-get install -y python3-pip -qq 2>/dev/null')
+        if platform_utils.IS_LINUX:
+            os.system('sudo apt-get update -qq 2>/dev/null && sudo apt-get install -y python3-pip -qq 2>/dev/null')
         pip_cmd = _pip_disponible()
     if pip_cmd:
         try:
@@ -78,7 +88,8 @@ if TK_OK:
         IMGTK_OK = True
     except ImportError:
         print("  [*] Falta ImageTk (PIL). Intentando instalar dependencias de sistema...")
-        os.system('sudo apt-get update -qq 2>/dev/null && sudo apt-get install -y python3-pil.imagetk -qq 2>/dev/null')
+        if platform_utils.IS_LINUX:
+            os.system('sudo apt-get update -qq 2>/dev/null && sudo apt-get install -y python3-pil.imagetk -qq 2>/dev/null')
         try:
             from PIL import ImageTk
             IMGTK_OK = True
@@ -113,7 +124,7 @@ except ImportError:
 _mouse_ctrl = None
 _kbd_ctrl   = None
 _PBtn       = None
-_XDO_CMD    = shutil.which('xdotool')
+_XDO_CMD    = shutil.which('xdotool') if platform_utils.IS_LINUX else None
 _xdo_env    = None   # entorno precalculado para xdotool (evita copiar os.environ en cada evento)
 _mon_left   = 0      # offset X del monitor capturado en el espacio virtual X11
 _mon_top    = 0      # offset Y del monitor capturado en el espacio virtual X11
@@ -152,13 +163,18 @@ def _start_overlay_proc() -> bool:
         print(f"  [!] vigia_overlay.py no encontrado en {script}")
         return False
     env = dict(os.environ)
-    env.setdefault('DISPLAY', ':0')
+    if platform_utils.IS_LINUX:
+        env.setdefault('DISPLAY', ':0')
+    if platform_utils.IS_WINDOWS:
+        # En Windows no se usa el overlay GTK; se usa _VentanaPizarra tkinter inline
+        print("  [*] Overlay GTK no disponible en Windows; usando pizarra tkinter.")
+        return False
     try:
         _overlay_proc = subprocess.Popen(
             [sys.executable, script, str(l), str(t), str(w), str(h)],
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
-            stderr=open('/tmp/vigia_pizarra.log', 'w'),
+            stderr=open(platform_utils.get_temp_path('vigia_pizarra.log'), 'w'),
             text=True,
             env=env,
         )
@@ -201,11 +217,12 @@ def _init_input():
     except Exception as e:
         print(f"  [!] pynput no disponible: {e}")
 
-    # 2. xdotool
-    if not _XDO_CMD:
-        _XDO_CMD = shutil.which('xdotool')
-    if not _XDO_CMD and os.path.exists('/usr/bin/xdotool'):
-        _XDO_CMD = '/usr/bin/xdotool'
+    # 2. xdotool (solo Linux)
+    if platform_utils.IS_LINUX:
+        if not _XDO_CMD:
+            _XDO_CMD = shutil.which('xdotool')
+        if not _XDO_CMD and os.path.exists('/usr/bin/xdotool'):
+            _XDO_CMD = '/usr/bin/xdotool'
 
     if _XDO_CMD:
         print(f"  [✓] xdotool detectado en {_XDO_CMD}.")
@@ -214,7 +231,7 @@ def _init_input():
 
     # Precalcular entorno para xdotool (se reutiliza en cada evento)
     _xdo_env = dict(os.environ)
-    if 'DISPLAY' not in _xdo_env:
+    if platform_utils.IS_LINUX and 'DISPLAY' not in _xdo_env:
         _xdo_env['DISPLAY'] = ':0'
 
     return (_mouse_ctrl is not None) or (_XDO_CMD is not None)
@@ -564,7 +581,7 @@ def on_do_input(data):
 @sio.event
 def connect():
     print(f"[✓] Conectado al servidor.")
-    sio.emit('register', {'name': f"{os.environ.get('USER','alumno')} - {socket.gethostname()}"})
+    sio.emit('register', {'name': f"{platform_utils.get_username()} - {socket.gethostname()}"})
 
 @sio.on('viewer_start')
 def on_viewer_start(data):
@@ -594,10 +611,7 @@ def on_viewer_stop(_data):
 
 @sio.on('quit_app')
 def on_quit_app(_data):
-    try:
-        subprocess.run(['sudo', 'shutdown', '-h', 'now'], check=False, timeout=5)
-    except Exception:
-        os._exit(0)
+    platform_utils.shutdown_system()
 
 @sio.on('show_message')
 def on_show_message(data): _cola_mensajes.put_nowait(data)
@@ -623,76 +637,20 @@ def on_exec_command(data):
     cmd_id = data.get('cmd_id', '')
     if not cmd:
         return
-    env = {**os.environ, 'DEBIAN_FRONTEND': 'noninteractive', 'TERM': 'xterm'}
-    # Marcador único para extraer el nuevo cwd del stdout sin colisiones
-    marker = '__VIGIA_PWD_7f3a9b2c__'
-    # Ejecutamos el comando dentro del cwd actual y capturamos el pwd resultante
-    wrapped = f'cd {_term_cwd!r} 2>/dev/null; {cmd}; echo "{marker}:$(pwd)"'
-    try:
-        result = subprocess.run(
-            wrapped, shell=True,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, timeout=60, env=env
-        )
-        stdout = result.stdout
-        new_cwd = _term_cwd
-        # Extraer la línea del marcador y obtener el nuevo cwd
-        lines = stdout.split('\n')
-        clean_lines = []
-        for line in lines:
-            if line.startswith(f'{marker}:'):
-                candidate = line[len(f'{marker}:'):]
-                if os.path.isdir(candidate):
-                    new_cwd = candidate
-            else:
-                clean_lines.append(line)
-        _term_cwd = new_cwd
-        # Reconstruir stdout sin la línea del marcador (quitar posible \n final extra)
-        clean_stdout = '\n'.join(clean_lines).rstrip('\n')
-        sio.emit('command_output', {
-            'cmd_id': cmd_id,
-            'command': cmd,
-            'stdout': clean_stdout[-6000:],
-            'stderr': result.stderr[-3000:],
-            'returncode': result.returncode,
-            'cwd': _term_cwd,
-        })
-    except subprocess.TimeoutExpired:
-        sio.emit('command_output', {
-            'cmd_id': cmd_id,
-            'command': cmd,
-            'stdout': '',
-            'stderr': 'Timeout (60s): el comando tardó demasiado.',
-            'returncode': -1,
-            'cwd': _term_cwd,
-        })
-    except Exception as e:
-        sio.emit('command_output', {
-            'cmd_id': cmd_id,
-            'command': cmd,
-            'stdout': '',
-            'stderr': str(e),
-            'returncode': -1,
-            'cwd': _term_cwd,
-        })
+    stdout, stderr, returncode, _term_cwd = platform_utils.run_shell(cmd, _term_cwd)
+    sio.emit('command_output', {
+        'cmd_id': cmd_id,
+        'command': cmd,
+        'stdout': stdout[-6000:],
+        'stderr': stderr[-3000:],
+        'returncode': returncode,
+        'cwd': _term_cwd,
+    })
 
 @sio.on('get_clipboard')
 def on_get_clipboard(_data):
-    text = ''
-    _env = _xdo_env  # ya calculado en _init_input()
-    # Intentar con xclip / xsel (requieren DISPLAY)
-    for cmd in [
-        ['xclip', '-o', '-selection', 'clipboard'],
-        ['xsel',  '--clipboard', '--output'],
-    ]:
-        try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=2, env=_env)
-            if r.returncode == 0:
-                text = r.stdout
-                break
-        except Exception:
-            continue
-    # Fallback: portapapeles X11 vía tkinter (hilo principal)
+    text = platform_utils.get_clipboard_text(_xdo_env)
+    # Fallback: portapapeles vía tkinter (hilo principal)
     if not text and TK_OK:
         try:
             # Vaciar respuesta anterior
@@ -803,50 +761,17 @@ if WEBRTC_OK:
         _webrtc_pc = None; _webrtc_activo = False; _webrtc_prof = None
 
 # ── Overlay pizarra (cliente) ───────────────────────────────────────────────
-def _set_clickthrough_x11(window_id: int) -> bool:
-    """Hace una ventana X11 'click-through' (no captura ratón/teclado)."""
-    try:
-        x11_path = ctypes.util.find_library('X11')
-        fix_path = ctypes.util.find_library('Xfixes')
-        if not x11_path or not fix_path:
-            return False
-        x11 = ctypes.cdll.LoadLibrary(x11_path)
-        xfix = ctypes.cdll.LoadLibrary(fix_path)
-
-        x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
-        x11.XOpenDisplay.restype = ctypes.c_void_p
-        x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
-        x11.XCloseDisplay.restype = ctypes.c_int
-        x11.XFlush.argtypes = [ctypes.c_void_p]
-        x11.XFlush.restype = ctypes.c_int
-
-        xfix.XFixesCreateRegion.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
-        xfix.XFixesCreateRegion.restype = ctypes.c_ulong
-        xfix.XFixesSetWindowShapeRegion.argtypes = [
-            ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong
-        ]
-        xfix.XFixesDestroyRegion.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
-
-        dpy = x11.XOpenDisplay(None)
-        if not dpy:
-            return False
-        try:
-            empty_region = xfix.XFixesCreateRegion(dpy, None, 0)
-            ShapeInput = 2
-            xfix.XFixesSetWindowShapeRegion(dpy, ctypes.c_ulong(window_id), ShapeInput, 0, 0, empty_region)
-            xfix.XFixesDestroyRegion(dpy, empty_region)
-            x11.XFlush(dpy)
-            return True
-        finally:
-            x11.XCloseDisplay(dpy)
-    except Exception:
-        return False
+# Click-through ahora delegado a platform_utils.set_clickthrough()
 
 # ── Interfaz UI ──────────────────────────────────────────────────────────────
 class _VentanaProfesor:
     def __init__(self, root):
         self.top = tk.Toplevel(root); self.top.title("📺 Pantalla del Profesor"); self.top.configure(bg='#0f1117')
-        self.top.attributes('-zoomed', True); self.top.attributes('-topmost', True)
+        if platform_utils.IS_WINDOWS:
+            self.top.state('zoomed')
+        else:
+            self.top.attributes('-zoomed', True)
+        self.top.attributes('-topmost', True)
         self._label = tk.Label(self.top, bg='#0f1117', text="⏳ Esperando imagen…", fg='#718096', font=('Segoe UI', 12))
         self._label.pack(expand=True, fill='both')
         self._foto = None
@@ -898,11 +823,7 @@ class _VentanaMensaje:
             txt.pack()
         adjuntos = msg.get('attachments', [])
         if adjuntos:
-            descargas = pathlib.Path.home() / 'Descargas'
-            if not descargas.exists():
-                descargas = pathlib.Path.home() / 'Downloads'
-            if not descargas.exists():
-                descargas = pathlib.Path.home()
+            descargas = platform_utils.get_downloads_dir()
             tk.Label(c, text='📎 Archivos adjuntos recibidos:', bg='#1a1d27',
                      fg='#718096', font=('Segoe UI', 9)).pack(
                          anchor='w', pady=(10 if body_text else 0, 4))
@@ -916,10 +837,7 @@ class _VentanaMensaje:
                         counter += 1
                     dest.write_bytes(base64.b64decode(att['data']))
                     def _abrir(p=dest):
-                        try:
-                            subprocess.Popen(['xdg-open', str(p)])
-                        except Exception:
-                            pass
+                        platform_utils.open_file(p)
                     fila = tk.Frame(c, bg='#1a1d27')
                     fila.pack(fill='x', pady=2)
                     tk.Button(fila, text=f'📄 {att["name"]}', bg='#252840', fg='#e2e8f0',
@@ -972,12 +890,12 @@ class _VentanaPizarra:
             return self._clickthrough_ok
         try:
             self.top.update_idletasks()
-            self._clickthrough_ok = _set_clickthrough_x11(int(self.top.winfo_id()))
+            self._clickthrough_ok = platform_utils.set_clickthrough(int(self.top.winfo_id()))
         except Exception:
             self._clickthrough_ok = False
         self._clickthrough_checked = True
         if not self._clickthrough_ok:
-            print("  [!] No se pudo activar click-through X11 (libXfixes); pizarra en modo degradado.")
+            print("  [!] No se pudo activar click-through; pizarra en modo degradado.")
         return self._clickthrough_ok
 
     def mostrar(self):
@@ -1083,14 +1001,17 @@ def ejecutar_interfaz():
     check(); root.mainloop()
 
 if __name__ == '__main__':
+    platform_utils.set_dpi_aware()
     ip = None
     if len(sys.argv) > 1:
         ip = sys.argv[1]
-    elif os.path.exists('/etc/vigia/client.conf'):
-        try:
-            with open('/etc/vigia/client.conf', 'r') as f:
-                ip = f.read().strip()
-        except: pass
+    else:
+        _conf_path = platform_utils.get_config_path()
+        if os.path.exists(_conf_path):
+            try:
+                with open(_conf_path, 'r') as f:
+                    ip = f.read().strip()
+            except: pass
     
     if not ip:
         try:

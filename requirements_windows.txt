@@ -1,0 +1,17 @@
+# VIGIA - Dependencias Windows (servidor + cliente)
+# Instalar con: pip install -r requirements_windows.txt
+
+# Servidor
+flask>=3.0
+flask-socketio>=5.3
+eventlet>=0.35
+
+# Cliente
+python-socketio[client]>=5.10
+websocket-client>=1.7
+mss>=9.0
+Pillow>=10.0
+pynput>=1.7
+
+# Empaquetado (solo para build)
+# pyinstaller>=6.0

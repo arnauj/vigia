@@ -1,0 +1,93 @@
+name: VIGIA - Build Multiplataforma
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  # ── Tests ───────────────────────────────────────────────────────────────────
+  test-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Instalar dependencias
+        run: |
+          pip install flask flask-socketio eventlet
+          pip install python-socketio[client] websocket-client mss Pillow pynput
+      - name: Ejecutar tests
+        run: |
+          python test_platform_utils.py -v
+          python test_remote_control.py -v
+
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Instalar dependencias
+        run: |
+          pip install flask flask-socketio eventlet
+          pip install python-socketio[client] websocket-client mss Pillow pynput
+      - name: Ejecutar tests
+        run: |
+          python test_platform_utils.py -v
+
+  # ── Build Linux (.deb) ─────────────────────────────────────────────────────
+  build-linux:
+    needs: test-linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Instalar dependencias de build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev debhelper
+          pip install flask flask-socketio eventlet
+          pip install python-socketio[client] websocket-client mss Pillow
+      - name: Generar paquetes .deb
+        run: bash build_debs.sh
+      - name: Upload .deb artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vigia-deb-packages
+          path: dist/*.deb
+
+  # ── Build Windows (.exe) ───────────────────────────────────────────────────
+  build-windows:
+    needs: test-windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Instalar dependencias
+        run: pip install -r requirements_windows.txt pyinstaller
+      - name: Generar icono .ico
+        run: python -c "from PIL import Image; img = Image.open('img/logo2.png'); img.save('img/logo2.ico', format='ICO', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+      - name: Build servidor
+        run: |
+          python -m PyInstaller --noconfirm --onedir --name vigia-servidor --icon img\logo2.ico --add-data "templates;templates" --add-data "img;img" --add-data "platform_utils.py;." --hidden-import eventlet --hidden-import eventlet.hubs.epolls --hidden-import eventlet.hubs.kqueue --hidden-import eventlet.hubs.selects --hidden-import dns --hidden-import dns.resolver --distpath dist\windows server.py
+      - name: Build cliente
+        run: |
+          python -m PyInstaller --noconfirm --onedir --name vigia-cliente --icon img\logo2.ico --add-data "img;img" --add-data "platform_utils.py;." --hidden-import pynput --hidden-import pynput.mouse._win32 --hidden-import pynput.keyboard._win32 --distpath dist\windows client.py
+      - name: Copiar archivos extra
+        run: |
+          copy vigia-launcher.py dist\windows\vigia-servidor\
+          copy platform_utils.py dist\windows\vigia-servidor\
+          copy platform_utils.py dist\windows\vigia-cliente\
+      - name: Upload .exe artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vigia-windows-executables
+          path: dist/windows/

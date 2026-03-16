@@ -25,6 +25,7 @@ mkdir -p "$SERVER_BUILD_DIR/usr/bin"
 
 cp "$SCRIPT_DIR/server.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/vigia-launcher.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
+cp "$SCRIPT_DIR/platform_utils.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/templates/"* "$SERVER_BUILD_DIR/opt/vigia-server/templates/"
 cp "$SCRIPT_DIR/img/logo2.png" "$SERVER_BUILD_DIR/opt/vigia-server/img/"
 cp "$SCRIPT_DIR/img/logo2_mini.png" "$SERVER_BUILD_DIR/opt/vigia-server/img/"
@@ -180,6 +181,7 @@ mkdir -p "$CLIENT_BUILD_DIR/usr/share/pixmaps"
 
 cp "$SCRIPT_DIR/client.py"        "$CLIENT_BUILD_DIR/opt/vigia-client/"
 cp "$SCRIPT_DIR/vigia_overlay.py" "$CLIENT_BUILD_DIR/opt/vigia-client/"
+cp "$SCRIPT_DIR/platform_utils.py" "$CLIENT_BUILD_DIR/opt/vigia-client/"
 cp "$SCRIPT_DIR/img/logo2_mini.png" "$CLIENT_BUILD_DIR/opt/vigia-client/img/"
 cp "$SCRIPT_DIR/img/logo2_mini.png" "$CLIENT_BUILD_DIR/usr/share/pixmaps/vigia-client.png"
 

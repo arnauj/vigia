@@ -14,6 +14,7 @@ import base64
 import threading
 import subprocess
 import webbrowser
+import platform_utils
 
 async_mode = 'eventlet'
 
@@ -239,62 +240,13 @@ def on_lock_student(data):
 
 
 def _get_window_list():
-    """Devuelve ventanas visibles usando xprop (_NET_CLIENT_LIST + _NET_WM_NAME)."""
-    try:
-        r = subprocess.run(['xprop', '-root', '-notype', '_NET_CLIENT_LIST'],
-                           capture_output=True, text=True, timeout=3)
-        if r.returncode != 0 or '_NET_CLIENT_LIST' not in r.stdout:
-            return []
-        # Extraer IDs hex con regex (evita el prefijo "window id # " del primer elemento)
-        wids = re.findall(r'0x[0-9a-fA-F]+', r.stdout.split(':', 1)[1])
-        windows = []
-        for wid in wids:
-            # Omitir ventanas minimizadas/ocultas
-            state_r = subprocess.run(['xprop', '-id', wid, '-notype', '_NET_WM_STATE'],
-                                     capture_output=True, text=True, timeout=1)
-            if '_NET_WM_STATE_HIDDEN' in state_r.stdout:
-                continue
-            # Nombre de la ventana
-            nr = subprocess.run(['xprop', '-id', wid, '-notype', '_NET_WM_NAME', 'WM_NAME'],
-                                capture_output=True, text=True, timeout=1)
-            title = ''
-            for line in nr.stdout.splitlines():
-                if '_NET_WM_NAME' in line and '=' in line:
-                    title = line.split('=', 1)[1].strip().strip('"')
-                    break
-                if 'WM_NAME' in line and '=' in line and not title:
-                    title = line.split('=', 1)[1].strip().strip('"')
-            if not title or 'VIGIA' in title:
-                continue
-            # Geometría
-            gr = subprocess.run(['xdotool', 'getwindowgeometry', '--shell', wid],
-                                capture_output=True, text=True, timeout=1)
-            geom = dict(kv.split('=', 1) for kv in gr.stdout.splitlines() if '=' in kv)
-            w, h = int(geom.get('WIDTH', 0)), int(geom.get('HEIGHT', 0))
-            if w < 100 or h < 100:
-                continue
-            windows.append({
-                'wid': wid,
-                'x': int(geom.get('X', 0)), 'y': int(geom.get('Y', 0)),
-                'w': w, 'h': h, 'title': title,
-            })
-        return windows
-    except Exception:
-        return []
+    """Devuelve ventanas visibles (delegado a platform_utils para multiplataforma)."""
+    return platform_utils.get_window_list()
 
 
 def _get_window_region(wid):
-    """Devuelve la región actual de una ventana vía xdotool."""
-    try:
-        gr = subprocess.run(['xdotool', 'getwindowgeometry', '--shell', wid],
-                            capture_output=True, text=True, timeout=2)
-        geom = dict(kv.split('=', 1) for kv in gr.stdout.splitlines() if '=' in kv)
-        if 'WIDTH' in geom:
-            return {'left': int(geom['X']), 'top': int(geom['Y']),
-                    'width': int(geom['WIDTH']), 'height': int(geom['HEIGHT'])}
-    except Exception:
-        pass
-    return None
+    """Devuelve la región actual de una ventana (delegado a platform_utils)."""
+    return platform_utils.get_window_region(wid)
 
 
 def _teacher_capture_loop():
@@ -354,35 +306,49 @@ def _capture_thumb(sct, region, max_w=192):
         return None
 
 
-def _capture_window_thumb(wid_hex, max_w=192):
-    """Captura thumbnail de ventana via Xlib GetImage.
-    En compositors (KWin, Mutter) obtiene el contenido real de la ventana
-    aunque esté oculta detrás de otras ventanas."""
-    try:
-        from Xlib import display as xlib_display, X
-        from PIL import Image
-        wid = int(wid_hex, 16)
-        d = xlib_display.Display()
-        win = d.create_resource_object('window', wid)
-        geom = win.get_geometry()
-        w, h = geom.width, geom.height
-        if w < 1 or h < 1:
+def _capture_window_thumb(wid, max_w=192):
+    """Captura thumbnail de ventana.
+    Linux: Xlib GetImage (contenido real incluso si está detrás de otras ventanas).
+    Windows: fallback a captura de región con mss."""
+    if platform_utils.IS_LINUX:
+        try:
+            from Xlib import display as xlib_display, X
+            from PIL import Image
+            wid_int = int(wid, 16) if isinstance(wid, str) else int(wid)
+            d = xlib_display.Display()
+            win = d.create_resource_object('window', wid_int)
+            geom = win.get_geometry()
+            w, h = geom.width, geom.height
+            if w < 1 or h < 1:
+                return None
+            raw = win.get_image(0, 0, w, h, X.ZPixmap, 0xffffffff)
+            img = Image.frombytes('RGBA', (w, h), raw.data, 'raw', 'BGRA')
+            img = img.convert('RGB')
+            th = max(1, round(max_w * h / w))
+            img = img.resize((max_w, th), Image.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, 'JPEG', quality=60)
+            return 'data:image/jpeg;base64,' + base64.b64encode(buf.getvalue()).decode()
+        except Exception:
             return None
-        raw = win.get_image(0, 0, w, h, X.ZPixmap, 0xffffffff)
-        # ZPixmap con profundidad 24/32: datos en formato BGRA (little-endian)
-        img = Image.frombytes('RGBA', (w, h), raw.data, 'raw', 'BGRA')
-        img = img.convert('RGB')
-        th = max(1, round(max_w * h / w))
-        img = img.resize((max_w, th), Image.LANCZOS)
-        buf = io.BytesIO()
-        img.save(buf, 'JPEG', quality=60)
-        return 'data:image/jpeg;base64,' + base64.b64encode(buf.getvalue()).decode()
-    except Exception:
+    else:
+        # Windows: captura región via mss (fallback)
+        region = _get_window_region(wid)
+        if region:
+            try:
+                import mss
+                with mss.mss() as sct:
+                    return _capture_thumb(sct, region, max_w)
+            except Exception:
+                pass
         return None
 
 
 def _find_desktop_icon(classes):
-    """Devuelve el nombre de icono de la app buscando en archivos .desktop por WM_CLASS."""
+    """Devuelve el nombre de icono de la app buscando en archivos .desktop por WM_CLASS.
+    Solo funciona en Linux; en Windows retorna None."""
+    if platform_utils.IS_WINDOWS:
+        return None
     lower = [c.lower() for c in classes]
     dirs = [
         '/usr/share/applications',
@@ -391,7 +357,7 @@ def _find_desktop_icon(classes):
         '/var/lib/snapd/desktop/applications',
         '/var/lib/flatpak/exports/share/applications',
     ]
-    second_pass = []  # coincidencias por nombre de archivo (menor prioridad)
+    second_pass = []
     for d in dirs:
         if not os.path.isdir(d):
             continue
@@ -404,11 +370,9 @@ def _find_desktop_icon(classes):
                 if not icon_m:
                     continue
                 icon = icon_m.group(1).strip()
-                # 1ª prioridad: StartupWMClass exacto
                 swm = re.search(r'^StartupWMClass=(.+)$', text, re.MULTILINE)
                 if swm and swm.group(1).strip().lower() in lower:
                     return icon
-                # 2ª prioridad: nombre del .desktop == clase (filezilla.desktop → filezilla)
                 stem = fname[:-8].lower()
                 if stem in lower:
                     second_pass.append(icon)
@@ -418,13 +382,16 @@ def _find_desktop_icon(classes):
 
 
 def _find_icon_path(name, preferred_size=48):
-    """Resuelve un nombre de icono a la ruta del archivo usando GTK IconTheme."""
+    """Resuelve un nombre de icono a la ruta del archivo.
+    Linux: GTK IconTheme + /usr/share/pixmaps.
+    Windows: retorna None (iconos embebidos en .exe no se extraen)."""
     if not name:
         return None
     if os.path.isabs(name):
         return name if os.path.exists(name) else None
+    if platform_utils.IS_WINDOWS:
+        return None
     base = os.path.splitext(os.path.basename(name))[0]
-    # GTK IconTheme maneja correctamente todos los temas (hicolor, breeze, etc.)
     try:
         import gi
         gi.require_version('Gtk', '3.0')
@@ -434,7 +401,6 @@ def _find_icon_path(name, preferred_size=48):
             return info.get_filename()
     except Exception:
         pass
-    # Fallback: búsqueda directa en pixmaps
     for n in (name, base):
         for ext in ('png', 'svg', 'xpm'):
             p = f'/usr/share/pixmaps/{n}.{ext}'
@@ -463,9 +429,13 @@ def _icon_to_b64(path):
         return None
 
 
-def _get_window_app_icon(wid_hex):
-    """Obtiene el icono de la aplicación de una ventana via WM_CLASS y .desktop."""
+def _get_window_app_icon(wid):
+    """Obtiene el icono de la aplicación de una ventana.
+    Linux: WM_CLASS + .desktop.  Windows: no implementado (retorna None)."""
+    if platform_utils.IS_WINDOWS:
+        return None
     try:
+        wid_hex = wid if isinstance(wid, str) else hex(wid)
         r = subprocess.run(['xprop', '-id', wid_hex, '-notype', 'WM_CLASS'],
                            capture_output=True, text=True, timeout=1)
         classes = re.findall(r'"([^"]+)"', r.stdout)

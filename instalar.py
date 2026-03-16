@@ -6,6 +6,7 @@ En modo cliente detecta automáticamente la IP del servidor (X.X.X.2).
 """
 
 import os
+import sys
 import socket
 import subprocess
 import threading
@@ -193,12 +194,24 @@ class InstaladorVIGIA:
         tipo = self.tipo_var.get()
         ip   = self.ip_var.get().strip() if tipo == 'cliente' else ''
 
+        is_windows = sys.platform == 'win32'
+
         if tipo == 'servidor':
-            cmd = ['bash', os.path.join(SCRIPT_DIR, 'instalar_servidor.sh')]
+            if is_windows:
+                cmd = ['powershell', '-ExecutionPolicy', 'Bypass', '-File',
+                       os.path.join(SCRIPT_DIR, 'instalar_servidor.ps1')]
+            else:
+                cmd = ['bash', os.path.join(SCRIPT_DIR, 'instalar_servidor.sh')]
             self._log('▶ Instalando VIGIA Servidor…\n\n')
         else:
-            script = os.path.join(SCRIPT_DIR, 'instalar_cliente.sh')
-            cmd = ['bash', script, ip] if ip else ['bash', script]
+            if is_windows:
+                script = os.path.join(SCRIPT_DIR, 'instalar_cliente.ps1')
+                cmd = ['powershell', '-ExecutionPolicy', 'Bypass', '-File', script]
+                if ip:
+                    cmd.extend(['-ServerIP', ip])
+            else:
+                script = os.path.join(SCRIPT_DIR, 'instalar_cliente.sh')
+                cmd = ['bash', script, ip] if ip else ['bash', script]
             self._log(f'▶ Instalando VIGIA Cliente'
                       f'{" → servidor: " + ip if ip else ""}…\n\n')
 

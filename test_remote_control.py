@@ -51,13 +51,19 @@ sys.modules['tkinter'] = None  # type: ignore
 # aiortc (no instalado → WEBRTC_OK = False en el cliente)
 # — no añadir a sys.modules: deja que ImportError lo maneje
 
+# ── Mock platform_utils antes de importar client ──────────────────────────────
+sys.path.insert(0, os.path.dirname(__file__))
+import platform_utils
+# Para los tests, forzar comportamiento Linux (xdotool disponible)
+platform_utils.IS_LINUX = True
+platform_utils.IS_WINDOWS = False
+
 # ── Importar client.py con xdotool mockeado ─────────────────────────────────
 
 import subprocess as _subprocess_real  # referencia antes del patch
 
 with patch('shutil.which', side_effect=lambda x: '/usr/bin/xdotool' if x == 'xdotool' else None), \
      patch('subprocess.run', return_value=MagicMock(returncode=0)):
-    sys.path.insert(0, os.path.dirname(__file__))
     import client
 
 # ── Constantes copiadas/verificadas desde client.py ────────────────────────

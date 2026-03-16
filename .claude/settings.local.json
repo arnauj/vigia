@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la /c/Users/Usuario/Desktop/Vigia/vigia/*.py)",
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(python test_platform_utils.py -v)",
+      "Bash(python test_remote_control.py -v)",
+      "Bash(python test_client.py -v)",
+      "Bash(pip install:*)",
+      "Bash(python -c \"from PIL import Image; img = Image.open\\(''img/logo2.png''\\); img.save\\(''img/logo2.ico'', format=''ICO'', sizes=[\\(16,16\\),\\(32,32\\),\\(48,48\\),\\(64,64\\),\\(128,128\\),\\(256,256\\)]\\)\")",
+      "Bash(python -m PyInstaller --noconfirm --onedir --name vigia-servidor --icon img/logo2.ico --add-data \"templates;templates\" --add-data \"img;img\" --add-data \"platform_utils.py;.\" --hidden-import eventlet --hidden-import eventlet.hubs.epolls --hidden-import eventlet.hubs.kqueue --hidden-import eventlet.hubs.selects --hidden-import dns --hidden-import dns.resolver --distpath dist/windows server.py)",
+      "Bash(python -m PyInstaller --noconfirm --onedir --name vigia-cliente --icon img/logo2.ico --add-data \"img;img\" --add-data \"platform_utils.py;.\" --hidden-import pynput --hidden-import pynput.mouse._win32 --hidden-import pynput.keyboard._win32 --distpath dist/windows client.py)",
+      "Bash(cp vigia-launcher.py dist/windows/vigia-servidor/)",
+      "Bash(cp platform_utils.py dist/windows/vigia-servidor/)",
+      "Bash(cp platform_utils.py dist/windows/vigia-cliente/)",
+      "Bash(where iscc:*)",
+      "Read(//c/Program Files \\(x86\\)/Inno Setup 6/**)",
+      "Read(//c/Program Files/Inno Setup 6/**)",
+      "Bash(\"/c/Program Files \\(x86\\)/Inno Setup 6/ISCC.exe\" vigia-server.iss)",
+      "Bash(\"/c/Program Files \\(x86\\)/Inno Setup 6/ISCC.exe\" vigia-client.iss)",
+      "Bash(./vigia-servidor.exe)",
+      "Bash(python -c \"import eventlet; print\\(eventlet.__file__\\)\")",
+      "Bash(python -c \":*)",
+      "Bash(python -m PyInstaller --noconfirm --onedir --name vigia-servidor --icon img/logo2.ico --add-data \"templates;templates\" --add-data \"img;img\" --add-data \"platform_utils.py;.\" --hidden-import eventlet --hidden-import eventlet.hubs --hidden-import eventlet.hubs.hub --hidden-import eventlet.hubs.epolls --hidden-import eventlet.hubs.kqueue --hidden-import eventlet.hubs.selects --hidden-import eventlet.hubs.poll --hidden-import eventlet.hubs.timer --hidden-import eventlet.green --hidden-import eventlet.green.socket --hidden-import eventlet.green.ssl --hidden-import eventlet.green.threading --hidden-import eventlet.green.thread --hidden-import eventlet.green.os --hidden-import eventlet.green.select --hidden-import eventlet.green.selectors --hidden-import eventlet.green.subprocess --hidden-import eventlet.green.time --hidden-import eventlet.greenio --hidden-import eventlet.greenio.base --hidden-import eventlet.greenio.py3 --hidden-import eventlet.greenpool --hidden-import eventlet.greenthread --hidden-import eventlet.patcher --hidden-import eventlet.queue --hidden-import eventlet.semaphore --hidden-import eventlet.timeout --hidden-import eventlet.wsgi --hidden-import eventlet.event --hidden-import eventlet.lock --hidden-import eventlet.support --hidden-import eventlet.support.greendns --hidden-import eventlet.support.greenlets --hidden-import engineio.async_drivers.eventlet --hidden-import dns --hidden-import dns.resolver --distpath dist/windows server.py)",
+      "Bash(taskkill //F //IM vigia-servidor.exe)",
+      "Bash(find C:/Users/Usuario/Desktop/Vigia/vigia/dist/windows/vigia-servidor/_internal/ -name *eventlet* -o -name *engineio* -o -name *async_driver*)",
+      "Bash(./_test_eventlet.exe)",
+      "Bash(rm -rf dist/_test_eventlet.exe build/_test_eventlet)",
+      "Bash(python -m PyInstaller --noconfirm --onefile --name _test_eventlet --collect-all eventlet --hidden-import engineio.async_drivers.eventlet --hidden-import dns --hidden-import dns.resolver _test_eventlet.py)",
+      "Bash(python -m PyInstaller --noconfirm --onefile --name _test_eventlet --collect-all eventlet --collect-all dns --collect-all engineio --collect-all socketio --collect-all flask_socketio _test_eventlet.py)",
+      "Bash(rm -rf dist/windows/vigia-servidor build/vigia-servidor)",
+      "Bash(python -m PyInstaller --noconfirm --onedir --name vigia-servidor --icon img/logo2.ico --add-data \"templates;templates\" --add-data \"img;img\" --add-data \"platform_utils.py;.\" --collect-all eventlet --collect-all dns --collect-all engineio --collect-all socketio --collect-all flask_socketio --distpath dist/windows server.py)",
+      "Bash(rm -f _test_eventlet.py _test_eventlet.spec dist/_test_eventlet.exe)",
+      "Bash(rm -rf build/_test_eventlet)"
+    ]
+  }
+}
