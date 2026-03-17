@@ -17,13 +17,25 @@ import subprocess
 import time
 import platform_utils
 
-# En Windows GUI (console=False), redirigir stdout/stderr a log
-if sys.platform == 'win32' and (sys.stdout is None or getattr(sys.stdout, 'fileno', lambda: -1)() == -1):
-    _log_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'vigia')
-    os.makedirs(_log_dir, exist_ok=True)
-    _log_file = open(os.path.join(_log_dir, 'launcher.log'), 'a', encoding='utf-8', errors='replace')
-    sys.stdout = _log_file
-    sys.stderr = _log_file
+# ---------------------------------------------------------------------------
+# Windows: ejecutar sin ventana de consola visible.
+# El launcher NO se re-lanza con pythonw (necesita mantener el proceso vivo
+# para gestionar Chrome), pero sí desconecta la consola heredada.
+# ---------------------------------------------------------------------------
+if sys.platform == 'win32':
+    # Desconectar de cualquier consola heredada
+    try:
+        import ctypes as _ct
+        _ct.windll.kernel32.FreeConsole()
+    except Exception:
+        pass
+    # Redirigir stdout/stderr a log (son None en modo sin consola)
+    if sys.stdout is None or sys.stderr is None:
+        _log_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'vigia')
+        os.makedirs(_log_dir, exist_ok=True)
+        _log_file = open(os.path.join(_log_dir, 'launcher.log'), 'a', encoding='utf-8', errors='replace')
+        sys.stdout = sys.stdout or _log_file
+        sys.stderr = sys.stderr or _log_file
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 

@@ -43,7 +43,18 @@
       "Bash(taskkill //F //PID 21676)",
       "Bash(rm -rf build/vigia-servidor build/vigia-cliente)",
       "Bash(rm -rf dist/windows/vigia-servidor dist/windows/vigia-cliente)",
-      "Bash(grep -r \"schtasks\\\\|taskkill\\\\|netsh\\\\|wmic\\\\|powershell\\\\|registry\\\\|winreg\" /c/Users/Usuario/Desktop/Vigia/vigia --include=*.py --include=*.bat --include=*.iss)"
+      "Bash(grep -r \"schtasks\\\\|taskkill\\\\|netsh\\\\|wmic\\\\|powershell\\\\|registry\\\\|winreg\" /c/Users/Usuario/Desktop/Vigia/vigia --include=*.py --include=*.bat --include=*.iss)",
+      "Bash(dir \"C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows\\\\vigia-servidor\\\\vigia-servidor.exe\")",
+      "Bash(dir \"C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows\\\\vigia-cliente\\\\vigia-cliente.exe\")",
+      "Bash(schtasks /Query /TN \"VIGIA Server\")",
+      "Bash(schtasks /Query /TN \"VIGIA Client\")",
+      "Bash(dir \"%APPDATA%\\\\..\\\\Roaming\\\\Microsoft\\\\Windows\\\\Start Menu\\\\Programs\\\\Startup\\\\VIGIA*\")",
+      "Bash(dir \"%PROGRAMDATA%\\\\Microsoft\\\\Windows\\\\Start Menu\\\\Programs\\\\VIGIA*\")",
+      "Bash(build_windows.bat)",
+      "Bash(cmd.exe /c build_windows.bat)",
+      "Bash(powershell.exe -Command \"cd ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia''; cmd /c build_windows.bat\")",
+      "Bash(powershell.exe -Command \"Set-Location ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia''; & ''.\\\\build_windows.bat''\")",
+      "Bash(powershell.exe -Command \"Get-ChildItem ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows\\\\vigia-servidor\\\\vigia-servidor.exe'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows\\\\vigia-launcher\\\\vigia-launcher.exe'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows\\\\vigia-cliente\\\\vigia-cliente.exe'' | Select-Object Name,Length,LastWriteTime | Format-Table -AutoSize\")"
     ]
   }
 }

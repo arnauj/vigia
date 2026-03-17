@@ -16,14 +16,38 @@ import subprocess
 import webbrowser
 import platform_utils
 
-# En Windows GUI (console=False / pythonw), sys.stdout/stderr son None.
-# Redirigir a un archivo de log para que print() no lance excepciones.
-if sys.platform == 'win32' and (sys.stdout is None or getattr(sys.stdout, 'fileno', lambda: -1)() == -1):
-    _log_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'vigia')
-    os.makedirs(_log_dir, exist_ok=True)
-    _log_file = open(os.path.join(_log_dir, 'server.log'), 'a', encoding='utf-8', errors='replace')
-    sys.stdout = _log_file
-    sys.stderr = _log_file
+# ---------------------------------------------------------------------------
+# Windows: ejecutar SIEMPRE sin ventana de consola visible.
+# 1) Si se lanzó con python.exe → re-lanzar con pythonw.exe y salir.
+# 2) Si ya estamos sin consola (pythonw / PyInstaller --noconsole) →
+#    redirigir stdout/stderr a un log porque son None.
+# 3) FreeConsole() como red de seguridad extra.
+# ---------------------------------------------------------------------------
+if sys.platform == 'win32':
+    # Paso 1: re-lanzar con pythonw si estamos con python.exe (consola visible)
+    _exe = os.path.basename(sys.executable).lower()
+    if _exe in ('python.exe', 'python3.exe'):
+        _pythonw = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
+        if os.path.isfile(_pythonw):
+            subprocess.Popen(
+                [_pythonw] + sys.argv,
+                cwd=os.getcwd(),
+                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
+            )
+            sys.exit(0)
+    # Paso 2: desconectar de cualquier consola heredada
+    try:
+        import ctypes as _ct
+        _ct.windll.kernel32.FreeConsole()
+    except Exception:
+        pass
+    # Paso 3: redirigir stdout/stderr a log (son None en modo sin consola)
+    if sys.stdout is None or sys.stderr is None:
+        _log_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'vigia')
+        os.makedirs(_log_dir, exist_ok=True)
+        _log_file = open(os.path.join(_log_dir, 'server.log'), 'a', encoding='utf-8', errors='replace')
+        sys.stdout = sys.stdout or _log_file
+        sys.stderr = sys.stderr or _log_file
 
 # Reconfigurar stdout/stderr para UTF-8 en Windows (cp1252 no soporta emojis)
 if sys.platform == 'win32':

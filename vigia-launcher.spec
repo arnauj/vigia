@@ -1,16 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-datas = [('img', 'img'), ('platform_utils.py', '.')]
-binaries = []
-hiddenimports = []
-
 
 a = Analysis(
     ['vigia-launcher.py'],
     pathex=[],
-    binaries=binaries,
-    datas=datas,
-    hiddenimports=hiddenimports,
+    binaries=[],
+    datas=[('img', 'img'), ('platform_utils.py', '.')],
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

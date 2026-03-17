@@ -1,5 +1,5 @@
 ('C:\\Users\\Usuario\\Desktop\\Vigia\\vigia\\build\\vigia-servidor\\vigia-servidor.exe',
- True,
+ False,
  False,
  True,
  ['C:\\Users\\Usuario\\Desktop\\Vigia\\vigia\\img\\logo2.ico'],
@@ -67,8 +67,8 @@
  [],
  False,
  False,
- 1773743149,
- [('run.exe',
-   'C:\\Users\\Usuario\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\bootloader\\Windows-64bit-intel\\run.exe',
+ 1773750008,
+ [('runw.exe',
+   'C:\\Users\\Usuario\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\bootloader\\Windows-64bit-intel\\runw.exe',
    'EXECUTABLE')],
  'C:\\Python313\\python313.dll')
