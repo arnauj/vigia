@@ -56,7 +56,28 @@
       "Bash(powershell.exe -Command \"Set-Location ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia''; & ''.\\\\build_windows.bat''\")",
       "Bash(powershell.exe -Command \"Get-ChildItem ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows\\\\vigia-servidor\\\\vigia-servidor.exe'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows\\\\vigia-launcher\\\\vigia-launcher.exe'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows\\\\vigia-cliente\\\\vigia-cliente.exe'' | Select-Object Name,Length,LastWriteTime | Format-Table -AutoSize\")",
       "Bash(powershell.exe -Command \"Get-ChildItem ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows'' -Recurse -Filter ''*.vbs'' | Select-Object -ExpandProperty FullName\")",
-      "Bash(powershell.exe -Command \"Copy-Item ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\vigia-cliente-silent.vbs'' ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows\\\\vigia-cliente\\\\'' -Force; Get-ChildItem ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows'' -Recurse -Filter ''*.vbs'' | Select-Object -ExpandProperty FullName\")"
+      "Bash(powershell.exe -Command \"Copy-Item ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\vigia-cliente-silent.vbs'' ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows\\\\vigia-cliente\\\\'' -Force; Get-ChildItem ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows'' -Recurse -Filter ''*.vbs'' | Select-Object -ExpandProperty FullName\")",
+      "Bash(powershell.exe -Command \"Write-Host ''=== TAREAS PROGRAMADAS VIGIA ===''; schtasks /Query /V /FO LIST /TN ''VIGIA Server'' 2>&1; schtasks /Query /V /FO LIST /TN ''VIGIA Client'' 2>&1\")",
+      "Bash(powershell.exe -Command \"Get-ChildItem \\([Environment]::GetFolderPath\\(''Startup''\\)\\) | ForEach-Object { Write-Host $_Name }\")",
+      "Bash(powershell.exe -Command \"Get-ChildItem ''C:\\\\ProgramData\\\\Microsoft\\\\Windows\\\\Start Menu\\\\Programs'' -Filter ''*VIGIA*'' -Recurse | ForEach-Object { Write-Host $_FullName }\")",
+      "Bash(powershell.exe -Command \"Get-ChildItem ''C:\\\\Program Files\\\\VIGIA Server'' -ErrorAction SilentlyContinue | Select-Object Name,Length | Format-Table; Get-ChildItem ''C:\\\\Program Files\\\\VIGIA Client'' -ErrorAction SilentlyContinue | Select-Object Name,Length | Format-Table\")",
+      "Bash(powershell.exe -Command \"schtasks /Query /V /FO LIST /TN ''VIGIA Server''\")",
+      "Bash(powershell.exe -Command \"schtasks /Query /TN ''VIGIA Server'' /FO LIST /V\")",
+      "Bash(powershell.exe -Command \"Start-Process ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\crear_tarea.bat'' -Verb RunAs -Wait\")",
+      "Bash(schtasks.exe /Query /TN \"VIGIA Server\" /FO LIST)",
+      "Bash(powershell.exe -Command \"schtasks.exe /Query /TN ''VIGIA Server''\")",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -File \"C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\test_launch.ps1\")",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -File \"C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\test_launcher.ps1\")",
+      "Bash(powershell.exe -Command \"Get-Content \\(Join-Path $env:APPDATA ''vigia\\\\launcher.log''\\) -Tail 10\")",
+      "Bash(powershell.exe -Command \"Remove-Item ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\test_launch.ps1'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\test_launcher.ps1'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\copiar_launcher.ps1'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\crear_tarea.bat'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\actualizar_instalacion.ps1'' -Force -ErrorAction SilentlyContinue\")",
+      "Bash(powershell.exe -Command \"Set-Location ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia''; & ''.\\\\build_windows.bat'' 2>&1 | Select-Object -Last 15\")",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -File \"C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\test_completo.ps1\")",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -File \"C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\check_exe.ps1\")",
+      "Bash(powershell.exe -Command \"Stop-Process -Name ''vigia-servidor'' -Force -ErrorAction SilentlyContinue; Stop-Process -Name ''vigia-launcher'' -Force -ErrorAction SilentlyContinue\")",
+      "Bash(powershell.exe -Command \"taskkill /F /IM vigia-servidor.exe 2>&1; taskkill /F /IM vigia-launcher.exe 2>&1\")",
+      "Bash(powershell.exe -Command \"Start-Process cmd.exe -ArgumentList ''/c \"\"C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\fix_todo.bat\"\"'' -Verb RunAs -Wait\")",
+      "Bash(powershell.exe -Command \":*)",
+      "Bash(powershell.exe -Command \"Remove-Item ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\fix_todo.bat'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\fix_instalacion.ps1'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\actualizar_instalacion.ps1'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\crear_tarea.ps1'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\check_exe.ps1'' -Force -ErrorAction SilentlyContinue\")"
     ]
   }
 }

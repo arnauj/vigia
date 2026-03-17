@@ -49,7 +49,11 @@ if sys.platform == 'win32':
     if sys.stderr is None:
         sys.stderr = _log_file
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# En PyInstaller frozen, __file__ apunta a _internal/; usar sys.executable para la ruta real
+if getattr(sys, 'frozen', False):
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Candidatos de Chromium/Chrome, en orden de preferencia
 if platform_utils.IS_WINDOWS:
@@ -251,10 +255,23 @@ def main() -> None:
             # buscar vigia-servidor.exe en la carpeta hermana ../server/
             _frozen = getattr(sys, 'frozen', False)
             if _frozen:
-                _server_exe = os.path.join(os.path.dirname(SCRIPT_DIR), 'server', 'vigia-servidor.exe')
-                if not os.path.isfile(_server_exe):
-                    # Fallback: misma carpeta
-                    _server_exe = os.path.join(SCRIPT_DIR, 'vigia-servidor.exe')
+                # Buscar vigia-servidor.exe: ../server/, misma carpeta, o raíz de instalación
+                _candidates = [
+                    os.path.join(os.path.dirname(SCRIPT_DIR), 'server', 'vigia-servidor.exe'),
+                    os.path.join(os.path.dirname(SCRIPT_DIR), 'vigia-servidor.exe'),
+                    os.path.join(SCRIPT_DIR, 'vigia-servidor.exe'),
+                ]
+                _server_exe = None
+                for _c in _candidates:
+                    print(f'[VIGIA] Buscando servidor en: {_c}')
+                    if os.path.isfile(_c):
+                        _server_exe = _c
+                        break
+                if not _server_exe:
+                    print('[VIGIA] ERROR: vigia-servidor.exe no encontrado', file=sys.stderr)
+                    sys.exit(1)
+                print(f'[VIGIA] Usando servidor: {_server_exe}')
+                popen_kwargs['cwd'] = os.path.dirname(_server_exe)
                 popen_kwargs['args'] = [_server_exe, '--no-browser', str(port)]
             else:
                 # Corriendo como script Python: usar pythonw si existe
