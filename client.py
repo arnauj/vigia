@@ -13,37 +13,38 @@ import json
 
 # ---------------------------------------------------------------------------
 # Windows: ejecutar SIEMPRE sin ventana de consola visible.
-# 1) Si se lanzó con python.exe → re-lanzar con pythonw.exe y salir.
-# 2) Si ya estamos sin consola (pythonw / PyInstaller --noconsole) →
-#    redirigir stdout/stderr a un log porque son None.
-# 3) FreeConsole() como red de seguridad extra.
+# Paso 1: Desconectar la consola heredada (FreeConsole) inmediatamente.
+# Paso 2: Si se lanzó con python.exe (no pythonw ni .exe frozen),
+#          re-lanzar con pythonw.exe mediante un .vbs para cero destello.
+# Paso 3: Redirigir stdout/stderr a log (son None sin consola).
 # ---------------------------------------------------------------------------
 if sys.platform == 'win32':
-    import subprocess as _sp
-    # Paso 1: re-lanzar con pythonw si estamos con python.exe (consola visible)
+    import ctypes as _ct
+    # Paso 1: desconectar de cualquier consola ANTES de hacer nada
+    try:
+        _ct.windll.kernel32.FreeConsole()
+    except Exception:
+        pass
+    # Paso 2: si nos lanzaron con python.exe, re-lanzar con pythonw (sin consola)
     _exe = os.path.basename(sys.executable).lower()
     if _exe in ('python.exe', 'python3.exe'):
         _pythonw = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
         if os.path.isfile(_pythonw):
-            _sp.Popen(
-                [_pythonw] + sys.argv,
-                cwd=os.getcwd(),
-                creationflags=_sp.CREATE_NO_WINDOW | _sp.DETACHED_PROCESS,
-            )
+            import subprocess as _sp, tempfile
+            _vbs = os.path.join(tempfile.gettempdir(), 'vigia_client_launch.vbs')
+            _cmd = f'"{_pythonw}" ' + ' '.join(f'"{a}"' for a in sys.argv)
+            with open(_vbs, 'w') as _f:
+                _f.write(f'CreateObject("WScript.Shell").Run "{_cmd}", 0, False\n')
+            os.startfile(_vbs)
             sys.exit(0)
-    # Paso 2: desconectar de cualquier consola heredada
-    try:
-        import ctypes as _ct
-        _ct.windll.kernel32.FreeConsole()
-    except Exception:
-        pass
-    # Paso 3: redirigir stdout/stderr a log (son None en modo sin consola)
-    if sys.stdout is None or sys.stderr is None:
-        _log_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'vigia')
-        os.makedirs(_log_dir, exist_ok=True)
-        _log_file = open(os.path.join(_log_dir, 'client.log'), 'a', encoding='utf-8', errors='replace')
-        sys.stdout = sys.stdout or _log_file
-        sys.stderr = sys.stderr or _log_file
+    # Paso 3: redirigir stdout/stderr a log
+    _log_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'vigia')
+    os.makedirs(_log_dir, exist_ok=True)
+    _log_file = open(os.path.join(_log_dir, 'client.log'), 'a', encoding='utf-8', errors='replace')
+    if sys.stdout is None:
+        sys.stdout = _log_file
+    if sys.stderr is None:
+        sys.stderr = _log_file
 
 # Forzar salida UTF-8 en Windows (cp1252 no soporta emojis/símbolos Unicode)
 if sys.platform == 'win32':

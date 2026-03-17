@@ -54,7 +54,9 @@
       "Bash(cmd.exe /c build_windows.bat)",
       "Bash(powershell.exe -Command \"cd ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia''; cmd /c build_windows.bat\")",
       "Bash(powershell.exe -Command \"Set-Location ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia''; & ''.\\\\build_windows.bat''\")",
-      "Bash(powershell.exe -Command \"Get-ChildItem ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows\\\\vigia-servidor\\\\vigia-servidor.exe'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows\\\\vigia-launcher\\\\vigia-launcher.exe'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows\\\\vigia-cliente\\\\vigia-cliente.exe'' | Select-Object Name,Length,LastWriteTime | Format-Table -AutoSize\")"
+      "Bash(powershell.exe -Command \"Get-ChildItem ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows\\\\vigia-servidor\\\\vigia-servidor.exe'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows\\\\vigia-launcher\\\\vigia-launcher.exe'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows\\\\vigia-cliente\\\\vigia-cliente.exe'' | Select-Object Name,Length,LastWriteTime | Format-Table -AutoSize\")",
+      "Bash(powershell.exe -Command \"Get-ChildItem ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows'' -Recurse -Filter ''*.vbs'' | Select-Object -ExpandProperty FullName\")",
+      "Bash(powershell.exe -Command \"Copy-Item ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\vigia-cliente-silent.vbs'' ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows\\\\vigia-cliente\\\\'' -Force; Get-ChildItem ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\dist\\\\windows'' -Recurse -Filter ''*.vbs'' | Select-Object -ExpandProperty FullName\")"
     ]
   }
 }

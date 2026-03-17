@@ -89,9 +89,11 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM -- Copiar servidor al directorio del launcher (el launcher arranca server.py) --
+REM -- Copiar archivos auxiliares al servidor y launcher --
 copy /y platform_utils.py dist\windows\vigia-servidor\ >nul
 copy /y platform_utils.py dist\windows\vigia-launcher\ >nul
+REM -- Copiar wrapper VBS del servidor (antes de empaquetar cliente que no toca esta carpeta) --
+copy /y vigia-servidor-silent.vbs dist\windows\vigia-servidor\ >nul
 
 REM -- Cliente (sin consola, ejecuta en segundo plano) --
 echo.
@@ -114,6 +116,8 @@ if errorlevel 1 (
 )
 
 copy /y platform_utils.py dist\windows\vigia-cliente\ >nul
+REM -- Copiar wrapper VBS del cliente (DESPUES de PyInstaller para que no lo borre) --
+copy /y vigia-cliente-silent.vbs dist\windows\vigia-cliente\ >nul
 
 echo.
 echo ============================================================================

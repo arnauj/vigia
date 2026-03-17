@@ -22,13 +22,15 @@ UninstallDisplayIcon={app}\img\logo2.ico
 
 [Files]
 Source: "dist\windows\vigia-cliente\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
+; Wrapper VBS silencioso
+Source: "vigia-cliente-silent.vbs"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\VIGIA Client"; Filename: "{app}\vigia-cliente.exe"; Parameters: "{code:GetServerIP}"; WorkingDir: "{app}"
+; Menu de inicio: lanza el cliente sin consola
+Name: "{group}\VIGIA Client"; Filename: "wscript.exe"; Parameters: """{app}\vigia-cliente-silent.vbs"" {code:GetServerIP}"; WorkingDir: "{app}"; IconFilename: "{app}\img\logo2.ico"
 Name: "{group}\Desinstalar VIGIA Client"; Filename: "{uninstallexe}"
 
 [UninstallRun]
-; Matar proceso del cliente antes de desinstalar
 Filename: "taskkill"; Parameters: "/F /IM vigia-cliente.exe"; Flags: runhidden
 
 [UninstallDelete]
@@ -67,21 +69,22 @@ begin
     ConfigFile := ConfigDir + '\client.conf';
     SaveStringToFile(ConfigFile, ServerIPPage.Values[0], False);
 
-    // Crear acceso directo en carpeta de inicio (oculto, sin ventana)
+    // Crear acceso directo en carpeta de inicio → usa wscript + .vbs = CERO consola
     CreateShellLink(
       ExpandConstant('{userstartup}\VIGIA Client.lnk'),
       'VIGIA Client',
-      ExpandConstant('{app}\vigia-cliente.exe'),
-      ServerIPPage.Values[0],
+      'wscript.exe',
+      ExpandConstant('"{app}\vigia-cliente-silent.vbs" ') + ServerIPPage.Values[0],
       ExpandConstant('{app}'),
-      '', 0, SW_SHOWMINNOACTIVE);
+      '', 0, SW_SHOWNORMAL);
 
-    // Preguntar si iniciar ahora (se ejecuta en segundo plano, sin consola)
+    // Iniciar ahora (sin consola, via .vbs)
     if MsgBox('Iniciar VIGIA Client ahora?', mbConfirmation, MB_YESNO) = IDYES then
     begin
-      Exec(ExpandConstant('{app}\vigia-cliente.exe'),
-           ServerIPPage.Values[0], ExpandConstant('{app}'),
-           SW_SHOWMINNOACTIVE, ewNoWait, ResultCode);
+      Exec('wscript.exe',
+           ExpandConstant('"{app}\vigia-cliente-silent.vbs" ') + ServerIPPage.Values[0],
+           ExpandConstant('{app}'),
+           SW_SHOWNORMAL, ewNoWait, ResultCode);
     end;
   end;
 end;

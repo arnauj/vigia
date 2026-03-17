@@ -37,12 +37,30 @@ if (-not (Test-Path $VenvDir)) {
 }
 
 $PipExe = Join-Path $VenvDir "Scripts\pip.exe"
-$PythonExe = Join-Path $VenvDir "Scripts\pythonw.exe"
-$PythonConExe = Join-Path $VenvDir "Scripts\python.exe"
+$PythonwExe = Join-Path $VenvDir "Scripts\pythonw.exe"
 
 # -- Instalar dependencias --
 Write-Host "[*] Instalando dependencias del servidor..."
-& (Join-Path $VenvDir "Scripts\pip.exe") install flask flask-socketio eventlet Pillow mss
+& $PipExe install flask flask-socketio eventlet Pillow mss
+
+# -- Crear .vbs silenciosos para lanzar sin consola --
+$ServerVbs = Join-Path $ScriptDir "run-server.vbs"
+$LauncherVbs = Join-Path $ScriptDir "run-launcher.vbs"
+
+$serverPy = Join-Path $ScriptDir "server.py"
+$launcherPy = Join-Path $ScriptDir "vigia-launcher.py"
+
+# VBS para el servidor en background (tarea programada, sin dashboard)
+Set-Content -Path $ServerVbs -Value @"
+CreateObject("WScript.Shell").Run """$PythonwExe"" ""$serverPy"" --no-browser 5000", 0, False
+"@
+
+# VBS para el launcher (menu inicio, abre dashboard)
+Set-Content -Path $LauncherVbs -Value @"
+CreateObject("WScript.Shell").Run """$PythonwExe"" ""$launcherPy""", 0, False
+"@
+
+Write-Host "[OK] Scripts de lanzamiento silencioso creados" -ForegroundColor Green
 
 # -- Crear acceso directo en Start Menu (launcher: abre dashboard sin consola) --
 $StartMenu = [Environment]::GetFolderPath("CommonStartMenu")
@@ -50,8 +68,8 @@ $ShortcutPath = Join-Path $StartMenu "Programs\VIGIA Server.lnk"
 
 $WshShell = New-Object -ComObject WScript.Shell
 $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
-$Shortcut.TargetPath = $PythonExe
-$Shortcut.Arguments = "`"$(Join-Path $ScriptDir 'vigia-launcher.py')`""
+$Shortcut.TargetPath = "wscript.exe"
+$Shortcut.Arguments = "`"$LauncherVbs`""
 $Shortcut.WorkingDirectory = $ScriptDir
 $Shortcut.Description = "VIGIA - Panel del Profesor"
 $IconPath = Join-Path $ScriptDir "img\logo2.ico"
@@ -61,9 +79,9 @@ if (Test-Path $IconPath) {
 $Shortcut.Save()
 Write-Host "[OK] Acceso directo creado en Start Menu (abre dashboard)" -ForegroundColor Green
 
-# -- Registrar tarea programada (auto-arranque en segundo plano, sin navegador) --
+# -- Registrar tarea programada (auto-arranque via wscript, sin consola) --
 $TaskName = "VIGIA Server"
-$Action = New-ScheduledTaskAction -Execute $PythonExe -Argument "`"$(Join-Path $ScriptDir 'server.py')`" --no-browser 5000" -WorkingDirectory $ScriptDir
+$Action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument "`"$ServerVbs`"" -WorkingDirectory $ScriptDir
 $Trigger = New-ScheduledTaskTrigger -AtLogon
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 try {

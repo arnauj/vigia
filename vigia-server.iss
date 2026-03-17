@@ -25,27 +25,26 @@ UninstallDisplayIcon={app}\img\logo2.ico
 Source: "dist\windows\vigia-servidor\*"; DestDir: "{app}\server"; Flags: ignoreversion recursesubdirs
 ; Launcher (abre el dashboard sin consola)
 Source: "dist\windows\vigia-launcher\*"; DestDir: "{app}\launcher"; Flags: ignoreversion recursesubdirs
+; Wrappers VBS silenciosos
+Source: "vigia-servidor-silent.vbs"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 ; Menu de inicio: el launcher abre el dashboard (sin consola)
-Name: "{group}\VIGIA Server"; Filename: "{app}\launcher\vigia-launcher.exe"; WorkingDir: "{app}\launcher"
+Name: "{group}\VIGIA Server"; Filename: "{app}\launcher\vigia-launcher.exe"; WorkingDir: "{app}\launcher"; IconFilename: "{app}\server\img\logo2.ico"
 Name: "{group}\Desinstalar VIGIA Server"; Filename: "{uninstallexe}"
 ; Escritorio: launcher
-Name: "{commondesktop}\VIGIA Server"; Filename: "{app}\launcher\vigia-launcher.exe"; WorkingDir: "{app}\launcher"
+Name: "{commondesktop}\VIGIA Server"; Filename: "{app}\launcher\vigia-launcher.exe"; WorkingDir: "{app}\launcher"; IconFilename: "{app}\server\img\logo2.ico"
 
 [Run]
 ; Abrir puerto 5000 en el firewall de Windows
 Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""VIGIA Server"" dir=in action=allow protocol=TCP localport=5000"; Flags: runhidden
-; Crear tarea programada para auto-arranque al inicio de sesion (servidor en segundo plano, sin navegador)
-Filename: "schtasks"; Parameters: "/Create /SC ONLOGON /TN ""VIGIA Server"" /TR """"""{app}\server\vigia-servidor.exe"""""" --no-browser"" /RL HIGHEST /F"; Flags: runhidden
+; Crear tarea programada: usa wscript + .vbs para CERO consola al inicio de sesion
+Filename: "schtasks"; Parameters: "/Create /SC ONLOGON /TN ""VIGIA Server"" /TR ""wscript.exe \""{app}\vigia-servidor-silent.vbs\"" --no-browser"" /RL HIGHEST /F"; Flags: runhidden
 
 [UninstallRun]
-; Matar proceso del servidor antes de desinstalar
 Filename: "taskkill"; Parameters: "/F /IM vigia-servidor.exe"; Flags: runhidden
 Filename: "taskkill"; Parameters: "/F /IM vigia-launcher.exe"; Flags: runhidden
-; Eliminar regla de firewall
 Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""VIGIA Server"""; Flags: runhidden
-; Eliminar tarea programada
 Filename: "schtasks"; Parameters: "/Delete /TN ""VIGIA Server"" /F"; Flags: runhidden
 
 [Code]

@@ -18,24 +18,36 @@ import time
 import platform_utils
 
 # ---------------------------------------------------------------------------
-# Windows: ejecutar sin ventana de consola visible.
-# El launcher NO se re-lanza con pythonw (necesita mantener el proceso vivo
-# para gestionar Chrome), pero sí desconecta la consola heredada.
+# Windows: ejecutar SIEMPRE sin ventana de consola visible.
+# Paso 1: Desconectar la consola heredada inmediatamente.
+# Paso 2: Si se lanzó con python.exe, re-lanzar con pythonw.exe.
+# Paso 3: Redirigir stdout/stderr a log.
 # ---------------------------------------------------------------------------
 if sys.platform == 'win32':
-    # Desconectar de cualquier consola heredada
+    import ctypes as _ct
     try:
-        import ctypes as _ct
         _ct.windll.kernel32.FreeConsole()
     except Exception:
         pass
-    # Redirigir stdout/stderr a log (son None en modo sin consola)
-    if sys.stdout is None or sys.stderr is None:
-        _log_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'vigia')
-        os.makedirs(_log_dir, exist_ok=True)
-        _log_file = open(os.path.join(_log_dir, 'launcher.log'), 'a', encoding='utf-8', errors='replace')
-        sys.stdout = sys.stdout or _log_file
-        sys.stderr = sys.stderr or _log_file
+    _exe = os.path.basename(sys.executable).lower()
+    if _exe in ('python.exe', 'python3.exe'):
+        _pythonw = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
+        if os.path.isfile(_pythonw):
+            import tempfile as _tmpmod
+            _vbs = os.path.join(_tmpmod.gettempdir(), 'vigia_launcher_launch.vbs')
+            _cmd = f'"{_pythonw}" ' + ' '.join(f'"{a}"' for a in sys.argv)
+            with open(_vbs, 'w') as _f:
+                _f.write(f'CreateObject("WScript.Shell").Run "{_cmd}", 0, False\n')
+            os.startfile(_vbs)
+            sys.exit(0)
+    # Redirigir stdout/stderr a log
+    _log_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'vigia')
+    os.makedirs(_log_dir, exist_ok=True)
+    _log_file = open(os.path.join(_log_dir, 'launcher.log'), 'a', encoding='utf-8', errors='replace')
+    if sys.stdout is None:
+        sys.stdout = _log_file
+    if sys.stderr is None:
+        sys.stderr = _log_file
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -115,7 +127,9 @@ def run_chrome_app(url: str, proc) -> bool:  # proc puede ser None si Flask ya c
         ]
         if platform_utils.IS_LINUX:
             args.append('--class=vigia')  # WM_CLASS → KDE asocia la ventana al .desktop
-        chrome = subprocess.Popen(args)
+        # CREATE_NO_WINDOW evita que Chrome herede una consola del proceso padre
+        _flags = subprocess.CREATE_NO_WINDOW if platform_utils.IS_WINDOWS else 0
+        chrome = subprocess.Popen(args, creationflags=_flags)
         try:
             chrome.wait()
         except KeyboardInterrupt:
@@ -233,8 +247,20 @@ def main() -> None:
         if platform_utils.IS_WINDOWS:
             # Evitar que el subproceso del servidor abra una ventana de consola
             popen_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
-            # El servidor no debe abrir el navegador; lo hace el launcher
-            popen_kwargs['args'] = [sys.executable, server_py, '--no-browser', str(port)]
+            # Si estamos corriendo como .exe frozen de PyInstaller,
+            # buscar vigia-servidor.exe en la carpeta hermana ../server/
+            _frozen = getattr(sys, 'frozen', False)
+            if _frozen:
+                _server_exe = os.path.join(os.path.dirname(SCRIPT_DIR), 'server', 'vigia-servidor.exe')
+                if not os.path.isfile(_server_exe):
+                    # Fallback: misma carpeta
+                    _server_exe = os.path.join(SCRIPT_DIR, 'vigia-servidor.exe')
+                popen_kwargs['args'] = [_server_exe, '--no-browser', str(port)]
+            else:
+                # Corriendo como script Python: usar pythonw si existe
+                _pythonw = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
+                _py = _pythonw if os.path.isfile(_pythonw) else sys.executable
+                popen_kwargs['args'] = [_py, server_py, '--no-browser', str(port)]
         else:
             popen_kwargs['args'] = [sys.executable, server_py, str(port)]
         proc = subprocess.Popen(**popen_kwargs)

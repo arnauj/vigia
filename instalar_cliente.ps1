@@ -35,7 +35,6 @@ if (-not $python) {
 
 # -- Pedir IP del servidor si no se proporcionó --
 if (-not $ServerIP) {
-    # Intentar auto-detectar: IP local con ultimo octeto = .2
     try {
         $localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike "*Loopback*" -and $_.PrefixOrigin -eq "Dhcp" } | Select-Object -First 1).IPAddress
         if ($localIP) {
@@ -62,7 +61,7 @@ if (-not (Test-Path $VenvDir)) {
 }
 
 $PipExe = Join-Path $VenvDir "Scripts\pip.exe"
-$PythonExe = Join-Path $VenvDir "Scripts\pythonw.exe"
+$PythonwExe = Join-Path $VenvDir "Scripts\pythonw.exe"
 
 # -- Instalar dependencias --
 Write-Host "[*] Instalando dependencias del cliente..."
@@ -77,17 +76,24 @@ $ConfigFile = Join-Path $ConfigDir "client.conf"
 Set-Content -Path $ConfigFile -Value $ServerIP -NoNewline
 Write-Host "[OK] IP guardada en $ConfigFile" -ForegroundColor Green
 
-# -- Crear acceso directo en Startup (auto-arranque, oculto sin consola) --
+# -- Crear .vbs silencioso para lanzar sin consola --
+$ClientPy = Join-Path $ScriptDir "client.py"
+$ClientVbs = Join-Path $ScriptDir "run-client.vbs"
+Set-Content -Path $ClientVbs -Value @"
+CreateObject("WScript.Shell").Run """$PythonwExe"" ""$ClientPy"" $ServerIP", 0, False
+"@
+Write-Host "[OK] Script de lanzamiento silencioso creado" -ForegroundColor Green
+
+# -- Crear acceso directo en Startup (auto-arranque via wscript, CERO consola) --
 $StartupDir = [Environment]::GetFolderPath("Startup")
 $ShortcutPath = Join-Path $StartupDir "VIGIA Client.lnk"
 
 $WshShell = New-Object -ComObject WScript.Shell
 $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
-$Shortcut.TargetPath = $PythonExe
-$Shortcut.Arguments = "`"$(Join-Path $ScriptDir 'client.py')`" $ServerIP"
+$Shortcut.TargetPath = "wscript.exe"
+$Shortcut.Arguments = "`"$ClientVbs`""
 $Shortcut.WorkingDirectory = $ScriptDir
 $Shortcut.Description = "VIGIA - Cliente del Alumno"
-$Shortcut.WindowStyle = 7  # Minimized (pythonw no crea consola igualmente)
 $IconPath = Join-Path $ScriptDir "img\logo2.ico"
 if (Test-Path $IconPath) {
     $Shortcut.IconLocation = $IconPath
@@ -99,8 +105,8 @@ Write-Host "[OK] Auto-arranque configurado (Startup, sin consola)" -ForegroundCo
 $StartMenu = [Environment]::GetFolderPath("CommonStartMenu")
 $MenuShortcut = Join-Path $StartMenu "Programs\VIGIA Client.lnk"
 $Shortcut2 = $WshShell.CreateShortcut($MenuShortcut)
-$Shortcut2.TargetPath = $PythonExe
-$Shortcut2.Arguments = "`"$(Join-Path $ScriptDir 'client.py')`" $ServerIP"
+$Shortcut2.TargetPath = "wscript.exe"
+$Shortcut2.Arguments = "`"$ClientVbs`""
 $Shortcut2.WorkingDirectory = $ScriptDir
 $Shortcut2.Description = "VIGIA - Cliente del Alumno"
 if (Test-Path $IconPath) {
@@ -109,9 +115,9 @@ if (Test-Path $IconPath) {
 $Shortcut2.Save()
 Write-Host "[OK] Acceso directo creado en Start Menu" -ForegroundColor Green
 
-# -- Arrancar el cliente inmediatamente (en segundo plano, sin consola) --
+# -- Arrancar el cliente inmediatamente (sin consola) --
 Write-Host "[*] Arrancando cliente en segundo plano..."
-Start-Process -FilePath $PythonExe -ArgumentList "`"$(Join-Path $ScriptDir 'client.py')`" $ServerIP" -WorkingDirectory $ScriptDir -WindowStyle Hidden
+Start-Process -FilePath "wscript.exe" -ArgumentList "`"$ClientVbs`"" -WindowStyle Hidden
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Green
