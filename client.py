@@ -800,9 +800,12 @@ class _VentanaProfesor:
 
     def actualizar(self, b64):
         try:
+            if not b64 or ',' not in b64:
+                return
             self._img_raw = Image.open(io.BytesIO(base64.b64decode(b64.split(',', 1)[1])))
             self._render()
-        except: pass
+        except Exception as e:
+            print(f"  [!] Error actualizando pantalla del profesor: {e}")
 
     def destruir(self): self.top.destroy()
 

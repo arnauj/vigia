@@ -688,6 +688,14 @@ def _auto_open_browser(port):
     if not platform_utils.IS_WINDOWS:
         return
     import shutil, tempfile
+    # Esperar a que el servidor esté listo (max 15s)
+    import socket as _sock
+    for _ in range(30):
+        try:
+            with _sock.create_connection(('127.0.0.1', port), timeout=0.5):
+                break
+        except OSError:
+            time.sleep(0.5)
     url = f'http://localhost:{port}/'
     # Buscar Chrome o Edge para modo --app (sin barra de herramientas)
     candidates = []
@@ -733,9 +741,9 @@ if __name__ == '__main__':
     print(f"  Alumnos se conectan a IP: {ip}  puerto: {port}")
     print(f"{sep}\n")
 
-    # En Windows, abrir el navegador automáticamente tras un breve retraso
+    # En Windows, abrir el navegador automáticamente (espera a que el servidor esté listo)
     if platform_utils.IS_WINDOWS:
-        t = threading.Timer(2.0, _auto_open_browser, args=[port])
+        t = threading.Timer(0.5, _auto_open_browser, args=[port])
         t.daemon = True
         t.start()
 

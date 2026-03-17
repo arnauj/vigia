@@ -2385,6 +2385,10 @@ const _shareVideo  = document.createElement('video');
 const _shareCanvas = document.createElement('canvas');
 const _shareCtx    = _shareCanvas.getContext('2d', { willReadFrequently: true });
 _shareVideo.autoplay = true; _shareVideo.muted = true; _shareVideo.playsInline = true;
+// Insertar el video oculto en el DOM para que los eventos (loadedmetadata, etc.)
+// se disparen correctamente en todos los navegadores/plataformas.
+_shareVideo.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none';
+document.addEventListener('DOMContentLoaded', () => document.body.appendChild(_shareVideo));
 const FPS_SHARE     = 10;
 const CALIDAD_SHARE = 0.70;
 const ANCHO_SHARE   = 1920;
@@ -2400,17 +2404,39 @@ function toggleCompartir() {
 
   if (_canGetDisplayMedia()) {
     // Chrome / Firefox / Edge: diálogo nativo del navegador (WebRTC getDisplayMedia)
+    console.log('[VIGIA] getDisplayMedia disponible, solicitando pantalla...');
     navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
       .then(stream => {
+        console.log('[VIGIA] Stream obtenido:', stream.getVideoTracks()[0].label);
         _sharing = true;
         _shareStream = stream;
         _shareVideo.srcObject = stream;
         stream.getVideoTracks()[0].addEventListener('ended', detenerCompartir);
-        const go = () => _shareVideo.play().then(() => {
-          _shareRunning = true; _loopCompartir(); _actualizarBoton(true);
-        });
-        _shareVideo.videoWidth ? go() :
+        const go = () => {
+          console.log('[VIGIA] Video listo, videoWidth=' + _shareVideo.videoWidth);
+          _shareVideo.play()
+            .then(() => {
+              console.log('[VIGIA] play() OK, iniciando loop de captura');
+              _shareRunning = true; _loopCompartir(); _actualizarBoton(true);
+            })
+            .catch(e => {
+              // play() puede fallar pero si autoplay funciona, forzar el loop igualmente
+              console.warn('[VIGIA] play() rechazado:', e.message, '— forzando loop');
+              _shareRunning = true; _loopCompartir(); _actualizarBoton(true);
+            });
+        };
+        if (_shareVideo.videoWidth) {
+          go();
+        } else {
           _shareVideo.addEventListener('loadedmetadata', go, { once: true });
+          // Timeout de seguridad: si loadedmetadata no llega en 3s, forzar inicio
+          setTimeout(() => {
+            if (!_shareRunning && _sharing && _shareStream) {
+              console.warn('[VIGIA] loadedmetadata timeout, forzando inicio');
+              go();
+            }
+          }, 3000);
+        }
       })
       .catch(err => {
         if (err.name === 'NotAllowedError') return;
@@ -2418,11 +2444,9 @@ function toggleCompartir() {
         console.warn('[VIGIA] getDisplayMedia falló, usando captura del servidor:', err.message);
         socket.emit('get_screens');
       });
-  } else if (IS_LAUNCHER) {
-    // Launcher WebKit2GTK sin getDisplayMedia: usar captura del servidor con mss
-    socket.emit('get_screens');
   } else {
-    // Sin getDisplayMedia ni launcher: contexto no seguro, fallback servidor
+    // getDisplayMedia no disponible (WebKit2GTK o contexto no seguro): captura del servidor
+    console.log('[VIGIA] getDisplayMedia no disponible, usando captura del servidor');
     socket.emit('get_screens');
   }
 }
@@ -2497,6 +2521,7 @@ socket.on('teacher_screen_preview', data => {
 });
 
 // ── Loop captura local (Chrome) ──
+let _shareFrameCount = 0;
 function _loopCompartir() {
   if (!_shareRunning || !_shareStream) return;
   if (_shareVideo.videoWidth) {
@@ -2508,9 +2533,14 @@ function _loopCompartir() {
     const _sharePayload = { image: img, activa: true };
     if (_shareSids) _sharePayload.sids = [..._shareSids];
     socket.emit('teacher_screenshot', _sharePayload);
+    _shareFrameCount++;
+    if (_shareFrameCount <= 3 || _shareFrameCount % 100 === 0)
+      console.log('[VIGIA] Frame #' + _shareFrameCount + ' enviado (' + Math.round(img.length/1024) + ' KB)');
     const prev = document.getElementById('share-preview');
     prev.src = img;
     if (!prev.classList.contains('show')) prev.classList.add('show');
+  } else {
+    console.warn('[VIGIA] _loopCompartir: videoWidth=0, esperando...');
   }
   _shareTimeout = setTimeout(() => { if (_shareRunning) requestAnimationFrame(_loopCompartir); }, 1000 / FPS_SHARE);
 }
