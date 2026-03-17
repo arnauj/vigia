@@ -1,7 +1,8 @@
 @echo off
 REM ============================================================================
 REM VIGIA - Script de empaquetado Windows
-REM Genera vigia-servidor.exe y vigia-cliente.exe usando PyInstaller
+REM Genera vigia-servidor.exe, vigia-launcher.exe y vigia-cliente.exe
+REM Todos sin ventana de consola (--noconsole / --windowed)
 REM Requisitos: Python 3.10+, pip, PyInstaller
 REM ============================================================================
 
@@ -44,11 +45,12 @@ REM -- Determinar parametro de icono --
 set "ICON_PARAM="
 if exist img\logo2.ico set "ICON_PARAM=--icon=img\logo2.ico"
 
-REM -- Servidor --
+REM -- Servidor (sin consola, ejecuta en segundo plano) --
 echo.
 echo [VIGIA] Empaquetando servidor...
 python -m PyInstaller ^
     --noconfirm ^
+    --noconsole ^
     --onedir ^
     --name vigia-servidor ^
     %ICON_PARAM% ^
@@ -68,15 +70,35 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM -- Copiar vigia-launcher.py al directorio del servidor --
-copy /y vigia-launcher.py dist\windows\vigia-servidor\ >nul
-copy /y platform_utils.py dist\windows\vigia-servidor\ >nul
+REM -- Launcher (sin consola, abre el dashboard en Chrome) --
+echo.
+echo [VIGIA] Empaquetando launcher...
+python -m PyInstaller ^
+    --noconfirm ^
+    --noconsole ^
+    --onedir ^
+    --name vigia-launcher ^
+    %ICON_PARAM% ^
+    --add-data "img;img" ^
+    --add-data "platform_utils.py;." ^
+    --distpath dist\windows ^
+    vigia-launcher.py
 
-REM -- Cliente --
+if errorlevel 1 (
+    echo [ERROR] Fallo al empaquetar el launcher.
+    exit /b 1
+)
+
+REM -- Copiar servidor al directorio del launcher (el launcher arranca server.py) --
+copy /y platform_utils.py dist\windows\vigia-servidor\ >nul
+copy /y platform_utils.py dist\windows\vigia-launcher\ >nul
+
+REM -- Cliente (sin consola, ejecuta en segundo plano) --
 echo.
 echo [VIGIA] Empaquetando cliente...
 python -m PyInstaller ^
     --noconfirm ^
+    --noconsole ^
     --onedir ^
     --name vigia-cliente ^
     %ICON_PARAM% ^
@@ -96,8 +118,9 @@ copy /y platform_utils.py dist\windows\vigia-cliente\ >nul
 echo.
 echo ============================================================================
 echo [OK] Ejecutables generados en dist\windows\
-echo   - dist\windows\vigia-servidor\vigia-servidor.exe
-echo   - dist\windows\vigia-cliente\vigia-cliente.exe
+echo   - dist\windows\vigia-servidor\vigia-servidor.exe  (servidor, segundo plano)
+echo   - dist\windows\vigia-launcher\vigia-launcher.exe  (abre dashboard + servidor)
+echo   - dist\windows\vigia-cliente\vigia-cliente.exe    (cliente, segundo plano)
 echo ============================================================================
 echo.
 echo Para generar instaladores, usa Inno Setup con:

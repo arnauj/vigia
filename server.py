@@ -16,6 +16,15 @@ import subprocess
 import webbrowser
 import platform_utils
 
+# En Windows GUI (console=False / pythonw), sys.stdout/stderr son None.
+# Redirigir a un archivo de log para que print() no lance excepciones.
+if sys.platform == 'win32' and (sys.stdout is None or getattr(sys.stdout, 'fileno', lambda: -1)() == -1):
+    _log_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'vigia')
+    os.makedirs(_log_dir, exist_ok=True)
+    _log_file = open(os.path.join(_log_dir, 'server.log'), 'a', encoding='utf-8', errors='replace')
+    sys.stdout = _log_file
+    sys.stderr = _log_file
+
 # Reconfigurar stdout/stderr para UTF-8 en Windows (cp1252 no soporta emojis)
 if sys.platform == 'win32':
     try:
@@ -731,7 +740,10 @@ def _auto_open_browser(port):
 
 
 if __name__ == '__main__':
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
+    # --no-browser: arrancar sin abrir el dashboard (para tareas programadas / servicios)
+    _no_browser = '--no-browser' in sys.argv
+    _args = [a for a in sys.argv[1:] if a != '--no-browser']
+    port = int(_args[0]) if _args else 5000
     ip = get_local_ip()
     sep = '=' * 52
     print(f"\n{sep}")
@@ -741,8 +753,8 @@ if __name__ == '__main__':
     print(f"  Alumnos se conectan a IP: {ip}  puerto: {port}")
     print(f"{sep}\n")
 
-    # En Windows, abrir el navegador automáticamente (espera a que el servidor esté listo)
-    if platform_utils.IS_WINDOWS:
+    # En Windows, abrir el navegador automáticamente (salvo --no-browser)
+    if platform_utils.IS_WINDOWS and not _no_browser:
         t = threading.Timer(0.5, _auto_open_browser, args=[port])
         t.daemon = True
         t.start()

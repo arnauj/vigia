@@ -17,6 +17,14 @@ import subprocess
 import time
 import platform_utils
 
+# En Windows GUI (console=False), redirigir stdout/stderr a log
+if sys.platform == 'win32' and (sys.stdout is None or getattr(sys.stdout, 'fileno', lambda: -1)() == -1):
+    _log_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'vigia')
+    os.makedirs(_log_dir, exist_ok=True)
+    _log_file = open(os.path.join(_log_dir, 'launcher.log'), 'a', encoding='utf-8', errors='replace')
+    sys.stdout = _log_file
+    sys.stderr = _log_file
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Candidatos de Chromium/Chrome, en orden de preferencia
@@ -209,10 +217,15 @@ def main() -> None:
         print(f'[VIGIA] Servidor detectado en :{port}, reutilizando…')
         proc = None
     else:
-        proc = subprocess.Popen(
-            [sys.executable, server_py, str(port)],
-            cwd=SCRIPT_DIR,
-        )
+        popen_kwargs = dict(cwd=SCRIPT_DIR)
+        if platform_utils.IS_WINDOWS:
+            # Evitar que el subproceso del servidor abra una ventana de consola
+            popen_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+            # El servidor no debe abrir el navegador; lo hace el launcher
+            popen_kwargs['args'] = [sys.executable, server_py, '--no-browser', str(port)]
+        else:
+            popen_kwargs['args'] = [sys.executable, server_py, str(port)]
+        proc = subprocess.Popen(**popen_kwargs)
         if not wait_for_port(port, 30):
             print('[VIGIA] Flask no respondió en 30 s', file=sys.stderr)
             proc.kill()

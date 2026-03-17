@@ -27,6 +27,10 @@ Source: "dist\windows\vigia-cliente\*"; DestDir: "{app}"; Flags: ignoreversion r
 Name: "{group}\VIGIA Client"; Filename: "{app}\vigia-cliente.exe"; Parameters: "{code:GetServerIP}"; WorkingDir: "{app}"
 Name: "{group}\Desinstalar VIGIA Client"; Filename: "{uninstallexe}"
 
+[UninstallRun]
+; Matar proceso del cliente antes de desinstalar
+Filename: "taskkill"; Parameters: "/F /IM vigia-cliente.exe"; Flags: runhidden
+
 [UninstallDelete]
 Type: files; Name: "{userstartup}\VIGIA Client.lnk"
 
@@ -63,21 +67,21 @@ begin
     ConfigFile := ConfigDir + '\client.conf';
     SaveStringToFile(ConfigFile, ServerIPPage.Values[0], False);
 
-    // Crear acceso directo en carpeta de inicio
+    // Crear acceso directo en carpeta de inicio (oculto, sin ventana)
     CreateShellLink(
       ExpandConstant('{userstartup}\VIGIA Client.lnk'),
       'VIGIA Client',
       ExpandConstant('{app}\vigia-cliente.exe'),
       ServerIPPage.Values[0],
       ExpandConstant('{app}'),
-      '', 0, SW_SHOWNORMAL);
+      '', 0, SW_SHOWMINNOACTIVE);
 
-    // Preguntar si iniciar ahora
+    // Preguntar si iniciar ahora (se ejecuta en segundo plano, sin consola)
     if MsgBox('Iniciar VIGIA Client ahora?', mbConfirmation, MB_YESNO) = IDYES then
     begin
       Exec(ExpandConstant('{app}\vigia-cliente.exe'),
            ServerIPPage.Values[0], ExpandConstant('{app}'),
-           SW_SHOW, ewNoWait, ResultCode);
+           SW_SHOWMINNOACTIVE, ewNoWait, ResultCode);
     end;
   end;
 end;

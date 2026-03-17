@@ -42,7 +42,8 @@
       "Bash(netstat -ano)",
       "Bash(taskkill //F //PID 21676)",
       "Bash(rm -rf build/vigia-servidor build/vigia-cliente)",
-      "Bash(rm -rf dist/windows/vigia-servidor dist/windows/vigia-cliente)"
+      "Bash(rm -rf dist/windows/vigia-servidor dist/windows/vigia-cliente)",
+      "Bash(grep -r \"schtasks\\\\|taskkill\\\\|netsh\\\\|wmic\\\\|powershell\\\\|registry\\\\|winreg\" /c/Users/Usuario/Desktop/Vigia/vigia --include=*.py --include=*.bat --include=*.iss)"
     ]
   }
 }

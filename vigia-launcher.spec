@@ -1,15 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
 
 datas = [('img', 'img'), ('platform_utils.py', '.')]
 binaries = []
 hiddenimports = []
-tmp_ret = collect_all('pynput')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
-    ['client.py'],
+    ['vigia-launcher.py'],
     pathex=[],
     binaries=binaries,
     datas=datas,
@@ -28,7 +25,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='vigia-cliente',
+    name='vigia-launcher',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -48,5 +45,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='vigia-cliente',
+    name='vigia-launcher',
 )

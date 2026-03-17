@@ -37,13 +37,14 @@ if (-not (Test-Path $VenvDir)) {
 }
 
 $PipExe = Join-Path $VenvDir "Scripts\pip.exe"
-$PythonExe = Join-Path $VenvDir "Scripts\python.exe"
+$PythonExe = Join-Path $VenvDir "Scripts\pythonw.exe"
+$PythonConExe = Join-Path $VenvDir "Scripts\python.exe"
 
 # -- Instalar dependencias --
 Write-Host "[*] Instalando dependencias del servidor..."
-& $PipExe install flask flask-socketio eventlet Pillow mss
+& (Join-Path $VenvDir "Scripts\pip.exe") install flask flask-socketio eventlet Pillow mss
 
-# -- Crear acceso directo en Start Menu --
+# -- Crear acceso directo en Start Menu (launcher: abre dashboard sin consola) --
 $StartMenu = [Environment]::GetFolderPath("CommonStartMenu")
 $ShortcutPath = Join-Path $StartMenu "Programs\VIGIA Server.lnk"
 
@@ -58,16 +59,16 @@ if (Test-Path $IconPath) {
     $Shortcut.IconLocation = $IconPath
 }
 $Shortcut.Save()
-Write-Host "[OK] Acceso directo creado en Start Menu" -ForegroundColor Green
+Write-Host "[OK] Acceso directo creado en Start Menu (abre dashboard)" -ForegroundColor Green
 
-# -- Registrar tarea programada (auto-arranque) --
+# -- Registrar tarea programada (auto-arranque en segundo plano, sin navegador) --
 $TaskName = "VIGIA Server"
-$Action = New-ScheduledTaskAction -Execute $PythonExe -Argument "`"$(Join-Path $ScriptDir 'server.py')`" 5000" -WorkingDirectory $ScriptDir
+$Action = New-ScheduledTaskAction -Execute $PythonExe -Argument "`"$(Join-Path $ScriptDir 'server.py')`" --no-browser 5000" -WorkingDirectory $ScriptDir
 $Trigger = New-ScheduledTaskTrigger -AtLogon
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 try {
     Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Force | Out-Null
-    Write-Host "[OK] Tarea programada '$TaskName' creada (auto-arranque al login)" -ForegroundColor Green
+    Write-Host "[OK] Tarea programada '$TaskName' creada (auto-arranque sin consola)" -ForegroundColor Green
 } catch {
     Write-Host "[!] No se pudo crear la tarea programada (se requieren permisos de administrador)" -ForegroundColor Yellow
 }
@@ -83,5 +84,6 @@ try {
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Green
 Write-Host "  Instalacion completada!" -ForegroundColor Green
-Write-Host "  Ejecuta: $PythonExe vigia-launcher.py" -ForegroundColor Green
+Write-Host "  - Auto-arranque: servidor en segundo plano (sin consola)" -ForegroundColor Green
+Write-Host "  - Menu Inicio: abre el dashboard en Chrome" -ForegroundColor Green
 Write-Host "============================================" -ForegroundColor Green

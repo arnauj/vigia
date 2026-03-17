@@ -21,20 +21,28 @@ SetupIconFile=img\logo2.ico
 UninstallDisplayIcon={app}\img\logo2.ico
 
 [Files]
-Source: "dist\windows\vigia-servidor\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
+; Servidor (proceso en segundo plano)
+Source: "dist\windows\vigia-servidor\*"; DestDir: "{app}\server"; Flags: ignoreversion recursesubdirs
+; Launcher (abre el dashboard sin consola)
+Source: "dist\windows\vigia-launcher\*"; DestDir: "{app}\launcher"; Flags: ignoreversion recursesubdirs
 
 [Icons]
-Name: "{group}\VIGIA Server"; Filename: "{app}\vigia-servidor.exe"; WorkingDir: "{app}"
+; Menu de inicio: el launcher abre el dashboard (sin consola)
+Name: "{group}\VIGIA Server"; Filename: "{app}\launcher\vigia-launcher.exe"; WorkingDir: "{app}\launcher"
 Name: "{group}\Desinstalar VIGIA Server"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\VIGIA Server"; Filename: "{app}\vigia-servidor.exe"; WorkingDir: "{app}"
+; Escritorio: launcher
+Name: "{commondesktop}\VIGIA Server"; Filename: "{app}\launcher\vigia-launcher.exe"; WorkingDir: "{app}\launcher"
 
 [Run]
 ; Abrir puerto 5000 en el firewall de Windows
 Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""VIGIA Server"" dir=in action=allow protocol=TCP localport=5000"; Flags: runhidden
-; Crear tarea programada para auto-arranque al inicio de sesion
-Filename: "schtasks"; Parameters: "/Create /SC ONLOGON /TN ""VIGIA Server"" /TR ""{app}\vigia-servidor.exe"" /RL HIGHEST /F"; Flags: runhidden
+; Crear tarea programada para auto-arranque al inicio de sesion (servidor en segundo plano, sin navegador)
+Filename: "schtasks"; Parameters: "/Create /SC ONLOGON /TN ""VIGIA Server"" /TR """"""{app}\server\vigia-servidor.exe"""""" --no-browser"" /RL HIGHEST /F"; Flags: runhidden
 
 [UninstallRun]
+; Matar proceso del servidor antes de desinstalar
+Filename: "taskkill"; Parameters: "/F /IM vigia-servidor.exe"; Flags: runhidden
+Filename: "taskkill"; Parameters: "/F /IM vigia-launcher.exe"; Flags: runhidden
 ; Eliminar regla de firewall
 Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""VIGIA Server"""; Flags: runhidden
 ; Eliminar tarea programada
@@ -50,7 +58,8 @@ begin
   begin
     if MsgBox('Iniciar VIGIA Server ahora?', mbConfirmation, MB_YESNO) = IDYES then
     begin
-      Exec(ExpandConstant('{app}\vigia-servidor.exe'), '', ExpandConstant('{app}'), SW_SHOW, ewNoWait, ResultCode);
+      { Lanzar el launcher: arranca servidor + abre dashboard, sin consola }
+      Exec(ExpandConstant('{app}\launcher\vigia-launcher.exe'), '', ExpandConstant('{app}\launcher'), SW_SHOWNORMAL, ewNoWait, ResultCode);
     end;
   end;
 end;

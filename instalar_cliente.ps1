@@ -62,7 +62,7 @@ if (-not (Test-Path $VenvDir)) {
 }
 
 $PipExe = Join-Path $VenvDir "Scripts\pip.exe"
-$PythonExe = Join-Path $VenvDir "Scripts\python.exe"
+$PythonExe = Join-Path $VenvDir "Scripts\pythonw.exe"
 
 # -- Instalar dependencias --
 Write-Host "[*] Instalando dependencias del cliente..."
@@ -77,7 +77,7 @@ $ConfigFile = Join-Path $ConfigDir "client.conf"
 Set-Content -Path $ConfigFile -Value $ServerIP -NoNewline
 Write-Host "[OK] IP guardada en $ConfigFile" -ForegroundColor Green
 
-# -- Crear acceso directo en Startup (auto-arranque) --
+# -- Crear acceso directo en Startup (auto-arranque, oculto sin consola) --
 $StartupDir = [Environment]::GetFolderPath("Startup")
 $ShortcutPath = Join-Path $StartupDir "VIGIA Client.lnk"
 
@@ -87,13 +87,13 @@ $Shortcut.TargetPath = $PythonExe
 $Shortcut.Arguments = "`"$(Join-Path $ScriptDir 'client.py')`" $ServerIP"
 $Shortcut.WorkingDirectory = $ScriptDir
 $Shortcut.Description = "VIGIA - Cliente del Alumno"
-$Shortcut.WindowStyle = 7  # Minimized
+$Shortcut.WindowStyle = 7  # Minimized (pythonw no crea consola igualmente)
 $IconPath = Join-Path $ScriptDir "img\logo2.ico"
 if (Test-Path $IconPath) {
     $Shortcut.IconLocation = $IconPath
 }
 $Shortcut.Save()
-Write-Host "[OK] Auto-arranque configurado (Startup)" -ForegroundColor Green
+Write-Host "[OK] Auto-arranque configurado (Startup, sin consola)" -ForegroundColor Green
 
 # -- Crear acceso directo en Start Menu --
 $StartMenu = [Environment]::GetFolderPath("CommonStartMenu")
@@ -109,12 +109,12 @@ if (Test-Path $IconPath) {
 $Shortcut2.Save()
 Write-Host "[OK] Acceso directo creado en Start Menu" -ForegroundColor Green
 
-# -- Arrancar el cliente inmediatamente --
-Write-Host "[*] Arrancando cliente..."
-Start-Process -FilePath $PythonExe -ArgumentList "`"$(Join-Path $ScriptDir 'client.py')`" $ServerIP" -WorkingDirectory $ScriptDir -WindowStyle Minimized
+# -- Arrancar el cliente inmediatamente (en segundo plano, sin consola) --
+Write-Host "[*] Arrancando cliente en segundo plano..."
+Start-Process -FilePath $PythonExe -ArgumentList "`"$(Join-Path $ScriptDir 'client.py')`" $ServerIP" -WorkingDirectory $ScriptDir -WindowStyle Hidden
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Green
 Write-Host "  Instalacion completada!" -ForegroundColor Green
-Write-Host "  Cliente conectando a: $ServerIP" -ForegroundColor Green
+Write-Host "  Cliente conectando a: $ServerIP (sin consola)" -ForegroundColor Green
 Write-Host "============================================" -ForegroundColor Green

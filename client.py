@@ -11,6 +11,15 @@ import io
 import re
 import json
 
+# En Windows GUI (console=False / pythonw), sys.stdout/stderr son None.
+# Redirigir a un archivo de log para que print() no lance excepciones.
+if sys.platform == 'win32' and (sys.stdout is None or getattr(sys.stdout, 'fileno', lambda: -1)() == -1):
+    _log_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'vigia')
+    os.makedirs(_log_dir, exist_ok=True)
+    _log_file = open(os.path.join(_log_dir, 'client.log'), 'a', encoding='utf-8', errors='replace')
+    sys.stdout = _log_file
+    sys.stderr = _log_file
+
 # Forzar salida UTF-8 en Windows (cp1252 no soporta emojis/símbolos Unicode)
 if sys.platform == 'win32':
     try:
