@@ -256,11 +256,14 @@ def _set_clickthrough_x11(window_id):
 def _set_clickthrough_win32(hwnd):
     try:
         u32 = ctypes.windll.user32
-        GWL_EXSTYLE      = -20
-        WS_EX_LAYERED    = 0x00080000
+        GWL_EXSTYLE       = -20
         WS_EX_TRANSPARENT = 0x00000020
+        # Solo añadir WS_EX_TRANSPARENT (click-through).
+        # NO forzar WS_EX_LAYERED aquí: Tkinter ya lo establece con
+        # wm_attributes('-transparentcolor', ...) y su propio SetLayeredWindowAttributes.
+        # Forzarlo de nuevo sin LWA_COLORKEY deja la ventana toda negra.
         style = u32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-        u32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED | WS_EX_TRANSPARENT)
+        u32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_TRANSPARENT)
         return True
     except Exception:
         return False

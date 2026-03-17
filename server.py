@@ -682,6 +682,46 @@ def on_webrtc_ice(data):
 
 # ── Arranque ─────────────────────────────────────────────────────────────────
 
+def _auto_open_browser(port):
+    """En Windows, abre el dashboard en localhost (contexto seguro → getDisplayMedia funciona).
+    Busca Chrome/Edge primero para modo --app; si no hay, abre el navegador por defecto."""
+    if not platform_utils.IS_WINDOWS:
+        return
+    import shutil, tempfile
+    url = f'http://localhost:{port}/'
+    # Buscar Chrome o Edge para modo --app (sin barra de herramientas)
+    candidates = []
+    for env_var in ('PROGRAMFILES', 'PROGRAMFILES(X86)', 'LOCALAPPDATA'):
+        base = os.environ.get(env_var, '')
+        if not base:
+            continue
+        candidates.append(os.path.join(base, 'Google', 'Chrome', 'Application', 'chrome.exe'))
+        candidates.append(os.path.join(base, 'Microsoft', 'Edge', 'Application', 'msedge.exe'))
+    browser = None
+    for c in candidates:
+        if os.path.isfile(c):
+            browser = c
+            break
+    if browser:
+        tmpdir = tempfile.mkdtemp(prefix='vigia-chrome-')
+        args = [
+            browser, f'--app={url}',
+            f'--user-data-dir={tmpdir}',
+            '--no-first-run', '--no-default-browser-check',
+            '--disable-infobars', '--disable-translate',
+            '--disable-sync', '--disable-extensions',
+            '--disable-background-networking',
+        ]
+        try:
+            subprocess.Popen(args)
+            print(f'[*] Dashboard abierto en {os.path.basename(browser)} modo app')
+        except Exception:
+            webbrowser.open(url)
+    else:
+        webbrowser.open(url)
+        print('[*] Dashboard abierto en el navegador del sistema')
+
+
 if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
     ip = get_local_ip()
@@ -692,5 +732,11 @@ if __name__ == '__main__':
     print(f"  Dashboard: http://{ip}:{port}")
     print(f"  Alumnos se conectan a IP: {ip}  puerto: {port}")
     print(f"{sep}\n")
+
+    # En Windows, abrir el navegador automáticamente tras un breve retraso
+    if platform_utils.IS_WINDOWS:
+        t = threading.Timer(2.0, _auto_open_browser, args=[port])
+        t.daemon = True
+        t.start()
 
     socketio.run(app, host='0.0.0.0', port=port, debug=False)

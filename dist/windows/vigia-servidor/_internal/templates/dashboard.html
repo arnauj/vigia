@@ -2398,11 +2398,8 @@ function _canGetDisplayMedia() {
 function toggleCompartir() {
   if (_sharing) { detenerCompartir(); return; }
 
-  if (IS_LAUNCHER || !_canGetDisplayMedia()) {
-    // Launcher WebKit2GTK o contexto no seguro: usar captura del servidor con mss
-    socket.emit('get_screens');
-  } else {
-    // Chrome / Firefox en contexto seguro: diálogo nativo del navegador
+  if (_canGetDisplayMedia()) {
+    // Chrome / Firefox / Edge: diálogo nativo del navegador (WebRTC getDisplayMedia)
     navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
       .then(stream => {
         _sharing = true;
@@ -2417,10 +2414,16 @@ function toggleCompartir() {
       })
       .catch(err => {
         if (err.name === 'NotAllowedError') return;
-        // Si getDisplayMedia falla (permisos, etc.), intentar captura del servidor
+        // Si getDisplayMedia falla, intentar captura del servidor como fallback
         console.warn('[VIGIA] getDisplayMedia falló, usando captura del servidor:', err.message);
         socket.emit('get_screens');
       });
+  } else if (IS_LAUNCHER) {
+    // Launcher WebKit2GTK sin getDisplayMedia: usar captura del servidor con mss
+    socket.emit('get_screens');
+  } else {
+    // Sin getDisplayMedia ni launcher: contexto no seguro, fallback servidor
+    socket.emit('get_screens');
   }
 }
 

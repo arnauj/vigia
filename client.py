@@ -891,7 +891,17 @@ class _VentanaPizarra:
             return self._clickthrough_ok
         try:
             self.top.update_idletasks()
-            self._clickthrough_ok = platform_utils.set_clickthrough(int(self.top.winfo_id()))
+            if platform_utils.IS_WINDOWS:
+                # En Windows, winfo_id() devuelve el HWND del frame hijo de Tkinter,
+                # no del toplevel real. Necesitamos el HWND padre para set_clickthrough.
+                import ctypes
+                child_hwnd = int(self.top.winfo_id())
+                hwnd = ctypes.windll.user32.GetParent(child_hwnd)
+                if not hwnd:
+                    hwnd = child_hwnd
+                self._clickthrough_ok = platform_utils.set_clickthrough(hwnd)
+            else:
+                self._clickthrough_ok = platform_utils.set_clickthrough(int(self.top.winfo_id()))
         except Exception:
             self._clickthrough_ok = False
         self._clickthrough_checked = True
@@ -911,16 +921,21 @@ class _VentanaPizarra:
             w = self.top.winfo_screenwidth()
             h = self.top.winfo_screenheight()
         self.top.geometry(f"{w}x{h}+{l}+{t}")
-        self.top.deiconify()
-        self.top.lift()
-        self.top.attributes('-topmost', True)
         # La transparencia debe aplicarse con la ventana ya visible para que
         # el compositor del WM (KWin/Mutter) la tenga en cuenta.
+        # En Windows: -transparentcolor configura WS_EX_LAYERED + LWA_COLORKEY
+        # internamente en Tk. Debe ir ANTES de set_clickthrough para que
+        # WS_EX_TRANSPARENT se añada sobre WS_EX_LAYERED ya existente.
         try:
             self.top.wm_attributes('-transparentcolor', self._transparent)
         except Exception:
             pass
+        self.top.deiconify()
+        self.top.lift()
+        self.top.attributes('-topmost', True)
         self.top.update_idletasks()
+        # Resetear estado de click-through (el HWND puede haber cambiado)
+        self._clickthrough_checked = False
         if not self._ensure_clickthrough():
             self.top.withdraw()
             self._visible = False
