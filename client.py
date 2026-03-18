@@ -20,14 +20,23 @@ import json
 # ---------------------------------------------------------------------------
 if sys.platform == 'win32':
     import ctypes as _ct
-    # Paso 1: desconectar de cualquier consola ANTES de hacer nada
+    # Paso 1: OCULTAR la ventana de consola inmediatamente (antes de cualquier otra cosa).
+    # GetConsoleWindow + ShowWindow(SW_HIDE) cierra visualmente la ventana al instante,
+    # incluso si FreeConsole no la cierra (p.ej. si fue creada por el shell de Windows).
+    try:
+        _hwnd = _ct.windll.kernel32.GetConsoleWindow()
+        if _hwnd:
+            _ct.windll.user32.ShowWindow(_hwnd, 0)  # SW_HIDE = 0
+    except Exception:
+        pass
+    # Paso 2: desconectar la consola del proceso
     try:
         _ct.windll.kernel32.FreeConsole()
     except Exception:
         pass
-    # Paso 2: si nos lanzaron con python.exe, re-lanzar con pythonw (sin consola)
+    # Paso 3: si nos lanzaron con python.exe, re-lanzar con pythonw (sin consola)
     _exe = os.path.basename(sys.executable).lower()
-    if _exe in ('python.exe', 'python3.exe'):
+    if _exe in ('python.exe', 'python3.exe') and not os.environ.get('VIGIA_NO_RELAUNCH'):
         _pythonw = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
         if os.path.isfile(_pythonw):
             import subprocess as _sp, tempfile
@@ -37,7 +46,7 @@ if sys.platform == 'win32':
                 _f.write(f'CreateObject("WScript.Shell").Run "{_cmd}", 0, False\n')
             os.startfile(_vbs)
             sys.exit(0)
-    # Paso 3: redirigir stdout/stderr a log
+    # Paso 4: redirigir stdout/stderr a log
     _log_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'vigia')
     os.makedirs(_log_dir, exist_ok=True)
     _log_file = open(os.path.join(_log_dir, 'client.log'), 'a', encoding='utf-8', errors='replace')
@@ -67,9 +76,10 @@ import platform_utils
 # ── Importaciones ────────────────────────────────────────────────────────────
 
 def _pip_disponible():
+    _kw = {'creationflags': subprocess.CREATE_NO_WINDOW} if platform_utils.IS_WINDOWS else {}
     try:
-        if subprocess.run([sys.executable, '-m', 'pip', '--version'], 
-                          capture_output=True, timeout=2).returncode == 0:
+        if subprocess.run([sys.executable, '-m', 'pip', '--version'],
+                          capture_output=True, timeout=2, **_kw).returncode == 0:
             return [sys.executable, '-m', 'pip']
     except Exception: pass
     if shutil.which('pip3'): return ['pip3']
@@ -85,8 +95,9 @@ def _instalar(paquete):
             os.system('sudo apt-get update -qq 2>/dev/null && sudo apt-get install -y python3-pip -qq 2>/dev/null')
         pip_cmd = _pip_disponible()
     if pip_cmd:
+        _kw = {'creationflags': subprocess.CREATE_NO_WINDOW} if platform_utils.IS_WINDOWS else {}
         try:
-            res = subprocess.run(pip_cmd + ['install', '--user', '--break-system-packages', '-q'] + paquete.split(), timeout=60)
+            res = subprocess.run(pip_cmd + ['install', '--user', '--break-system-packages', '-q'] + paquete.split(), timeout=60, **_kw)
             if res.returncode == 0:
                 importlib.invalidate_caches()
                 return True

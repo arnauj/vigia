@@ -25,17 +25,25 @@ import platform_utils
 # ---------------------------------------------------------------------------
 if sys.platform == 'win32':
     import ctypes as _ct
-    # Paso 1: desconectar de cualquier consola ANTES de hacer nada
+    # Paso 1: OCULTAR la ventana de consola inmediatamente (antes de cualquier otra cosa).
+    # GetConsoleWindow + ShowWindow(SW_HIDE) cierra visualmente la ventana al instante,
+    # incluso si FreeConsole no la cierra (p.ej. si fue creada por el shell de Windows).
+    try:
+        _hwnd = _ct.windll.kernel32.GetConsoleWindow()
+        if _hwnd:
+            _ct.windll.user32.ShowWindow(_hwnd, 0)  # SW_HIDE = 0
+    except Exception:
+        pass
+    # Paso 2: desconectar la consola del proceso
     try:
         _ct.windll.kernel32.FreeConsole()
     except Exception:
         pass
-    # Paso 2: si nos lanzaron con python.exe, re-lanzar con pythonw (sin consola)
+    # Paso 3: si nos lanzaron con python.exe, re-lanzar con pythonw (sin consola)
     _exe = os.path.basename(sys.executable).lower()
-    if _exe in ('python.exe', 'python3.exe'):
+    if _exe in ('python.exe', 'python3.exe') and not os.environ.get('VIGIA_NO_RELAUNCH'):
         _pythonw = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
         if os.path.isfile(_pythonw):
-            # Usar un .vbs temporal para lanzar sin NINGÚN destello de consola
             import tempfile
             _vbs = os.path.join(tempfile.gettempdir(), 'vigia_server_launch.vbs')
             _cmd = f'"{_pythonw}" ' + ' '.join(f'"{a}"' for a in sys.argv)
@@ -43,7 +51,7 @@ if sys.platform == 'win32':
                 _f.write(f'CreateObject("WScript.Shell").Run "{_cmd}", 0, False\n')
             os.startfile(_vbs)
             sys.exit(0)
-    # Paso 3: redirigir stdout/stderr a log
+    # Paso 4: redirigir stdout/stderr a log
     _log_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'vigia')
     os.makedirs(_log_dir, exist_ok=True)
     _log_file = open(os.path.join(_log_dir, 'server.log'), 'a', encoding='utf-8', errors='replace')

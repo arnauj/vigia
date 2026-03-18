@@ -77,7 +77,9 @@
       "Bash(powershell.exe -Command \"taskkill /F /IM vigia-servidor.exe 2>&1; taskkill /F /IM vigia-launcher.exe 2>&1\")",
       "Bash(powershell.exe -Command \"Start-Process cmd.exe -ArgumentList ''/c \"\"C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\fix_todo.bat\"\"'' -Verb RunAs -Wait\")",
       "Bash(powershell.exe -Command \":*)",
-      "Bash(powershell.exe -Command \"Remove-Item ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\fix_todo.bat'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\fix_instalacion.ps1'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\actualizar_instalacion.ps1'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\crear_tarea.ps1'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\check_exe.ps1'' -Force -ErrorAction SilentlyContinue\")"
+      "Bash(powershell.exe -Command \"Remove-Item ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\fix_todo.bat'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\fix_instalacion.ps1'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\actualizar_instalacion.ps1'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\crear_tarea.ps1'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\check_exe.ps1'' -Force -ErrorAction SilentlyContinue\")",
+      "Bash(powershell.exe -File:*)",
+      "Bash(find /c/Users/Usuario/Desktop/Vigia/vigia -type f \\\\\\(-name *.bat -o -name *.vbs -o -name *.cmd \\\\\\))"
     ]
   }
 }

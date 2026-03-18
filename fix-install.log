@@ -1,0 +1,51 @@
+﻿**********************
+Inicio de la transcripción de Windows PowerShell
+Hora de inicio: 20260318081901
+Nombre de usuario: DESKTOP-59S76IA\Usuario
+Usuario RunAs: DESKTOP-59S76IA\Usuario
+Nombre de la configuración: 
+Máquina: DESKTOP-59S76IA (Microsoft Windows NT 10.0.26200.0)
+Aplicación host: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File C:\Users\Usuario\Desktop\Vigia\vigia\fix-install.ps1
+Id. de proceso: 25328
+PSVersion: 5.1.26100.7920
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.7920
+BuildVersion: 10.0.26100.7920
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+La transcripción ha comenzado. El archivo de salida es C:\Users\Usuario\Desktop\Vigia\vigia\fix-install.log
+============================================
+  VIGIA - Corrigiendo instalacion
+============================================
+
+[1] Arreglando servidor...
+  [OK] Exe raiz reemplazado con version GUI (sin consola)
+Correcto: se eliminó correctamente la tarea programada "VIGIA Server".
+  [OK] Tarea programada vieja eliminada
+  [OK] Tarea programada creada: wscript -> VBS -> exe GUI (sin consola)
+  [OK] Start Menu -> launcher (abre dashboard, sin consola)
+  [OK] Desktop -> launcher (sin consola)
+  [OK] Servidor corregido
+
+[2] Cliente no instalado en Program Files, instalando...
+  [OK] Cliente copiado a C:\Program Files\VIGIA Client
+
+=== VERIFICACION ===
+  Exe raiz servidor: GUI (SIN CONSOLA) - OK
+  Exe cliente: GUI (SIN CONSOLA) - OK
+  Tarea programada: wscript.exe "C:\Program Files\VIGIA Server\vigia-servidor-silent.vbs" --no-browser
+  Start Menu servidor: C:\Program Files\VIGIA Server\launcher\vigia-launcher.exe
+
+============================================
+  Correccion completada!
+  - Servidor: se inicia sin consola al login
+  - Dashboard: se abre desde Start Menu sin consola
+  - Cliente: se inicia sin consola al login
+============================================
+**********************
+Fin de la transcripción de Windows PowerShell
+Hora de finalización: 20260318081906
+**********************
