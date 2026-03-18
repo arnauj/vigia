@@ -142,7 +142,8 @@ def shutdown_system():
     """Apaga el equipo."""
     try:
         if IS_WINDOWS:
-            subprocess.run(['shutdown', '/s', '/t', '0'], check=False, timeout=5)
+            subprocess.run(['shutdown', '/s', '/t', '0'], check=False, timeout=5,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
         else:
             subprocess.run(['sudo', 'shutdown', '-h', 'now'], check=False, timeout=5)
     except Exception:
@@ -176,10 +177,11 @@ def run_shell(cmd, cwd, env=None, timeout=60):
         wrapped = f'cd {cwd!r} 2>/dev/null; {cmd}; echo "{marker}:$(pwd)"'
 
     try:
+        _kw = {'creationflags': subprocess.CREATE_NO_WINDOW} if IS_WINDOWS else {}
         result = subprocess.run(
             wrapped, shell=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, timeout=timeout, env=env
+            text=True, timeout=timeout, env=env, **_kw
         )
         stdout = result.stdout
         new_cwd = cwd

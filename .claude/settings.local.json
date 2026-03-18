@@ -79,7 +79,14 @@
       "Bash(powershell.exe -Command \":*)",
       "Bash(powershell.exe -Command \"Remove-Item ''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\fix_todo.bat'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\fix_instalacion.ps1'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\actualizar_instalacion.ps1'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\crear_tarea.ps1'',''C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\check_exe.ps1'' -Force -ErrorAction SilentlyContinue\")",
       "Bash(powershell.exe -File:*)",
-      "Bash(find /c/Users/Usuario/Desktop/Vigia/vigia -type f \\\\\\(-name *.bat -o -name *.vbs -o -name *.cmd \\\\\\))"
+      "Bash(find /c/Users/Usuario/Desktop/Vigia/vigia -type f \\\\\\(-name *.bat -o -name *.vbs -o -name *.cmd \\\\\\))",
+      "Bash(cmd //c build_windows.bat)",
+      "Bash(ls *.bat)",
+      "Bash(cmd.exe //c build_windows.bat)",
+      "Bash(cmd.exe //c \"C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\build_windows.bat\")",
+      "Bash(ls \"/c/Program Files \\(x86\\)/Inno Setup 6/ISCC.exe\")",
+      "Bash(\"/c/Program Files \\(x86\\)/Inno Setup 6/ISCC.exe\" \"C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\vigia-server.iss\")",
+      "Bash(\"/c/Program Files \\(x86\\)/Inno Setup 6/ISCC.exe\" \"C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\vigia-client.iss\")"
     ]
   }
 }
