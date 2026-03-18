@@ -5,13 +5,34 @@
   <img src="img/logo2.png" alt="VIGIA Logo" width="100">
 </div>
 
-> Software de monitoreo de aula en tiempo real para Linux. El profesor ve, controla y gestiona todos los equipos del aula desde una sola ventana.
+> Software de monitoreo de aula en tiempo real. El profesor ve, controla y gestiona todos los equipos del aula desde una sola ventana.
+
+---
+
+## Descargas
 
 <div align="center">
 
-[![Descargar Servidor](https://img.shields.io/badge/⬇%20%20VIGIA%20Servidor-vigia--server__1.1__amd64.deb-0073e6?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/arnauj/vigia/raw/master/dist/vigia-server_1.1_amd64.deb)
-&nbsp;
-[![Descargar Cliente](https://img.shields.io/badge/⬇%20%20VIGIA%20Cliente-vigia--client__1.1__all.deb-E95420?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/arnauj/vigia/raw/master/dist/vigia-client_1.1_all.deb)
+### Windows
+
+[![Descargar Servidor Windows](https://img.shields.io/badge/⬇%20Servidor%20Windows-vigia--server--setup.exe-0078D4?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/arnauj/vigia/raw/master/dist/installers/vigia-server-setup.exe)
+&nbsp;&nbsp;
+[![Descargar Cliente Windows](https://img.shields.io/badge/⬇%20Cliente%20Windows-vigia--client--setup.exe-0078D4?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/arnauj/vigia/raw/master/dist/installers/vigia-client-setup.exe)
+
+### Linux (Debian / Ubuntu / Kubuntu)
+
+[![Descargar Servidor Linux](https://img.shields.io/badge/⬇%20Servidor%20Linux-vigia--server__1.1__amd64.deb-E95420?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/arnauj/vigia/raw/master/dist/vigia-server_1.1_amd64.deb)
+&nbsp;&nbsp;
+[![Descargar Cliente Linux](https://img.shields.io/badge/⬇%20Cliente%20Linux-vigia--client__1.1__all.deb-E95420?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/arnauj/vigia/raw/master/dist/vigia-client_1.1_all.deb)
+
+</div>
+
+<div align="center">
+
+| | Servidor (profesor) | Cliente (alumno) |
+|:---:|:---:|:---:|
+| **Windows** | [vigia-server-setup.exe](https://github.com/arnauj/vigia/raw/master/dist/installers/vigia-server-setup.exe) | [vigia-client-setup.exe](https://github.com/arnauj/vigia/raw/master/dist/installers/vigia-client-setup.exe) |
+| **Linux .deb** | [vigia-server_1.1_amd64.deb](https://github.com/arnauj/vigia/raw/master/dist/vigia-server_1.1_amd64.deb) | [vigia-client_1.1_all.deb](https://github.com/arnauj/vigia/raw/master/dist/vigia-client_1.1_all.deb) |
 
 </div>
 
@@ -58,15 +79,16 @@ VIGIA es una herramienta para profesores que permite **ver y controlar en tiempo
 ### Infraestructura y automatización
 
 - **Sin base de datos** — todo el estado es en memoria. Sin ficheros de configuración ni tablas que mantener.
-- **Autostart del servidor** — el servicio Flask arranca automáticamente con la sesión del profesor gracias a un unit de systemd de usuario.
-- **Autostart del cliente** — el cliente del alumno arranca con la sesión gráfica mediante XDG autostart. No requiere intervención manual.
+- **Autostart del servidor** — el servicio arranca automáticamente con la sesión del profesor (systemd en Linux, tarea programada en Windows).
+- **Autostart del cliente** — el cliente del alumno arranca con la sesión gráfica (XDG autostart en Linux, carpeta Startup en Windows). No requiere intervención manual.
 - **Ventana nativa** — el lanzador (`vigia-launcher.py`) abre el panel en modo aplicación nativa. Orden de preferencia: Chrome/Chromium `--app` → GTK + WebKit2GTK → navegador del sistema.
-- **Detección de Flask activo** — si el servidor ya está corriendo como servicio systemd, el lanzador lo reutiliza sin arrancar un proceso duplicado ni matarlo al cerrar la ventana.
+- **Detección de Flask activo** — si el servidor ya está corriendo como servicio, el lanzador lo reutiliza sin arrancar un proceso duplicado ni matarlo al cerrar la ventana.
 - **Perfil Chrome aislado** — el modo `--app` usa un perfil temporal para no interferir con el Chrome personal del profesor.
 - **PWA / icono correcto** — VIGIA sirve un Web App Manifest con iconos propios para que Chrome muestre el icono de VIGIA en lugar del genérico de Chrome.
 
 ### Instalación
 
+- **Instaladores Windows** — asistentes `.exe` generados con Inno Setup para servidor y cliente. Sin consola, sin configuración manual.
 - **Paquetes `.deb` listos** — un paquete para el servidor y otro para el cliente, generados con `build_debs.sh`.
 - **Instalador gráfico** — una ventana tkinter (`instalar.sh`) permite elegir entre instalar servidor o cliente y muestra el progreso en tiempo real.
 - **Scripts de línea de comandos** — `instalar_servidor.sh` e `instalar_cliente.sh` para entornos sin GUI o despliegue masivo.
@@ -75,11 +97,20 @@ VIGIA es una herramienta para profesores que permite **ver y controlar en tiempo
 
 ---
 
-## Instalación rápida (recomendada)
+## Instalación rápida
 
-Los paquetes `.deb` están en [`dist/`](dist/). Descárgalos desde los botones al inicio de este documento.
+### Windows
 
-### En el equipo del profesor (servidor)
+Descarga el instalador correspondiente desde los botones de arriba y ejecútalo. El asistente instala todo automáticamente.
+
+- **Servidor:** instala el servicio, crea acceso directo en el escritorio y tarea programada de auto-arranque.
+- **Cliente:** pide la IP del servidor durante la instalación, configura auto-arranque y se conecta inmediatamente.
+
+### Linux (Debian / Ubuntu / Kubuntu)
+
+Los paquetes `.deb` están en [`dist/`](dist/). Descárgalos desde los botones de arriba.
+
+**En el equipo del profesor (servidor):**
 
 ```bash
 sudo apt install ./vigia-server_1.1_amd64.deb
@@ -87,7 +118,7 @@ sudo apt install ./vigia-server_1.1_amd64.deb
 
 Aparece **VIGIA Servidor** en el menú de inicio. El servidor arranca automáticamente al iniciar sesión.
 
-### En los equipos de los alumnos (cliente)
+**En los equipos de los alumnos (cliente):**
 
 ```bash
 sudo apt install ./vigia-client_1.1_all.deb
@@ -97,7 +128,7 @@ Durante la instalación se pedirá la IP del servidor (se sugiere automáticamen
 
 ---
 
-## Instalación alternativa
+## Instalación alternativa (Linux)
 
 ### Servidor
 
@@ -139,7 +170,11 @@ bash instalar.sh
 ### 1 — Averigua la IP del servidor
 
 ```bash
+# Linux
 ip a | grep "inet " | grep -v 127
+
+# Windows
+ipconfig
 ```
 
 ### 2 — Inicia el servidor (profesor)
@@ -174,20 +209,20 @@ python3 client.py 192.168.X.X
 
 ## Requisitos del sistema
 
-| | Requisito |
-|---|---|
-| **Sistema operativo** | Kubuntu 22.04 / 24.04 o cualquier Ubuntu/Debian moderno |
-| **Python** | 3.10 o superior |
-| **Sesión gráfica** | **X11** (no Wayland) |
-| **Red** | Misma red local para profesor y alumnos |
+| | Windows | Linux |
+|---|---|---|
+| **SO** | Windows 10/11 | Kubuntu 22.04/24.04 o Debian/Ubuntu moderno |
+| **Python** | 3.10+ (incluido en instaladores) | 3.10+ |
+| **Sesión gráfica** | Escritorio estándar | **X11** (no Wayland) |
+| **Red** | Misma red local | Misma red local |
 
-> **La captura de pantalla (`mss`) solo funciona en X11.**
+> **Linux:** la captura de pantalla (`mss`) solo funciona en X11.
 >
 > Comprueba tu sesión con `echo $XDG_SESSION_TYPE`
 >
 > Si muestra `wayland`, cierra sesión, selecciona **"Plasma (X11)"** en la pantalla de login y vuelve a entrar.
 
-### Dependencias por componente
+### Dependencias por componente (Linux)
 
 | Componente | Python (pip) | Sistema (apt) |
 |---|---|---|
@@ -203,7 +238,11 @@ python3 client.py 192.168.X.X
 El servidor escucha en el **puerto 5000 TCP**. WebRTC usa puertos UDP efímeros para el stream P2P.
 
 ```bash
+# Linux
 sudo ufw allow 5000/tcp
+
+# Windows (el instalador lo configura automáticamente)
+netsh advfirewall firewall add rule name="VIGIA" dir=in action=allow protocol=TCP localport=5000
 ```
 
 Todos los equipos deben estar en la **misma red local**. Si la WiFi tiene AP isolation activado, el stream WebRTC no funcionará, pero el fallback JPEG seguirá operativo.
@@ -226,7 +265,7 @@ Todos los equipos deben estar en la **misma red local**. Si la WiFi tiene AP iso
 - Comprueba que la red no tiene AP isolation.
 
 **El alumno no consigue conectar**
-- Verifica que el servidor está en marcha: `systemctl --user status vigia-servidor`
+- Verifica que el servidor está en marcha: `systemctl --user status vigia-servidor` (Linux) o comprueba el Administrador de tareas (Windows).
 - Abre el puerto: `sudo ufw allow 5000/tcp`
 
 **"No module named pip"**
@@ -244,15 +283,21 @@ pip3 install --break-system-packages <paquete>
 ## Estructura del proyecto
 
 ```
-vigia-master/
+vigia/
 ├── server.py                  — Servidor Flask + Socket.IO (profesor)
 ├── client.py                  — Cliente del alumno (captura + Tkinter)
 ├── vigia-launcher.py          — Lanzador: Chrome --app → GTK/WebKit2GTK → navegador
+├── platform_utils.py          — Abstracción multiplataforma (Windows/Linux)
 ├── instalar.py                — Instalador gráfico (tkinter)
 ├── instalar.sh                — Lanzador del instalador gráfico
-├── instalar_servidor.sh       — Instalación servidor (deps + desktop + systemd)
-├── instalar_cliente.sh        — Instalación cliente (deps + desktop + autostart)
+├── instalar_servidor.sh       — Instalación servidor Linux (deps + desktop + systemd)
+├── instalar_cliente.sh        — Instalación cliente Linux (deps + desktop + autostart)
+├── instalar_servidor.ps1      — Instalación servidor Windows (venv + tarea programada)
+├── instalar_cliente.ps1       — Instalación cliente Windows (venv + startup)
 ├── build_debs.sh              — Genera ambos .deb en dist/
+├── build_windows.bat          — Genera los .exe con PyInstaller
+├── vigia-server.iss           — Script Inno Setup (instalador servidor Windows)
+├── vigia-client.iss           — Script Inno Setup (instalador cliente Windows)
 ├── test_remote_control.py     — Suite de 39 tests para el control remoto
 ├── templates/
 │   └── dashboard.html         — Panel SPA del profesor (JS vanilla + Socket.IO)
@@ -263,21 +308,30 @@ vigia-master/
 │   └── icon-512.png
 └── dist/
     ├── vigia-server_1.1_amd64.deb
-    └── vigia-client_1.1_all.deb
+    ├── vigia-client_1.1_all.deb
+    └── installers/
+        ├── vigia-server-setup.exe
+        └── vigia-client-setup.exe
 ```
 
 ---
 
-## Generar los paquetes .deb
+## Generar los paquetes
+
+### Linux (.deb)
 
 ```bash
 bash build_debs.sh
 ```
 
-Genera en `dist/`:
-- `vigia-server_1.1_amd64.deb` — paquete del profesor
-- `vigia-client_1.1_all.deb` — paquete del alumno
+### Windows (.exe)
+
+```bash
+build_windows.bat          # Genera los .exe con PyInstaller
+iscc vigia-server.iss      # Genera el instalador del servidor
+iscc vigia-client.iss      # Genera el instalador del cliente
+```
 
 ---
 
-*Desarrollado para aulas Linux con Kubuntu.*
+*Desarrollado para aulas con Kubuntu y Windows.*
