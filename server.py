@@ -291,6 +291,21 @@ def on_lock_student(data):
         print(f"[*] {students[sid]['name']} -> {'BLOQUEADO' if locked else 'desbloqueado'}")
 
 
+@socketio.on('update_config')
+def on_update_config(data):
+    """Retransmite la configuración de rendimiento a todos los clientes."""
+    cfg = {
+        'thumb_interval': float(data.get('thumb_interval', 1.0)),
+        'thumb_quality':  int(data.get('thumb_quality', 55)),
+        'live_fps':       int(data.get('live_fps', 20)),
+        'webrtc_fps':     int(data.get('webrtc_fps', 30)),
+        'live_quality':   int(data.get('live_quality', 70)),
+    }
+    socketio.emit('config_update', cfg, broadcast=True, include_self=False)
+    print(f"[*] Configuración actualizada: intervalo={cfg['thumb_interval']}s, "
+          f"JPEG live={cfg['live_fps']}fps, WebRTC={cfg['webrtc_fps']}fps")
+
+
 def _get_window_list():
     """Devuelve ventanas visibles (delegado a platform_utils para multiplataforma)."""
     return platform_utils.get_window_list()

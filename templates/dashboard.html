@@ -1026,6 +1026,78 @@
       from { transform: rotate(0deg); }
       to { transform: rotate(360deg); }
     }
+
+    /* ── Panel de configuración ── */
+    #settings-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.6); z-index: 800;
+      align-items: center; justify-content: center;
+    }
+    #settings-overlay.show { display: flex; }
+    #settings-box {
+      background: var(--card-bg); border: 1px solid var(--card-border);
+      border-radius: 14px; width: min(480px, 94vw); padding: 22px 24px;
+      box-shadow: 0 20px 50px rgba(0,0,0,.5);
+    }
+    #settings-box h3 {
+      margin: 0 0 18px; font-size: 1rem; font-weight: 700;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .settings-presets {
+      display: flex; gap: 8px; margin-bottom: 18px;
+    }
+    .preset-btn {
+      flex: 1; padding: 10px 8px; border-radius: 10px;
+      border: 1px solid var(--card-border); background: var(--bg-soft);
+      color: var(--text); cursor: pointer; text-align: center;
+      transition: border-color .15s, background .15s;
+      font-size: 0.82rem;
+    }
+    .preset-btn:hover { border-color: var(--accent); background: #142241; }
+    .preset-btn.active { border-color: var(--accent); background: #16315b; }
+    .preset-btn .preset-name { font-weight: 700; display: block; margin-bottom: 2px; }
+    .preset-btn .preset-desc { font-size: 0.72rem; color: var(--muted); }
+    .settings-section {
+      margin-bottom: 14px;
+      padding: 12px 14px;
+      border: 1px solid rgba(142,160,195,.12);
+      border-radius: 10px;
+      background: rgba(7,11,22,.5);
+    }
+    .settings-section h4 {
+      margin: 0 0 10px; font-size: 0.82rem; font-weight: 600; color: var(--accent);
+    }
+    .settings-row {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 8px; font-size: 0.82rem;
+    }
+    .settings-row:last-child { margin-bottom: 0; }
+    .settings-row label { color: var(--muted); }
+    .settings-row .val-group {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .settings-row input[type=range] {
+      width: 110px; accent-color: var(--accent);
+    }
+    .settings-row .val-display {
+      min-width: 52px; text-align: right; font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+    #settings-footer {
+      display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;
+    }
+    #settings-footer button {
+      background: none; border: 1px solid var(--card-border); color: var(--muted);
+      border-radius: 8px; padding: 7px 16px; font-size: 0.82rem; cursor: pointer;
+      transition: border-color .15s, color .15s;
+    }
+    #settings-footer button:hover { border-color: var(--text); color: var(--text); }
+    #settings-footer button.primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      border: none; color: #fff; font-weight: 600;
+    }
+    #settings-footer button.primary:hover { opacity: .9; }
   </style>
 </head>
 <body>
@@ -1068,6 +1140,12 @@
     <i data-lucide="power" size="12"></i> Apagar todos
   </button>
 
+  <button id="btn-settings" onclick="abrirSettings()" class="d-flex align-items-center gap-2"
+          style="background:none;border:1px solid var(--card-border);color:var(--muted);border-radius:8px;padding:6px 14px;font-size:0.85rem;cursor:pointer;transition:border-color .15s,color .15s;margin-left:auto"
+          onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'"
+          onmouseout="this.style.borderColor='var(--card-border)';this.style.color='var(--muted)'">
+    <i data-lucide="settings" size="12"></i> Configuración
+  </button>
   <img id="share-preview" alt="Previsualización" title="Lo que ven los alumnos" />
 </div>
 
@@ -1125,6 +1203,103 @@ function escHtml(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
+
+// ── Configuración de rendimiento ──────────────────────────────────────────
+const _PRESETS = {
+  light:    { thumb_interval: 3.0, thumb_quality: 35, live_fps: 8,  webrtc_fps: 15, live_quality: 45 },
+  balanced: { thumb_interval: 1.0, thumb_quality: 55, live_fps: 20, webrtc_fps: 30, live_quality: 70 },
+  quality:  { thumb_interval: 0.5, thumb_quality: 75, live_fps: 30, webrtc_fps: 60, live_quality: 90 },
+};
+let _cfgCurrent = { ..._PRESETS.balanced };
+let _cfgPreset  = 'balanced';
+
+function _detectPreset(cfg) {
+  for (const [name, p] of Object.entries(_PRESETS)) {
+    if (p.thumb_interval === cfg.thumb_interval && p.thumb_quality === cfg.thumb_quality &&
+        p.live_fps === cfg.live_fps && p.webrtc_fps === cfg.webrtc_fps && p.live_quality === cfg.live_quality)
+      return name;
+  }
+  return null;
+}
+
+function _syncSettingsUI() {
+  document.getElementById('cfg-thumb-interval').value = _cfgCurrent.thumb_interval;
+  document.getElementById('cfg-thumb-interval-val').textContent = _cfgCurrent.thumb_interval.toFixed(1) + ' s';
+  document.getElementById('cfg-thumb-quality').value = _cfgCurrent.thumb_quality;
+  document.getElementById('cfg-thumb-quality-val').textContent = _cfgCurrent.thumb_quality + '%';
+  document.getElementById('cfg-live-fps').value = _cfgCurrent.live_fps;
+  document.getElementById('cfg-live-fps-val').textContent = _cfgCurrent.live_fps + ' fps';
+  document.getElementById('cfg-webrtc-fps').value = _cfgCurrent.webrtc_fps;
+  document.getElementById('cfg-webrtc-fps-val').textContent = _cfgCurrent.webrtc_fps + ' fps';
+  document.getElementById('cfg-live-quality').value = _cfgCurrent.live_quality;
+  document.getElementById('cfg-live-quality-val').textContent = _cfgCurrent.live_quality + '%';
+  // Resaltar preset activo
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+  const active = _detectPreset(_cfgCurrent);
+  if (active) document.getElementById('preset-' + active)?.classList.add('active');
+}
+
+function _applyPreset(name) {
+  const p = _PRESETS[name];
+  if (!p) return;
+  _cfgCurrent = { ...p };
+  _cfgPreset = name;
+  _syncSettingsUI();
+}
+
+function abrirSettings() {
+  _syncSettingsUI();
+  document.getElementById('settings-overlay').classList.add('show');
+  lucide.createIcons();
+}
+
+function cerrarSettings() {
+  document.getElementById('settings-overlay').classList.remove('show');
+}
+
+function guardarSettings() {
+  _cfgCurrent = {
+    thumb_interval: parseFloat(document.getElementById('cfg-thumb-interval').value),
+    thumb_quality:  parseInt(document.getElementById('cfg-thumb-quality').value),
+    live_fps:       parseInt(document.getElementById('cfg-live-fps').value),
+    webrtc_fps:     parseInt(document.getElementById('cfg-webrtc-fps').value),
+    live_quality:   parseInt(document.getElementById('cfg-live-quality').value),
+  };
+  _cfgPreset = _detectPreset(_cfgCurrent);
+  // Actualizar FPS_SHARE del dashboard
+  FPS_SHARE     = _cfgCurrent.live_fps;
+  CALIDAD_SHARE = _cfgCurrent.live_quality / 100;
+  // Enviar config a todos los clientes vía servidor
+  socket.emit('update_config', _cfgCurrent);
+  cerrarSettings();
+  const presetName = _cfgPreset
+    ? { light: 'Ligero', balanced: 'Equilibrado', quality: 'Alta calidad' }[_cfgPreset]
+    : 'Personalizado';
+  toast('Configuración aplicada: ' + presetName, 'connect');
+}
+
+// Conectar sliders a sus displays
+document.addEventListener('DOMContentLoaded', () => {
+  const sliders = [
+    ['cfg-thumb-interval', 'cfg-thumb-interval-val', v => parseFloat(v).toFixed(1) + ' s'],
+    ['cfg-thumb-quality',  'cfg-thumb-quality-val',  v => v + '%'],
+    ['cfg-live-fps',       'cfg-live-fps-val',       v => v + ' fps'],
+    ['cfg-webrtc-fps',     'cfg-webrtc-fps-val',     v => v + ' fps'],
+    ['cfg-live-quality',   'cfg-live-quality-val',    v => v + '%'],
+  ];
+  sliders.forEach(([id, valId, fmt]) => {
+    document.getElementById(id)?.addEventListener('input', (e) => {
+      document.getElementById(valId).textContent = fmt(e.target.value);
+      // Deseleccionar presets al cambiar manualmente
+      document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+    });
+  });
+
+  // Cerrar con Escape
+  document.getElementById('settings-overlay')?.addEventListener('click', (e) => {
+    if (e.target.id === 'settings-overlay') cerrarSettings();
+  });
+});
 
 // ── Estado ────────────────────────────────────────────────────────────────
 const students = {};  // sid → {name, ip, image, last_seen, connected_at}
@@ -1395,7 +1570,9 @@ document.getElementById('modal-overlay').addEventListener('click', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (document.getElementById('screen-overlay').classList.contains('show')) {
+    if (document.getElementById('settings-overlay').classList.contains('show')) {
+      cerrarSettings();
+    } else if (document.getElementById('screen-overlay').classList.contains('show')) {
       cerrarScreenModal();
     } else if (document.getElementById('clipboard-overlay').classList.contains('show')) {
       cerrarPortapapeles();
@@ -2389,8 +2566,8 @@ _shareVideo.autoplay = true; _shareVideo.muted = true; _shareVideo.playsInline =
 // se disparen correctamente en todos los navegadores/plataformas.
 _shareVideo.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none';
 document.addEventListener('DOMContentLoaded', () => document.body.appendChild(_shareVideo));
-const FPS_SHARE     = 10;
-const CALIDAD_SHARE = 0.70;
+let FPS_SHARE     = 10;
+let CALIDAD_SHARE = 0.70;
 const ANCHO_SHARE   = 1920;
 
 function _canGetDisplayMedia() {
@@ -2910,6 +3087,76 @@ function _actualizarPrompt(cwd) {
     <div id="link-footer">
       <button class="compose-cancel" onclick="cerrarLink()">Cancelar</button>
       <button class="compose-send"   onclick="insertarLink()">Insertar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal configuración ── -->
+<div id="settings-overlay">
+  <div id="settings-box">
+    <h3><i data-lucide="settings" size="16"></i> Configuración de rendimiento</h3>
+
+    <div class="settings-presets">
+      <button class="preset-btn" id="preset-light" onclick="_applyPreset('light')">
+        <span class="preset-name">Ligero</span>
+        <span class="preset-desc">Bajo consumo de red y CPU</span>
+      </button>
+      <button class="preset-btn active" id="preset-balanced" onclick="_applyPreset('balanced')">
+        <span class="preset-name">Equilibrado</span>
+        <span class="preset-desc">Configuración por defecto</span>
+      </button>
+      <button class="preset-btn" id="preset-quality" onclick="_applyPreset('quality')">
+        <span class="preset-name">Alta calidad</span>
+        <span class="preset-desc">Máxima fluidez</span>
+      </button>
+    </div>
+
+    <div class="settings-section">
+      <h4>Miniaturas (pantalla de inicio)</h4>
+      <div class="settings-row">
+        <label>Intervalo de actualización</label>
+        <div class="val-group">
+          <input type="range" id="cfg-thumb-interval" min="0.5" max="5" step="0.5" value="1" />
+          <span class="val-display" id="cfg-thumb-interval-val">1.0 s</span>
+        </div>
+      </div>
+      <div class="settings-row">
+        <label>Calidad JPEG</label>
+        <div class="val-group">
+          <input type="range" id="cfg-thumb-quality" min="20" max="90" step="5" value="55" />
+          <span class="val-display" id="cfg-thumb-quality-val">55%</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h4>Vista en directo / Control remoto</h4>
+      <div class="settings-row">
+        <label>FPS (fallback JPEG)</label>
+        <div class="val-group">
+          <input type="range" id="cfg-live-fps" min="5" max="30" step="1" value="20" />
+          <span class="val-display" id="cfg-live-fps-val">20 fps</span>
+        </div>
+      </div>
+      <div class="settings-row">
+        <label>FPS (WebRTC P2P)</label>
+        <div class="val-group">
+          <input type="range" id="cfg-webrtc-fps" min="10" max="60" step="5" value="30" />
+          <span class="val-display" id="cfg-webrtc-fps-val">30 fps</span>
+        </div>
+      </div>
+      <div class="settings-row">
+        <label>Calidad JPEG directo</label>
+        <div class="val-group">
+          <input type="range" id="cfg-live-quality" min="30" max="95" step="5" value="70" />
+          <span class="val-display" id="cfg-live-quality-val">70%</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="settings-footer">
+      <button onclick="cerrarSettings()">Cancelar</button>
+      <button class="primary" onclick="guardarSettings()">Aplicar</button>
     </div>
   </div>
 </div>

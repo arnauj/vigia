@@ -340,11 +340,14 @@ def _get_pynput_key(key):
         return m.get(key.lower(), key)
     except: return key
 
-# ── Configuración ────────────────────────────────────────────────────────────
+# ── Configuración (valores por defecto, ajustables desde el dashboard) ───────
 ANCHO_IMAGEN      = 1280
 CALIDAD_JPEG      = 55
 INTERVALO_SEG     = 1.0
 REINTENTOS_ESPERA = 5
+_LIVE_FPS_SLEEP   = 0.05     # ~20 fps JPEG fallback
+_LIVE_QUALITY     = 70       # calidad JPEG en modo observación
+_WEBRTC_FPS       = 30       # FPS objetivo WebRTC
 
 # ── Estado ───────────────────────────────────────────────────────────────────
 sio = sio_module.Client(reconnection=True, reconnection_attempts=0)
@@ -368,7 +371,10 @@ if WEBRTC_OK:
     class ScreenStreamTrack(VideoStreamTrack):
         kind = "video"
         _CLOCK_RATE = 90000
-        _TARGET_FPS = 30
+
+        @property
+        def _TARGET_FPS(self):
+            return _WEBRTC_FPS
 
         def __init__(self):
             super().__init__()
@@ -469,9 +475,9 @@ def bucle_capturas():
                 ancho_r = min(orig_w, 1280)
                 if img.width > ancho_r:
                     img = img.resize((ancho_r, int(img.height * ancho_r / img.width)), Image.BILINEAR)
-                buf = io.BytesIO(); img.save(buf, format='JPEG', quality=70)
+                buf = io.BytesIO(); img.save(buf, format='JPEG', quality=_LIVE_QUALITY)
                 sio.emit('remote_frame', {'image': _b64(buf.getvalue()), 'orig_w': orig_w, 'orig_h': orig_h})
-                time.sleep(0.05)   # ~20 fps JPEG fallback
+                time.sleep(_LIVE_FPS_SLEEP)
             else:
                 time.sleep(0.2)
         except:
@@ -668,6 +674,18 @@ def on_lock_screen(_data): _cola_bloqueo.put_nowait(True)
 
 @sio.on('unlock_screen')
 def on_unlock_screen(_data): _cola_bloqueo.put_nowait(False)
+
+@sio.on('config_update')
+def on_config_update(data):
+    global INTERVALO_SEG, CALIDAD_JPEG, _LIVE_FPS_SLEEP, _LIVE_QUALITY, _WEBRTC_FPS
+    INTERVALO_SEG  = float(data.get('thumb_interval', INTERVALO_SEG))
+    CALIDAD_JPEG   = int(data.get('thumb_quality', CALIDAD_JPEG))
+    live_fps       = int(data.get('live_fps', 20))
+    _LIVE_FPS_SLEEP = 1.0 / max(1, live_fps)
+    _LIVE_QUALITY  = int(data.get('live_quality', _LIVE_QUALITY))
+    _WEBRTC_FPS    = int(data.get('webrtc_fps', _WEBRTC_FPS))
+    print(f"[*] Config actualizada: intervalo={INTERVALO_SEG}s, "
+          f"live={live_fps}fps, webrtc={_WEBRTC_FPS}fps")
 
 @sio.on('teacher_screen')
 def on_teacher_screen(data):

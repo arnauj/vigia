@@ -86,7 +86,21 @@
       "Bash(cmd.exe //c \"C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\build_windows.bat\")",
       "Bash(ls \"/c/Program Files \\(x86\\)/Inno Setup 6/ISCC.exe\")",
       "Bash(\"/c/Program Files \\(x86\\)/Inno Setup 6/ISCC.exe\" \"C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\vigia-server.iss\")",
-      "Bash(\"/c/Program Files \\(x86\\)/Inno Setup 6/ISCC.exe\" \"C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\vigia-client.iss\")"
+      "Bash(\"/c/Program Files \\(x86\\)/Inno Setup 6/ISCC.exe\" \"C:\\\\Users\\\\Usuario\\\\Desktop\\\\Vigia\\\\vigia\\\\vigia-client.iss\")",
+      "Bash(find . -type f \\\\\\(-name *.spec -o -name *.bat -o -name *.ps1 \\\\\\))",
+      "Bash(grep -E \"\\\\.\\(vbs|iss|txt|py\\)$\")",
+      "Bash(xargs grep:*)",
+      "Bash(find dist/windows -type f -name *.exe -o -name *.ico)",
+      "Bash(python -m PyInstaller --version)",
+      "Bash(python -m PyInstaller --noconfirm --noconsole --onedir --name vigia-servidor --icon=img/logo2.ico --add-data \"templates;templates\" --add-data \"img;img\" --add-data \"platform_utils.py;.\" --collect-all eventlet --collect-all dns --collect-all engineio --collect-all socketio --collect-all flask_socketio --distpath dist/windows server.py)",
+      "Bash(python -m PyInstaller --noconfirm --noconsole --onedir --name vigia-launcher --icon=img/logo2.ico --add-data \"img;img\" --add-data \"platform_utils.py;.\" --distpath dist/windows vigia-launcher.py)",
+      "Bash(python -m PyInstaller --noconfirm --noconsole --onedir --name vigia-cliente --icon=img/logo2.ico --add-data \"img;img\" --add-data \"platform_utils.py;.\" --collect-all pynput --distpath dist/windows client.py)",
+      "Bash(cp platform_utils.py dist/windows/vigia-launcher/)",
+      "Bash(cp vigia-servidor-silent.vbs dist/windows/vigia-servidor/)",
+      "Bash(cp vigia-cliente-silent.vbs dist/windows/vigia-cliente/)",
+      "Bash(ls \"C:/Program Files \\(x86\\)/Inno Setup 6/ISCC.exe\")",
+      "Bash(\"C:/Program Files \\(x86\\)/Inno Setup 6/ISCC.exe\" vigia-server.iss)",
+      "Bash(\"C:/Program Files \\(x86\\)/Inno Setup 6/ISCC.exe\" vigia-client.iss)"
     ]
   }
 }
