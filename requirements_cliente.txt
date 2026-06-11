@@ -1,5 +1,7 @@
 python-socketio[client]>=5.10
 websocket-client>=1.7
 mss>=9.0
-Pillow>=10.0
-# Nota: tkinter se instala via apt: sudo apt install python3-tk
+# Dependencias con extensiones nativas — instalar vía apt, NO con pip:
+#   sudo apt install python3-tk python3-pil python3-pil.imagetk \
+#                    python3-pynput python3-numpy python3-aiortc
+# Wayland (Kubuntu 25.10+/26.04): sudo apt install kde-spectacle ydotool

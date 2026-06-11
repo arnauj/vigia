@@ -21,9 +21,9 @@
 
 ### Linux (Debian / Ubuntu / Kubuntu)
 
-[![Descargar Servidor Linux](https://img.shields.io/badge/⬇%20Servidor%20Linux-vigia--server__1.1__amd64.deb-E95420?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/arnauj/vigia/raw/master/dist/vigia-server_1.1_amd64.deb)
+[![Descargar Servidor Linux](https://img.shields.io/badge/⬇%20Servidor%20Linux-vigia--server__1.2__amd64.deb-E95420?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/arnauj/vigia/raw/master/dist/vigia-server_1.2_amd64.deb)
 &nbsp;&nbsp;
-[![Descargar Cliente Linux](https://img.shields.io/badge/⬇%20Cliente%20Linux-vigia--client__1.1__all.deb-E95420?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/arnauj/vigia/raw/master/dist/vigia-client_1.1_all.deb)
+[![Descargar Cliente Linux](https://img.shields.io/badge/⬇%20Cliente%20Linux-vigia--client__1.2__all.deb-E95420?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/arnauj/vigia/raw/master/dist/vigia-client_1.2_all.deb)
 
 </div>
 
@@ -32,7 +32,7 @@
 | | Servidor (profesor) | Cliente (alumno) |
 |:---:|:---:|:---:|
 | **Windows** | [vigia-server-setup.exe](https://github.com/arnauj/vigia/raw/master/dist/installers/vigia-server-setup.exe) | [vigia-client-setup.exe](https://github.com/arnauj/vigia/raw/master/dist/installers/vigia-client-setup.exe) |
-| **Linux .deb** | [vigia-server_1.1_amd64.deb](https://github.com/arnauj/vigia/raw/master/dist/vigia-server_1.1_amd64.deb) | [vigia-client_1.1_all.deb](https://github.com/arnauj/vigia/raw/master/dist/vigia-client_1.1_all.deb) |
+| **Linux .deb** | [vigia-server_1.2_amd64.deb](https://github.com/arnauj/vigia/raw/master/dist/vigia-server_1.2_amd64.deb) | [vigia-client_1.2_all.deb](https://github.com/arnauj/vigia/raw/master/dist/vigia-client_1.2_all.deb) |
 
 </div>
 
@@ -113,7 +113,7 @@ Los paquetes `.deb` están en [`dist/`](dist/). Descárgalos desde los botones d
 **En el equipo del profesor (servidor):**
 
 ```bash
-sudo apt install ./vigia-server_1.1_amd64.deb
+sudo apt install ./vigia-server_1.2_amd64.deb
 ```
 
 Aparece **VIGIA Servidor** en el menú de inicio. El servidor arranca automáticamente al iniciar sesión.
@@ -121,10 +121,12 @@ Aparece **VIGIA Servidor** en el menú de inicio. El servidor arranca automátic
 **En los equipos de los alumnos (cliente):**
 
 ```bash
-sudo apt install ./vigia-client_1.1_all.deb
+sudo apt install ./vigia-client_1.2_all.deb
 ```
 
 Durante la instalación se pedirá la IP del servidor (se sugiere automáticamente). El cliente arranca solo al iniciar sesión.
+
+> **Kubuntu 25.10 / 26.04 (Wayland):** estas versiones ya no incluyen sesión X11; VIGIA lo detecta y captura la pantalla con `spectacle`/`grim` (~1-3 fps) y controla el ratón/teclado con `ydotool` (el instalador habilita su servicio). Para rendimiento completo (~30 fps y captura de ventanas individuales) puedes instalar la sesión X11 clásica: `sudo apt install plasma-session-x11` y seleccionarla en la pantalla de login.
 
 ---
 
@@ -307,8 +309,8 @@ vigia/
 │   ├── icon-192.png           — Icono PWA/Chrome app
 │   └── icon-512.png
 └── dist/
-    ├── vigia-server_1.1_amd64.deb
-    ├── vigia-client_1.1_all.deb
+    ├── vigia-server_1.2_amd64.deb
+    ├── vigia-client_1.2_all.deb
     └── installers/
         ├── vigia-server-setup.exe
         └── vigia-client-setup.exe

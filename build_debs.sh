@@ -2,7 +2,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VERSION="1.1"
+VERSION="1.2"
 DIST_DIR="$SCRIPT_DIR/dist"
 mkdir -p "$DIST_DIR"
 
@@ -11,6 +11,18 @@ if ! command -v dpkg-deb >/dev/null 2>&1; then
   echo "[!] dpkg-deb not found."
   exit 1
 fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NOTA DE COMPATIBILIDAD (Kubuntu 26.04 / Wayland / Python moderno):
+#  - Las dependencias Python con extensiones nativas (Pillow, numpy, pynput,
+#    aiortc) se resuelven SIEMPRE vía apt (Depends), nunca via wheels pip:
+#    un wheel binario construido para cp312 no instala en el Python de
+#    Kubuntu 26 y rompía el postinst ("problema con Pillow").
+#  - Los wheels empaquetados son solo paquetes Python PUROS (py3-none-any),
+#    válidos para cualquier versión de Python y utilizables sin red.
+#  - eventlet se eliminó (depende de greenlet, extensión C frágil);
+#    el servidor usa threading + simple-websocket.
+# ─────────────────────────────────────────────────────────────────────────────
 
 # --- BUILD SERVER PACKAGE ---
 echo "Building vigia-server..."
@@ -26,6 +38,7 @@ mkdir -p "$SERVER_BUILD_DIR/usr/bin"
 cp "$SCRIPT_DIR/server.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/vigia-launcher.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/platform_utils.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
+cp "$SCRIPT_DIR/screen_capture.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/templates/"* "$SERVER_BUILD_DIR/opt/vigia-server/templates/"
 cp "$SCRIPT_DIR/img/logo2.png" "$SERVER_BUILD_DIR/opt/vigia-server/img/"
 cp "$SCRIPT_DIR/img/logo2_mini.png" "$SERVER_BUILD_DIR/opt/vigia-server/img/"
@@ -33,12 +46,15 @@ cp "$SCRIPT_DIR/img/logo2_mini.png" "$SERVER_BUILD_DIR/usr/share/pixmaps/vigia-s
 [ -f "$SCRIPT_DIR/img/icon-192.png" ] && cp "$SCRIPT_DIR/img/icon-192.png" "$SERVER_BUILD_DIR/opt/vigia-server/img/"
 [ -f "$SCRIPT_DIR/img/icon-512.png" ] && cp "$SCRIPT_DIR/img/icon-512.png" "$SERVER_BUILD_DIR/opt/vigia-server/img/"
 
-# Pre-build Python wheels for offline installation (works even in apt sandbox)
-echo "Construyendo wheels Python para servidor (instalación offline)..."
+# Wheels Python PUROS para instalación offline (válidos en cualquier Python 3)
+echo "Construyendo wheels Python puros para servidor (instalación offline)..."
 mkdir -p "$SERVER_BUILD_DIR/opt/vigia-server/wheels"
 pip3 wheel --wheel-dir "$SERVER_BUILD_DIR/opt/vigia-server/wheels/" \
-    flask flask-socketio eventlet mss Pillow \
-    2>/dev/null || echo "[!] Aviso: no se pudieron pre-construir wheels; la instalación requerirá red."
+    mss simple-websocket flask-socketio python-socketio python-engineio bidict \
+    2>/dev/null || echo "[!] Aviso: no se pudieron pre-construir wheels; los paquetes apt cubrirán las dependencias."
+# Eliminar cualquier wheel binario (cpXXX) que se haya colado: solo py puros
+find "$SERVER_BUILD_DIR/opt/vigia-server/wheels/" -name '*.whl' \
+    ! -name '*-py2.py3-none-any.whl' ! -name '*-py3-none-any.whl' -delete 2>/dev/null || true
 
 cat > "$SERVER_BUILD_DIR/DEBIAN/control" <<EOF
 Package: $SERVER_PKG_NAME
@@ -47,7 +63,8 @@ Architecture: amd64
 Maintainer: VIGIA
 Section: education
 Priority: optional
-Depends: python3, python3-venv, python3-gi, python3-tk, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, libwebkit2gtk-4.1-0, libgtk-3-0
+Depends: python3, python3-venv, python3-flask, python3-flask-socketio, python3-socketio, python3-engineio, python3-pil
+Recommends: python3-simple-websocket, python3-gi, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, libwebkit2gtk-4.1-0, libgtk-3-0, chromium-browser | chromium | google-chrome-stable, kde-spectacle | grim | gnome-screenshot
 Description: VIGIA Server - Classroom Monitoring System (Teacher)
  VIGIA allows teachers to monitor student screens in real-time.
  This package installs the teacher's dashboard and relay server.
@@ -64,21 +81,34 @@ PYTHON3="/opt/vigia-server/venv/bin/python3"
 
 chmod +x "$VIGIA_DIR"/*.py 2>/dev/null || true
 
-# ── Dependencias Python (Virtual Environment) ────────────────
-echo "Configurando entorno virtual Python del servidor..."
-if [ ! -d "$VIGIA_DIR/venv" ]; then
-    python3 -m venv --system-site-packages "$VIGIA_DIR/venv"
-fi
-echo "Instalando dependencias en venv..."
-if [ -d "$VIGIA_DIR/wheels" ] && [ "$(ls -A "$VIGIA_DIR/wheels" 2>/dev/null)" ]; then
-    "$VIGIA_DIR/venv/bin/pip" install --no-warn-script-location --ignore-installed \
-        --no-index --find-links "$VIGIA_DIR/wheels/" \
-        flask flask-socketio eventlet mss Pillow || \
-    "$VIGIA_DIR/venv/bin/pip" install --no-warn-script-location --ignore-installed \
-        flask flask-socketio eventlet mss Pillow
+# ── Entorno Python ────────────────────────────────────────────
+# Se recrea SIEMPRE el venv: un venv heredado de otra versión de Python
+# (p.ej. tras actualizar a Kubuntu 26) queda roto. --system-site-packages
+# permite usar los paquetes apt (python3-flask, python3-pil, …).
+echo "Configurando entorno Python del servidor..."
+rm -rf "$VIGIA_DIR/venv"
+python3 -m venv --system-site-packages "$VIGIA_DIR/venv"
+VPY="$VIGIA_DIR/venv/bin/python3"
+VPIP="$VIGIA_DIR/venv/bin/pip"
+
+# Instalar SOLO lo que falte; nunca abortar la instalación del paquete.
+_pip_install() {
+    "$VPIP" install -q --no-warn-script-location --no-index \
+        --find-links "$VIGIA_DIR/wheels/" "$1" 2>/dev/null \
+    || "$VPIP" install -q --no-warn-script-location "$1" 2>/dev/null \
+    || echo "[!] Aviso: no se pudo instalar $1 (se usará el paquete del sistema si existe)."
+}
+for spec in "flask:flask" "flask_socketio:flask-socketio" \
+            "socketio:python-socketio" "engineio:python-engineio" \
+            "simple_websocket:simple-websocket" "mss:mss" "PIL:Pillow"; do
+    mod="${spec%%:*}"; pkg="${spec#*:}"
+    "$VPY" -c "import $mod" 2>/dev/null || _pip_install "$pkg"
+done
+if "$VPY" -c "import flask, flask_socketio, PIL" 2>/dev/null; then
+    echo "[OK] Dependencias Python del servidor verificadas."
 else
-    "$VIGIA_DIR/venv/bin/pip" install --no-warn-script-location --ignore-installed \
-        flask flask-socketio eventlet mss Pillow
+    echo "[!] AVISO: faltan dependencias Python del servidor."
+    echo "    Instala manualmente: sudo apt install python3-flask python3-flask-socketio python3-pil"
 fi
 
 # ── Acceso directo en el menú inicio ─────────────────────────
@@ -179,18 +209,21 @@ mkdir -p "$CLIENT_BUILD_DIR/DEBIAN"
 mkdir -p "$CLIENT_BUILD_DIR/opt/vigia-client/img"
 mkdir -p "$CLIENT_BUILD_DIR/usr/share/pixmaps"
 
-cp "$SCRIPT_DIR/client.py"        "$CLIENT_BUILD_DIR/opt/vigia-client/"
-cp "$SCRIPT_DIR/vigia_overlay.py" "$CLIENT_BUILD_DIR/opt/vigia-client/"
-cp "$SCRIPT_DIR/platform_utils.py" "$CLIENT_BUILD_DIR/opt/vigia-client/"
+cp "$SCRIPT_DIR/client.py"          "$CLIENT_BUILD_DIR/opt/vigia-client/"
+cp "$SCRIPT_DIR/vigia_overlay.py"   "$CLIENT_BUILD_DIR/opt/vigia-client/"
+cp "$SCRIPT_DIR/platform_utils.py"  "$CLIENT_BUILD_DIR/opt/vigia-client/"
+cp "$SCRIPT_DIR/screen_capture.py"  "$CLIENT_BUILD_DIR/opt/vigia-client/"
 cp "$SCRIPT_DIR/img/logo2_mini.png" "$CLIENT_BUILD_DIR/opt/vigia-client/img/"
 cp "$SCRIPT_DIR/img/logo2_mini.png" "$CLIENT_BUILD_DIR/usr/share/pixmaps/vigia-client.png"
 
-# Pre-build Python wheels for offline installation (works even in apt sandbox)
-echo "Construyendo wheels Python para cliente (instalación offline)..."
+# Wheels Python PUROS para instalación offline (válidos en cualquier Python 3)
+echo "Construyendo wheels Python puros para cliente (instalación offline)..."
 mkdir -p "$CLIENT_BUILD_DIR/opt/vigia-client/wheels"
 pip3 wheel --wheel-dir "$CLIENT_BUILD_DIR/opt/vigia-client/wheels/" \
-    mss pynput "python-socketio[client]" websocket-client Pillow "websockets>=12.0" \
-    2>/dev/null || echo "[!] Aviso: no se pudieron pre-construir wheels; la instalación requerirá red."
+    mss python-socketio python-engineio websocket-client bidict simple-websocket \
+    2>/dev/null || echo "[!] Aviso: no se pudieron pre-construir wheels; los paquetes apt cubrirán las dependencias."
+find "$CLIENT_BUILD_DIR/opt/vigia-client/wheels/" -name '*.whl' \
+    ! -name '*-py2.py3-none-any.whl' ! -name '*-py3-none-any.whl' -delete 2>/dev/null || true
 
 # Control file
 cat > "$CLIENT_BUILD_DIR/DEBIAN/control" <<EOF
@@ -200,7 +233,8 @@ Architecture: all
 Maintainer: VIGIA
 Section: education
 Priority: optional
-Depends: python3, python3-venv, python3-tk, python3-pil, python3-pil.imagetk, xdotool, python3-numpy, python3-gi, python3-gi-cairo, gir1.2-gtk-3.0, debconf
+Depends: python3, python3-venv, python3-tk, python3-pil, python3-pil.imagetk, python3-socketio, python3-engineio, python3-websocket, python3-requests, python3-pynput, python3-numpy, xdotool, debconf
+Recommends: python3-aiortc, ydotool, kde-spectacle | grim | gnome-screenshot, xclip, python3-gi, python3-gi-cairo, gir1.2-gtk-3.0
 Description: VIGIA Client - Classroom Monitoring System (Student)
  VIGIA allows teachers to monitor student screens in real-time.
  This package installs the student client.
@@ -225,7 +259,7 @@ _IP_LOCAL="$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'src \K\S+' || ip route
 
 if [ -n "$_IP_LOCAL" ]; then
     DEFAULT_IP="$(echo "$_IP_LOCAL" | awk -F. '{print $1"."$2"."$3".2"}')"
-    
+
     # Solo establecemos el valor si no hay uno previo o queremos sugerir el nuevo
     db_get vigia-client/server_ip || true
     if [ -z "$RET" ]; then
@@ -260,21 +294,42 @@ chmod +x "$VIGIA_DIR"/*.py 2>/dev/null || true
 mkdir -p /etc/vigia
 echo "$SERVER_IP" > /etc/vigia/client.conf
 
-# ── Dependencias Python (Virtual Environment) ────────────────
-echo "Configurando entorno virtual Python del cliente..."
-if [ ! -d "$VIGIA_DIR/venv" ]; then
-    python3 -m venv --system-site-packages "$VIGIA_DIR/venv"
-fi
-echo "Instalando dependencias en venv..."
-if [ -d "$VIGIA_DIR/wheels" ] && [ "$(ls -A "$VIGIA_DIR/wheels" 2>/dev/null)" ]; then
-    "$VIGIA_DIR/venv/bin/pip" install --no-warn-script-location --ignore-installed \
-        --no-index --find-links "$VIGIA_DIR/wheels/" \
-        mss pynput "python-socketio[client]" websocket-client Pillow "websockets>=12.0" || \
-    "$VIGIA_DIR/venv/bin/pip" install --no-warn-script-location --ignore-installed \
-        mss pynput "python-socketio[client]" websocket-client Pillow "websockets>=12.0"
+# ── Entorno Python ────────────────────────────────────────────
+# Recrear SIEMPRE el venv (un venv de otra versión de Python queda roto).
+# --system-site-packages reutiliza los paquetes apt (python3-pil, numpy…).
+echo "Configurando entorno Python del cliente..."
+rm -rf "$VIGIA_DIR/venv"
+python3 -m venv --system-site-packages "$VIGIA_DIR/venv"
+VPY="$VIGIA_DIR/venv/bin/python3"
+VPIP="$VIGIA_DIR/venv/bin/pip"
+
+_pip_install() {
+    "$VPIP" install -q --no-warn-script-location --no-index \
+        --find-links "$VIGIA_DIR/wheels/" "$1" 2>/dev/null \
+    || "$VPIP" install -q --no-warn-script-location "$1" 2>/dev/null \
+    || echo "[!] Aviso: no se pudo instalar $1 (se usará el paquete del sistema si existe)."
+}
+for spec in "socketio:python-socketio" "engineio:python-engineio" \
+            "websocket:websocket-client" "requests:requests" \
+            "simple_websocket:simple-websocket" "mss:mss" \
+            "PIL:Pillow" "pynput:pynput"; do
+    mod="${spec%%:*}"; pkg="${spec#*:}"
+    "$VPY" -c "import $mod" 2>/dev/null || _pip_install "$pkg"
+done
+if "$VPY" -c "import socketio, PIL" 2>/dev/null; then
+    echo "[OK] Dependencias Python del cliente verificadas."
 else
-    "$VIGIA_DIR/venv/bin/pip" install --no-warn-script-location --ignore-installed \
-        mss pynput "python-socketio[client]" websocket-client Pillow "websockets>=12.0"
+    echo "[!] AVISO: faltan dependencias Python del cliente."
+    echo "    Instala manualmente: sudo apt install python3-socketio python3-pil python3-pil.imagetk"
+fi
+
+# ── ydotool (control remoto en Wayland — Kubuntu 26 es solo Wayland) ──
+# Habilitar el daemon si el paquete está instalado; el nombre de la unidad
+# varía entre versiones (ydotool.service / ydotoold.service).
+if command -v ydotoold >/dev/null 2>&1 || command -v ydotool >/dev/null 2>&1; then
+  systemctl enable --now ydotool.service 2>/dev/null \
+    || systemctl enable --now ydotoold.service 2>/dev/null \
+    || echo "[!] Aviso: no se pudo habilitar el servicio de ydotool (control remoto Wayland limitado)."
 fi
 
 # ── Script lanzador global ────────────────────────────────────
@@ -323,20 +378,27 @@ if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
   pkill -u "$REAL_USER" -f "python.*client\.py" 2>/dev/null || true
   sleep 0.3
 
-  # Detectar el DISPLAY activo del usuario leyendo el entorno de sus procesos
-  _XDISPLAY=""
-  for _pid in $(pgrep -u "$REAL_USER" 2>/dev/null | head -30); do
-    _XDISPLAY=$(tr '\0' '\n' < "/proc/$_pid/environ" 2>/dev/null \
-                | grep "^DISPLAY=" | cut -d= -f2 | grep -v "^$" | head -1)
-    [ -n "$_XDISPLAY" ] && break
+  # Detectar el entorno gráfico del usuario (X11 o Wayland) leyendo el
+  # entorno de sus procesos. En Kubuntu 26 (Wayland) DISPLAY puede ser el
+  # de XWayland y WAYLAND_DISPLAY/XDG_RUNTIME_DIR son imprescindibles para
+  # que spectacle/ydotool funcionen.
+  _SESS_ENV=""
+  for _pid in $(pgrep -u "$REAL_USER" 2>/dev/null | head -40); do
+    [ -r "/proc/$_pid/environ" ] || continue
+    _CAND="$(tr '\0' '\n' < "/proc/$_pid/environ" 2>/dev/null \
+             | grep -E '^(DISPLAY|WAYLAND_DISPLAY|XDG_SESSION_TYPE|XDG_RUNTIME_DIR|XDG_CURRENT_DESKTOP|DBUS_SESSION_BUS_ADDRESS|XAUTHORITY)=' || true)"
+    if echo "$_CAND" | grep -qE '^(DISPLAY|WAYLAND_DISPLAY)='; then
+      _SESS_ENV="$_CAND"
+      break
+    fi
   done
-  [ -z "$_XDISPLAY" ] && _XDISPLAY=":0"
+  _ENV_PREFIX="$(echo "$_SESS_ENV" | tr '\n' ' ')"
+  [ -z "$_ENV_PREFIX" ] && _ENV_PREFIX="DISPLAY=:0"
 
-  su - "$REAL_USER" -c \
-    "DISPLAY='$_XDISPLAY' XAUTHORITY='$REAL_HOME/.Xauthority' \
-     python3 -c \"import subprocess; subprocess.Popen(['/usr/local/bin/vigia-client'], stdin=open('/dev/null'), stdout=open('/tmp/vigia-cliente.log','w'), stderr=subprocess.STDOUT, close_fds=True, start_new_session=True)\"" \
-    </dev/null 2>/dev/null || true
-  echo "Cliente VIGIA iniciado para $REAL_USER (DISPLAY=$_XDISPLAY)."
+  su "$REAL_USER" -c \
+    "env $_ENV_PREFIX setsid /usr/local/bin/vigia-client >/tmp/vigia-cliente.log 2>&1 </dev/null &" \
+    2>/dev/null || true
+  echo "Cliente VIGIA iniciado para $REAL_USER."
 fi
 
 # ── Sudo sin contraseña (necesario para exec_command remoto y apt) ──

@@ -6,7 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Classroom monitoring software for Linux (Kubuntu/Ubuntu). The teacher runs a server (Flask) that displays a live grid of student screens. The teacher's dashboard appears as a **native desktop window** launched by `vigia-launcher.py` (Chrome/Chromium `--app` mode as primary, GTK+WebKit2GTK as fallback). Each student runs a client that captures and streams their screen.
 
-**Critical constraint:** Only works under X11 sessions. The `mss` screen-capture library does not support Wayland. Always keep this limitation in mind.
+**Critical constraint (sesiones gráficas):** `mss` (captura) y `xdotool`/`pynput` (control remoto) solo funcionan en X11. Kubuntu 25.10+/26.04 usa **Wayland como única sesión por defecto**, así que existe una capa de compatibilidad:
+- **Captura:** `screen_capture.py` abstrae el backend — `mss` en X11/Windows; `spectacle -b -n -f -o` (KDE), `grim` (wlroots) o `gnome-screenshot` (GNOME) en Wayland (~1-3 fps, sin diálogos).
+- **Control remoto:** en Wayland el cliente usa `ydotool` (uinput; requiere el servicio `ydotoold` activo — el postinst del .deb lo habilita best-effort). xdotool/pynput siguen siendo el backend X11.
+- Captura de ventanas individuales, bloqueo global de pantalla y captura a ~30 fps siguen requiriendo X11 (`plasma-session-x11` sigue en el archive de Ubuntu 26.04, sin soporte oficial de Kubuntu).
 
 ## Running the application
 
@@ -27,14 +30,20 @@ python3 client.py [ip_servidor] [puerto]
 bash instalar.sh                               # Instalador gráfico tkinter (servidor o cliente)
 bash instalar_servidor.sh                      # Instala deps Python + desktop + servicio systemd de usuario
 bash instalar_cliente.sh [IP_DEL_SERVIDOR]     # Idem para alumnos; auto-detecta X.X.X.2 si no se pasa IP
-bash build_debs.sh                             # Genera dist/vigia-server_1.1_amd64.deb y vigia-client_1.1_all.deb
+bash build_debs.sh                             # Genera dist/vigia-server_1.2_amd64.deb y vigia-client_1.2_all.deb
 ```
 
 ## Architecture
 
 ```
 server.py ──────────────────────────────────────────────────────────
-  Flask + Flask-SocketIO (threading mode, puerto 5000)
+  Flask + Flask-SocketIO (puerto 5000). async_mode: eventlet si está
+  instalado, si no threading (con simple-websocket para WS). En los .deb
+  ya NO se instala eventlet (greenlet es una extensión C que se rompe
+  con cada versión nueva de Python — p.ej. Kubuntu 26).
+  IMPORTANTE: no pasar broadcast=True a socketio.emit() — provoca
+  TypeError con python-socketio/flask-socketio modernos de apt; emitir
+  sin 'to' ya difunde a todos.
   Estado en memoria:
     students = {sid: {name, ip, screenshot, last_seen, locked, …}}
     viewers  = {student_sid: {prof_sid, mode}}   # sesiones activas view/control
@@ -42,8 +51,18 @@ server.py ───────────────────────�
   y cliente usando viewers para autorización.
   Ruta /manifest.json: Web App Manifest para PWA/Chrome app (icono VIGIA).
   Ruta /img/<filename>: sirve iconos estáticos (icon-192.png, icon-512.png).
-  _teacher_capture_loop: usa socketio.start_background_task + socketio.sleep
-  para integración correcta con eventlet.
+  _teacher_capture_loop: usa socketio.start_background_task + socketio.sleep;
+  captura vía screen_capture (mss en X11, spectacle/grim en Wayland).
+  Captura de ventana individual: solo X11 (mss + xdotool).
+
+screen_capture.py ──────────────────────────────────────────────────
+  Abstracción de captura compartida por server.py y client.py.
+  session_type() → 'x11' | 'wayland' | 'windows' | 'unknown'
+  create_capturer() → MssBackend (X11/Win) o CliBackend (Wayland:
+  spectacle/grim/gnome-screenshot, orden según XDG_CURRENT_DESKTOP).
+  API: .grab() → PIL.Image RGB, .monitor() → {left,top,width,height},
+  .close(). MssBackend además: .set_monitor(i), .monitors().
+  Importa mss/PIL de forma perezosa (los tests los mockean).
 
 vigia-launcher.py ──────────────────────────────────────────────────
   Lanzador principal del panel del profesor. Orden de preferencia:
@@ -76,10 +95,11 @@ templates/dashboard.html ──────────────────�
   que pueda lanzar excepciones (riesgo de TDZ en JS).
 
 client.py ──────────────────────────────────────────────────────────
-  Socket.IO client + captura mss + Tkinter (ventanas flotantes)
+  Socket.IO client + captura screen_capture + Tkinter (ventanas flotantes)
   Hilo daemon unificado `bucle_capturas`: screenshots normales (~1 s);
   frames JPEG HD solo cuando _en_observacion y NOT _webrtc_activo.
-  Control remoto: xdotool (preferido, X11) → pynput (fallback).
+  Control remoto: en Wayland ydotool (_YDO_CMD, mapa _YDO_KEY_MAP con
+  códigos del kernel); en X11 xdotool (preferido) → pynput (fallback).
   Auto-instala sus dependencias pip al arrancar si faltan.
   _VentanaMensaje: muestra texto enriquecido + archivos adjuntos recibidos.
     Los adjuntos (base64) se guardan en ~/Descargas y se abren con xdg-open.
@@ -99,7 +119,9 @@ instalar.py ──────────────────────�
   Logo: logo2.png subsample(5,5) → ~153×153 px sin Pillow.
 
 instalar_servidor.sh ───────────────────────────────────────────────
-  Instala deps Python (flask, flask-socketio, eventlet…) con pip.
+  Instala deps de sistema (python3-flask, python3-flask-socketio,
+  python3-pil, kde-spectacle) con apt y deps Python puras con pip
+  (flask, flask-socketio, simple-websocket, mss). Sin eventlet.
   Crea ~/.local/share/applications/vigia-servidor.desktop con
   Exec apuntando a vigia-launcher.py.
   Crea ~/.config/systemd/user/vigia-servidor.service y lo habilita
@@ -107,28 +129,42 @@ instalar_servidor.sh ───────────────────�
   loginctl enable-linger permite arranque sin sesión gráfica activa.
 
 instalar_cliente.sh ────────────────────────────────────────────────
-  Instala deps Python (python-socketio, mss, Pillow…) y de sistema
-  (python3-tk, xdotool, python3-aiortc, python3-numpy).
+  Instala deps de sistema vía apt (python3-tk, python3-pil[.imagetk],
+  python3-pynput, xdotool, ydotool, kde-spectacle, python3-aiortc,
+  python3-numpy — las nativas SIEMPRE por apt, nunca pip) y deps
+  Python puras con pip (python-socketio[client], websocket-client, mss).
+  En Wayland habilita el servicio ydotoold.
   Crea desktop entry en el menú de inicio.
   Crea ~/.config/autostart/vigia-alumno.desktop (XDG autostart).
   Arranca el cliente inmediatamente sin esperar al siguiente reinicio.
 
 test_remote_control.py ─────────────────────────────────────────────
-  Suite de tests (unittest) para el control remoto. 39 tests. Ejecutar:
+  Suite de tests (unittest) para el control remoto. 55 tests. Ejecutar:
     python3 test_remote_control.py
   Cubre: mapas de teclas xdotool, _procesar_input (ratón + teclado),
+  backend ydotool (Wayland), detección de sesión de screen_capture,
   encolado en _input_q, traducción de coordenadas (letterbox/pillarbox),
   enrutamiento DataChannel (_enviarInput). No requiere servidor ni X11.
 
 build_debs.sh ──────────────────────────────────────────────────────
   Script principal de empaquetado. Genera dos .deb en dist/:
-  - vigia-server_1.1_amd64.deb  → instala en /opt/vigia-server/
-      postinst: instala deps Python, crea desktop en /usr/share/applications/,
-      crea servicio systemd de usuario para el usuario real (SUDO_USER).
-  - vigia-client_1.1_all.deb   → instala en /opt/vigia-client/
+  - vigia-server_1.2_amd64.deb  → instala en /opt/vigia-server/
+      postinst: recrea el venv (--system-site-packages), instala solo lo
+      que falte (wheels puros → red → aviso, nunca aborta), crea desktop
+      en /usr/share/applications/ y servicio systemd del usuario real.
+  - vigia-client_1.2_all.deb   → instala en /opt/vigia-client/
       usa debconf para preguntar la IP del servidor durante la instalación.
-      postinst: instala deps, crea desktop + XDG autostart, arranca cliente.
+      postinst: idem venv + deps, habilita ydotoold (Wayland), crea
+      desktop + XDG autostart, arranca cliente con el entorno de la
+      sesión real (DISPLAY/WAYLAND_DISPLAY detectados de /proc).
       prerm: para el cliente y elimina autostart.
+  REGLAS CLAVE de empaquetado (Kubuntu 26):
+  - Librerías nativas (Pillow, numpy, pynput, aiortc) SIEMPRE por apt
+    (Depends); jamás wheels pip (un wheel cp312 no instala en Python
+    nuevo y rompía el postinst).
+  - Los wheels embebidos son solo py3-none-any (se borran los binarios).
+  - WebKit2GTK/chromium/spectacle/ydotool van en Recommends, no Depends,
+    para que un rename de paquete no haga el .deb «no instalable».
 ```
 
 ## Socket.IO event flow
@@ -173,7 +209,8 @@ Dashboard → Cliente            : eventos teclado (RTCDataChannel 'vigia-input'
 - **`_instalar()` en client.py** detecta si pip falta, lo instala vía `apt-get python3-pip` y hace fallback a `pip3` si `python -m pip` falla. aiortc NO se auto-instala (requiere apt por las libs nativas).
 - **Tkinter en client.py** se usa solo para ventanas flotantes (pantalla del profesor, mensajes, bloqueo). Si no está disponible el cliente sigue funcionando pero sin UI.
 - **Bloqueo de pantalla** usa `grab_set_global()` de Tkinter (XGrabPointer + XGrabKeyboard) para capturar todos los eventos X11.
-- **xdotool vs pynput:** xdotool es el backend principal de control remoto por ser más fiable en X11/Xwayland. pynput es el fallback automático si xdotool no está instalado.
+- **Backends de control remoto:** en Wayland, ydotool (uinput) es el único que inyecta en todo el escritorio; `_procesar_input` lo usa en exclusiva si `_YDO_CMD` está definido. En X11, xdotool es el backend principal y pynput el fallback automático.
+- **Captura en Wayland:** spectacle/grim escriben un PNG por frame (~0,5 s), así que la observación en vivo baja a ~1-3 fps y WebRTC se autorregula a ese ritmo. Las miniaturas de 1 s no se ven afectadas.
 - **Coordenadas en modo control WebRTC:** el `<video>` usa `max-width:100%;max-height:100%` (no `width:100%;height:100%`) para que `getBoundingClientRect()` devuelva el área real del contenido, igual que el `<img>`.
 - **Adjuntos en mensajes:** el dashboard codifica los archivos en base64 (límite 10 MB total) y los envía junto al mensaje. El cliente los decodifica y guarda en `~/Descargas`, con botón para abrir cada uno con `xdg-open`.
 - **IP por defecto del cliente:** `instalar_cliente.sh` auto-detecta la IP local con `ip route get 1.1.1.1` y sustituye el último octeto por `.2` para apuntar al servidor por convención.
@@ -182,21 +219,25 @@ Dashboard → Cliente            : eventos teclado (RTCDataChannel 'vigia-input'
 
 ## Dependencies
 
-| Componente | Python | Sistema (apt) |
+| Componente | Python (pip, solo puros) | Sistema (apt) |
 |---|---|---|
-| Servidor | `flask flask-socketio eventlet` | — |
-| Cliente | `python-socketio[client] websocket-client mss Pillow` | `python3-tk xdotool` |
+| Servidor | `flask flask-socketio simple-websocket mss` | `python3-flask python3-flask-socketio python3-pil` |
+| Cliente | `python-socketio[client] websocket-client mss` | `python3-tk python3-pil python3-pil.imagetk python3-pynput xdotool` |
 | Cliente (WebRTC) | — | `python3-aiortc python3-numpy` |
+| Cliente (Wayland) | — | `ydotool` + `kde-spectacle`/`grim`/`gnome-screenshot` |
 | Ventana nativa fallback (profesor) | — | `python3-gi gir1.2-webkit2-4.1 libwebkit2gtk-4.1-0 libgtk-3-0` |
+
+Regla general: **cualquier librería con extensión nativa va por apt**; pip solo
+para paquetes Python puros (sus wheels `py3-none-any` valen en cualquier Python).
 
 ## Packaging
 
 ```bash
-bash build_debs.sh   # genera dist/vigia-server_1.1_amd64.deb y vigia-client_1.1_all.deb
+bash build_debs.sh   # genera dist/vigia-server_1.2_amd64.deb y vigia-client_1.2_all.deb
 
 # Instalar
-sudo apt install ./dist/vigia-server_1.1_amd64.deb
-sudo apt install ./dist/vigia-client_1.1_all.deb
+sudo apt install ./dist/vigia-server_1.2_amd64.deb
+sudo apt install ./dist/vigia-client_1.2_all.deb
 
 # Desinstalar
 sudo dpkg -r vigia-server
@@ -217,14 +258,14 @@ El servidor se instala en `/opt/vigia-server/`. El cliente en `/opt/vigia-client
 bash build_debs.sh
 ```
 
-Esto garantiza que `dist/vigia-server_1.1_amd64.deb` y `dist/vigia-client_1.1_all.deb` estén siempre sincronizados con el código fuente.
+Esto garantiza que `dist/vigia-server_1.2_amd64.deb` y `dist/vigia-client_1.2_all.deb` estén siempre sincronizados con el código fuente.
 
 ### Qué cambios afectan a qué paquete
 
 | Archivo/componente modificado | Paquete a regenerar |
 |---|---|
-| `server.py`, `vigia-launcher.py`, `templates/`, `instalar_servidor.sh`, `img/` | `vigia-server_1.1_amd64.deb` |
-| `client.py`, `instalar_cliente.sh` | `vigia-client_1.1_all.deb` |
-| Cualquier archivo compartido o cambio global | **Ambos** paquetes |
+| `server.py`, `vigia-launcher.py`, `templates/`, `instalar_servidor.sh`, `img/` | `vigia-server_1.2_amd64.deb` |
+| `client.py`, `vigia_overlay.py`, `instalar_cliente.sh` | `vigia-client_1.2_all.deb` |
+| `platform_utils.py`, `screen_capture.py` o cualquier cambio global | **Ambos** paquetes |
 
 > Nunca entregar ni documentar un cambio sin haber ejecutado `bash build_debs.sh` y verificado que los `.deb` de `dist/` se han actualizado correctamente.

@@ -38,10 +38,29 @@ fi
 echo "[✓] Python: $PYTHON3"
 
 # ── Actualizar e instalar dependencias de sistema ──────────────
-echo "[*] Instalando dependencias del sistema (xdotool, tk, pip)..."
+# Las librerías con extensiones nativas (Pillow, numpy, pynput, aiortc)
+# se instalan vía apt: pip falla al compilarlas en Pythons nuevos
+# (Kubuntu 26) y con PEP 668. Cada paquete se instala por separado para
+# que uno inexistente no aborte el resto.
+echo "[*] Instalando dependencias del sistema (xdotool, tk, Pillow, pip)..."
 sudo apt-get update -qq 2>/dev/null || true
-sudo apt-get install -y python3-pip python3-tk python3-pil.imagetk python3-pynput \
-    xdotool xclip xsel curl wget scrot python3-aiortc python3-numpy -qq 2>/dev/null || true
+sudo apt-get install -y python3-pip python3-tk python3-pil python3-pil.imagetk \
+    xdotool xclip xsel curl wget -qq 2>/dev/null || true
+for p in python3-pynput python3-numpy python3-aiortc \
+         python3-socketio python3-websocket python3-requests \
+         ydotool kde-spectacle; do
+  sudo apt-get install -y "$p" -qq 2>/dev/null || true
+done
+
+# ── Soporte Wayland (Kubuntu 25.10+/26.04 ya no usa X11) ──────
+if [ "${XDG_SESSION_TYPE:-}" = "wayland" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+  echo "[*] Sesión Wayland detectada:"
+  echo "    - Captura de pantalla: spectacle/grim (instalado arriba)."
+  echo "    - Control remoto: ydotool (habilitando su servicio...)"
+  sudo systemctl enable --now ydotool.service 2>/dev/null \
+    || sudo systemctl enable --now ydotoold.service 2>/dev/null \
+    || echo "    [!] No se pudo habilitar ydotoold; el control remoto será limitado."
+fi
 
 # ── Detectar o instalar pip ───────────────────────────────────
 PIP=""
@@ -63,9 +82,11 @@ fi
 
 echo "[✓] pip: $PIP"
 
-# ── Instalar dependencias Python ──────────────────────────────
+# ── Instalar dependencias Python (solo paquetes puros) ────────
+# Pillow y pynput vienen de apt (ver arriba); instalarlos con pip puede
+# requerir compilación y romper en Pythons nuevos.
 echo "[*] Instalando librerías Python..."
-$PIP install --break-system-packages --user -q "python-socketio[client]" websocket-client mss Pillow pynput 2>/dev/null
+$PIP install --break-system-packages --user -q "python-socketio[client]" websocket-client mss 2>/dev/null || true
 
 # ── Acceso directo en el menú inicio ─────────────────────────
 APPS_DIR="$HOME/.local/share/applications"

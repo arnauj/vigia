@@ -468,6 +468,106 @@ class TestDataChannelRouting(unittest.TestCase):
         self.assertEqual(dest, 'dc_mouse')
 
 
+class TestProcesarInputYdotool(unittest.TestCase):
+    """Pruebas de _procesar_input con backend ydotool (sesiones Wayland)."""
+
+    def setUp(self):
+        client._YDO_CMD  = '/usr/bin/ydotool'
+        client._ydo_env  = dict(os.environ)
+        client._XDO_CMD  = '/usr/bin/xdotool'   # presente pero NO debe usarse
+        client._mouse_ctrl = None
+        client._kbd_ctrl   = None
+        client._PBtn       = None
+
+    def tearDown(self):
+        client._YDO_CMD = None
+
+    def _run(self, data):
+        with patch('subprocess.run', return_value=MagicMock(returncode=0)) as mock_run:
+            client._procesar_input(data)
+        return [c.args[0] for c in mock_run.call_args_list]
+
+    def test_mousemove_absoluto(self):
+        calls = self._run({'type': 'mousemove', 'x': 640, 'y': 480})
+        self.assertEqual(calls, [['/usr/bin/ydotool', 'mousemove', '-a', '-x', '640', '-y', '480']])
+
+    def test_ydotool_tiene_prioridad_sobre_xdotool(self):
+        calls = self._run({'type': 'mousemove', 'x': 1, 'y': 2})
+        for c in calls:
+            self.assertEqual(c[0], '/usr/bin/ydotool')
+
+    def test_mousedown_izquierdo(self):
+        calls = self._run({'type': 'mousedown', 'x': 100, 'y': 200, 'button': 'left'})
+        self.assertIn(['/usr/bin/ydotool', 'click', '0x40'], calls)
+
+    def test_mouseup_derecho(self):
+        calls = self._run({'type': 'mouseup', 'x': 0, 'y': 0, 'button': 'right'})
+        self.assertIn(['/usr/bin/ydotool', 'click', '0x81'], calls)
+
+    def test_scroll(self):
+        calls = self._run({'type': 'scroll', 'x': 10, 'y': 20, 'dy': -3})
+        self.assertIn(['/usr/bin/ydotool', 'mousemove', '-w', '-x', '0', '-y', '-3'], calls)
+
+    def test_type_texto(self):
+        calls = self._run({'type': 'type', 'char': 'hola'})
+        self.assertIn(['/usr/bin/ydotool', 'type', '--', 'hola'], calls)
+
+    def test_keypress_enter(self):
+        calls = self._run({'type': 'keypress', 'key': 'enter'})
+        self.assertIn(['/usr/bin/ydotool', 'key', '28:1', '28:0'], calls)
+
+    def test_keycombo_ctrl_c(self):
+        calls = self._run({'type': 'keycombo', 'combo': 'ctrl+c'})
+        self.assertIn(['/usr/bin/ydotool', 'key', '29:1', '46:1', '46:0', '29:0'], calls)
+
+    def test_keydown_keyup_shift(self):
+        calls = self._run({'type': 'keydown', 'key': 'shift'})
+        self.assertIn(['/usr/bin/ydotool', 'key', '42:1'], calls)
+        calls = self._run({'type': 'keyup', 'key': 'shift'})
+        self.assertIn(['/usr/bin/ydotool', 'key', '42:0'], calls)
+
+    def test_tecla_no_mapeada_es_noop(self):
+        calls = self._run({'type': 'keypress', 'key': 'teclainventada'})
+        self.assertEqual(calls, [])
+
+
+class TestScreenCaptureSession(unittest.TestCase):
+    """Detección de tipo de sesión en screen_capture (Wayland vs X11)."""
+
+    def setUp(self):
+        import screen_capture
+        self.sc = screen_capture
+
+    def _with_env(self, env):
+        return patch.dict(os.environ, env, clear=True)
+
+    def test_wayland_por_wayland_display(self):
+        with self._with_env({'WAYLAND_DISPLAY': 'wayland-0'}):
+            self.assertEqual(self.sc.session_type(), 'wayland')
+            self.assertTrue(self.sc.is_wayland())
+
+    def test_wayland_por_xdg_session_type(self):
+        with self._with_env({'XDG_SESSION_TYPE': 'wayland', 'DISPLAY': ':0'}):
+            self.assertEqual(self.sc.session_type(), 'wayland')
+
+    def test_x11(self):
+        with self._with_env({'XDG_SESSION_TYPE': 'x11', 'DISPLAY': ':0'}):
+            self.assertEqual(self.sc.session_type(), 'x11')
+            self.assertFalse(self.sc.is_wayland())
+
+    def test_sin_entorno_grafico(self):
+        with self._with_env({}):
+            self.assertEqual(self.sc.session_type(), 'unknown')
+
+    def test_orden_herramientas_kde(self):
+        with self._with_env({'XDG_CURRENT_DESKTOP': 'KDE'}):
+            self.assertEqual(self.sc._cli_tool_order()[0], 'spectacle')
+
+    def test_orden_herramientas_gnome(self):
+        with self._with_env({'XDG_CURRENT_DESKTOP': 'GNOME'}):
+            self.assertEqual(self.sc._cli_tool_order()[0], 'gnome-screenshot')
+
+
 # ── Punto de entrada ──────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
@@ -477,7 +577,8 @@ if __name__ == '__main__':
     loader = unittest.TestLoader()
     suite  = unittest.TestSuite()
     for cls in (TestKeyMaps, TestProcesarInput, TestInputQueue,
-                TestCoordenadas, TestDataChannelRouting):
+                TestCoordenadas, TestDataChannelRouting,
+                TestProcesarInputYdotool, TestScreenCaptureSession):
         suite.addTests(loader.loadTestsFromTestCase(cls))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)

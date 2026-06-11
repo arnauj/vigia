@@ -91,9 +91,20 @@ fi
 
 echo "[✓] pip: $PIP"
 
-# ── Instalar dependencias Python ──────────────────────────────
+# ── Instalar dependencias de sistema (preferidas sobre pip) ───
+# python3-pil evita compilar Pillow con pip (falla en Pythons nuevos).
+# kde-spectacle/grim permiten capturar la pantalla del profesor en Wayland.
+echo "[*] Instalando dependencias del sistema..."
+sudo apt-get install -y python3-flask python3-flask-socketio python3-pil -qq 2>/dev/null || true
+for p in python3-simple-websocket kde-spectacle; do
+  sudo apt-get install -y "$p" -qq 2>/dev/null || true
+done
+
+# ── Instalar dependencias Python (solo paquetes puros) ────────
+# eventlet se eliminó: depende de greenlet (extensión C) y se rompe con
+# cada nueva versión de Python; el servidor usa threading + simple-websocket.
 echo "[*] Instalando dependencias Python..."
-$PIP install --break-system-packages --user -q flask flask-socketio eventlet gevent-websocket 2>/dev/null || $PIP install --break-system-packages --user -q flask flask-socketio
+$PIP install --break-system-packages --user -q flask flask-socketio simple-websocket mss 2>/dev/null || true
 
 # ── Acceso directo en el menú inicio ─────────────────────────
 APPS_DIR="$HOME/.local/share/applications"

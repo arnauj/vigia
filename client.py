@@ -72,6 +72,7 @@ import subprocess
 import ctypes
 import ctypes.util
 import platform_utils
+import screen_capture
 
 # ── Importaciones ────────────────────────────────────────────────────────────
 
@@ -115,7 +116,14 @@ except ImportError:
 try:
     import mss
 except ImportError:
-    _instalar("mss"); import mss
+    _instalar("mss")
+    try:
+        import mss
+    except ImportError:
+        # En Wayland (Kubuntu 25.10+/26.04) la captura usa spectacle/grim,
+        # así que mss no es imprescindible para arrancar.
+        mss = None
+        print("  [!] mss no disponible — se usará captura Wayland si existe.")
 
 try:
     from PIL import Image
@@ -166,11 +174,13 @@ try:
 except ImportError:
     print("  [!] aiortc no instalado — usando fallback JPEG.")
 
-# ── Control remoto (Pynput + Xdotool) ─────────────────────────────────────────
+# ── Control remoto (Pynput + Xdotool en X11, ydotool en Wayland) ──────────────
 _mouse_ctrl = None
 _kbd_ctrl   = None
 _PBtn       = None
 _XDO_CMD    = shutil.which('xdotool') if platform_utils.IS_LINUX else None
+_YDO_CMD    = None   # ydotool (Wayland) — se detecta en _init_input
+_ydo_env    = None   # entorno con YDOTOOL_SOCKET resuelto
 _xdo_env    = None   # entorno precalculado para xdotool (evita copiar os.environ en cada evento)
 _mon_left   = 0      # offset X del monitor capturado en el espacio virtual X11
 _mon_top    = 0      # offset Y del monitor capturado en el espacio virtual X11
@@ -197,13 +207,9 @@ def _start_overlay_proc() -> bool:
     global _overlay_proc
     if _overlay_proc and _overlay_proc.poll() is None:
         return True
-    try:
-        with mss.mss() as _s:
-            mon = _s.monitors[1]
-            l = mon.get('left', 0); t = mon.get('top', 0)
-            w = mon['width'];       h = mon['height']
-    except Exception:
-        l = t = 0; w = 1920; h = 1080
+    mon = screen_capture.get_monitor_geometry()
+    l = mon.get('left', 0); t = mon.get('top', 0)
+    w = mon['width'];       h = mon['height']
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vigia_overlay.py')
     if not os.path.exists(script):
         print(f"  [!] vigia_overlay.py no encontrado en {script}")
@@ -250,8 +256,32 @@ def _xdo_sync(*args):
     except Exception as e:
         print(f"  [!] xdotool {args}: {e}")
 
+def _ydo_sync(*args):
+    """Ejecuta ydotool de forma síncrona. Usar solo desde el hilo de entrada."""
+    try:
+        subprocess.run([_YDO_CMD] + [str(a) for a in args],
+                       env=_ydo_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=2)
+    except Exception as e:
+        print(f"  [!] ydotool {args}: {e}")
+
+def _ydo_resolver_socket():
+    """Devuelve un entorno con YDOTOOL_SOCKET apuntando al socket de ydotoold."""
+    env = dict(os.environ)
+    if 'YDOTOOL_SOCKET' not in env:
+        candidatos = [
+            f"/run/user/{os.getuid()}/.ydotool_socket",
+            '/run/ydotoold/socket',
+            '/tmp/.ydotool_socket',
+        ]
+        for cand in candidatos:
+            if os.path.exists(cand):
+                env['YDOTOOL_SOCKET'] = cand
+                break
+    return env
+
 def _init_input():
-    global _mouse_ctrl, _kbd_ctrl, _PBtn, _XDO_CMD, _xdo_env
+    global _mouse_ctrl, _kbd_ctrl, _PBtn, _XDO_CMD, _xdo_env, _YDO_CMD, _ydo_env
     # 1. pynput
     try:
         from pynput.mouse import Controller as MouseController, Button
@@ -276,12 +306,24 @@ def _init_input():
     else:
         print("  [!] xdotool no detectado — pynput manejará todo el control remoto.")
 
+    # 3. ydotool (Wayland): xdotool/pynput solo inyectan en XWayland, no en el
+    #    escritorio Wayland real. ydotool usa uinput y funciona en ambos.
+    if platform_utils.IS_LINUX and screen_capture.is_wayland():
+        _YDO_CMD = shutil.which('ydotool')
+        if _YDO_CMD:
+            _ydo_env = _ydo_resolver_socket()
+            print(f"  [✓] Sesión Wayland: control remoto vía ydotool ({_YDO_CMD}).")
+        else:
+            print("  [!] Sesión Wayland sin ydotool: el control remoto solo "
+                  "afectará a apps XWayland. Instala 'ydotool' y habilita su "
+                  "servicio para control completo.")
+
     # Precalcular entorno para xdotool (se reutiliza en cada evento)
     _xdo_env = dict(os.environ)
     if platform_utils.IS_LINUX and 'DISPLAY' not in _xdo_env:
         _xdo_env['DISPLAY'] = ':0'
 
-    return (_mouse_ctrl is not None) or (_XDO_CMD is not None)
+    return (_mouse_ctrl is not None) or (_XDO_CMD is not None) or (_YDO_CMD is not None)
 
 INPUT_OK = _init_input()
 
@@ -293,6 +335,24 @@ _XDO_KEY_MAP = {
     'ctrl': 'Control_L', 'alt': 'Alt_L', 'shift': 'Shift_L', 'win': 'Super_L'
 }
 _BTN_MAP_XDO = {'left': 1, 'middle': 2, 'right': 3}
+
+# ── Mapas ydotool (códigos de tecla del kernel: linux/input-event-codes.h) ────
+_YDO_KEY_MAP = {
+    'esc': 1, '1': 2, '2': 3, '3': 4, '4': 5, '5': 6, '6': 7, '7': 8,
+    '8': 9, '9': 10, '0': 11, 'minus': 12, 'equal': 13, 'backspace': 14,
+    'tab': 15, 'q': 16, 'w': 17, 'e': 18, 'r': 19, 't': 20, 'y': 21,
+    'u': 22, 'i': 23, 'o': 24, 'p': 25, 'enter': 28, 'ctrl': 29,
+    'a': 30, 's': 31, 'd': 32, 'f': 33, 'g': 34, 'h': 35, 'j': 36,
+    'k': 37, 'l': 38, 'shift': 42, 'z': 44, 'x': 45, 'c': 46, 'v': 47,
+    'b': 48, 'n': 49, 'm': 50, 'alt': 56, 'space': 57,
+    'f1': 59, 'f2': 60, 'f3': 61, 'f4': 62, 'f5': 63, 'f6': 64,
+    'f7': 65, 'f8': 66, 'f9': 67, 'f10': 68, 'f11': 87, 'f12': 88,
+    'home': 102, 'up': 103, 'pageup': 104, 'left': 105, 'right': 106,
+    'end': 107, 'down': 108, 'pagedown': 109, 'insert': 110, 'delete': 111,
+    'win': 125,
+}
+# Botones de ratón ydotool: código base | 0x40 (down) / 0x80 (up)
+_BTN_MAP_YDO = {'left': 0x00, 'right': 0x01, 'middle': 0x02}
 
 # ── Cola de entrada dedicada ───────────────────────────────────────────────────
 # Todos los eventos de ratón/teclado pasan por esta cola y son procesados
@@ -378,10 +438,10 @@ if WEBRTC_OK:
 
         def __init__(self):
             super().__init__()
-            self._sct      = None
+            self._cap      = None   # backend de screen_capture
             self._ts       = 0
             self._t0       = None
-            self._last_rgb = None   # último frame válido; se sirve si mss falla
+            self._last_rgb = None   # último frame válido; se sirve si la captura falla
 
         async def recv(self):
             if self._t0 is None:
@@ -401,30 +461,27 @@ if WEBRTC_OK:
 
         def _capturar(self):
             try:
-                if self._sct is None:
-                    self._sct = mss.mss()
-                mon = self._sct.monitors[1]
+                if self._cap is None:
+                    self._cap = screen_capture.create_capturer(verbose=False)
+                mon = self._cap.monitor()
                 # Mantener offset sincronizado para el mapeo de coordenadas
                 global _mon_left, _mon_top
                 _mon_left = mon.get('left', 0)
                 _mon_top  = mon.get('top',  0)
-                cap = self._sct.grab(mon)
-                bgra = np.frombuffer(cap.bgra, np.uint8).reshape(cap.height, cap.width, 4)
-                rgb  = bgra[:, :, [2, 1, 0]]   # BGRA → RGB
-                h, w = rgb.shape[:2]
+                img = self._cap.grab()   # PIL.Image RGB
                 # Cap at 1920px wide for good resolution; VP8 at 4 Mbps handles 1080p well.
-                if w > 1920:
-                    new_w, new_h = 1920, int(h * 1920 / w)
-                    img = Image.fromarray(rgb).resize((new_w, new_h), Image.BILINEAR)
-                    rgb = np.array(img)
+                if img.width > 1920:
+                    img = img.resize((1920, int(img.height * 1920 / img.width)),
+                                     Image.BILINEAR)
+                rgb = np.array(img)
                 self._last_rgb = rgb
                 return rgb
             except Exception as e:
                 print(f"  [WebRTC] Captura: {e}")
-                if self._sct:
-                    try: self._sct.close()
+                if self._cap:
+                    try: self._cap.close()
                     except: pass
-                    self._sct = None
+                    self._cap = None
                 # Devolver el último frame válido (imagen congelada) en lugar de negro
                 if self._last_rgb is not None:
                     return self._last_rgb
@@ -443,35 +500,40 @@ def _wrtc(coro):
 
 def bucle_capturas():
     _ultimo_screenshot = 0.0
-    sct = None
+    _aviso_captura = 0.0
+    cap = None
     while True:
         if not sio.connected:
             time.sleep(0.5); continue
-        if sct is None:
-            try: sct = mss.mss()
-            except: time.sleep(2); continue
-        
+        if cap is None:
+            try:
+                cap = screen_capture.create_capturer()
+            except Exception as e:
+                # Avisar como mucho una vez por minuto para no inundar el log
+                if time.monotonic() - _aviso_captura > 60:
+                    print(f"  [!] Captura de pantalla no disponible: {e}")
+                    _aviso_captura = time.monotonic()
+                time.sleep(5); continue
+
         now = time.monotonic()
         try:
-            monitor = sct.monitors[1]
+            monitor = cap.monitor()
             orig_w, orig_h = monitor['width'], monitor['height']
             # Actualizar offset global del monitor para el mapeo de coordenadas
             global _mon_left, _mon_top
             _mon_left = monitor.get('left', 0)
             _mon_top  = monitor.get('top',  0)
-            
+
             if (now - _ultimo_screenshot) >= INTERVALO_SEG:
-                captura = sct.grab(monitor)
-                img = Image.frombytes('RGB', captura.size, captura.bgra, 'raw', 'BGRX')
+                img = cap.grab()
                 if img.width > ANCHO_IMAGEN:
                     img = img.resize((ANCHO_IMAGEN, int(img.height * ANCHO_IMAGEN / img.width)), Image.LANCZOS)
                 buf = io.BytesIO(); img.save(buf, format='JPEG', quality=CALIDAD_JPEG)
                 sio.emit('screenshot', {'image': _b64(buf.getvalue())})
                 _ultimo_screenshot = now
-            
+
             if _en_observacion and not _webrtc_activo:
-                captura = sct.grab(monitor)
-                img = Image.frombytes('RGB', captura.size, captura.bgra, 'raw', 'BGRX')
+                img = cap.grab()
                 ancho_r = min(orig_w, 1280)
                 if img.width > ancho_r:
                     img = img.resize((ancho_r, int(img.height * ancho_r / img.width)), Image.BILINEAR)
@@ -481,11 +543,53 @@ def bucle_capturas():
             else:
                 time.sleep(0.2)
         except:
-            try: sct.close()
+            try: cap.close()
             except: pass
-            sct = None; time.sleep(1)
+            cap = None; time.sleep(1)
 
 # ── Manejo de entrada ─────────────────────────────────────────────────────────
+
+def _procesar_input_ydo(tipo, data, x, y):
+    """Ejecuta un evento de entrada vía ydotool (sesiones Wayland)."""
+    if tipo == 'mousemove':
+        _ydo_sync('mousemove', '-a', '-x', x, '-y', y)
+        return
+    if tipo == 'scroll':
+        dy = int(data.get('dy', 0))
+        _ydo_sync('mousemove', '-w', '-x', 0, '-y', dy)
+        return
+    btn = _BTN_MAP_YDO.get(data.get('button', 'left'), 0x00)
+    if tipo == 'mousedown':
+        _ydo_sync('mousemove', '-a', '-x', x, '-y', y)
+        _ydo_sync('click', f'{0x40 | btn:#04x}')
+        return
+    if tipo == 'mouseup':
+        _ydo_sync('click', f'{0x80 | btn:#04x}')
+        return
+    if tipo == 'type':
+        char = data.get('char', '')
+        if char:
+            _ydo_sync('type', '--', char)
+        return
+    if tipo in ('keypress', 'keydown', 'keyup'):
+        code = _YDO_KEY_MAP.get(data.get('key', '').lower())
+        if code is None:
+            return
+        if tipo == 'keypress':
+            _ydo_sync('key', f'{code}:1', f'{code}:0')
+        elif tipo == 'keydown':
+            _ydo_sync('key', f'{code}:1')
+        else:
+            _ydo_sync('key', f'{code}:0')
+        return
+    if tipo == 'keycombo':
+        combo = data.get('combo', '')
+        codes = [_YDO_KEY_MAP.get(p.lower()) for p in combo.split('+') if p]
+        if not codes or None in codes:
+            return
+        args = [f'{c}:1' for c in codes] + [f'{c}:0' for c in reversed(codes)]
+        _ydo_sync('key', *args)
+
 
 def _procesar_input(data):
     """Ejecuta un evento de entrada. Llamar SOLO desde el hilo _input_worker."""
@@ -497,6 +601,11 @@ def _procesar_input(data):
         y = int(data.get('y', 0)) + _mon_top
     except:
         x = y = 0
+
+    # En Wayland, ydotool es el único backend que inyecta en todo el escritorio
+    if _YDO_CMD:
+        _procesar_input_ydo(tipo, data, x, y)
+        return
 
     # ── ratón ─────────────────────────────────────────────────────────────────
     if tipo == 'mousemove':
@@ -642,12 +751,11 @@ def on_viewer_start(data):
     print(f"[*] El profesor está observando/controlando.")
     # Enviar resolución real de pantalla para que el profesor mapee coordenadas correctamente
     try:
-        with mss.mss() as _sct:
-            _mon = _sct.monitors[1]
-            global _mon_left, _mon_top
-            _mon_left = _mon.get('left', 0)
-            _mon_top  = _mon.get('top',  0)
-            sio.emit('screen_info', {'w': _mon['width'], 'h': _mon['height']})
+        _mon = screen_capture.get_monitor_geometry()
+        global _mon_left, _mon_top
+        _mon_left = _mon.get('left', 0)
+        _mon_top  = _mon.get('top',  0)
+        sio.emit('screen_info', {'w': _mon['width'], 'h': _mon['height']})
     except Exception:
         pass
 
@@ -979,10 +1087,9 @@ class _VentanaPizarra:
     def mostrar(self):
         # Posicionar la ventana sobre el monitor que se está capturando
         try:
-            with mss.mss() as _s:
-                mon = _s.monitors[1]
-                w = mon['width']; h = mon['height']
-                l = mon.get('left', 0); t = mon.get('top', 0)
+            mon = screen_capture.get_monitor_geometry()
+            w = mon['width']; h = mon['height']
+            l = mon.get('left', 0); t = mon.get('top', 0)
         except Exception:
             l, t = 0, 0
             w = self.top.winfo_screenwidth()
