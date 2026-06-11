@@ -15,6 +15,7 @@ import threading
 import subprocess
 import webbrowser
 import platform_utils
+import screen_capture
 
 # ---------------------------------------------------------------------------
 # Windows: ejecutar SIEMPRE sin ventana de consola visible.
@@ -68,7 +69,15 @@ if sys.platform == 'win32':
     except Exception:
         pass
 
-async_mode = 'eventlet'
+# eventlet depende de greenlet (extensión C) y se rompe con cada salto de
+# versión de Python (p.ej. Kubuntu 26.04 / Python nuevo). Si no está instalado
+# o no importa, usar threading: Flask-SocketIO funciona igual (WebSocket vía
+# simple-websocket si está disponible, long-polling si no).
+try:
+    import eventlet  # noqa: F401
+    async_mode = 'eventlet'
+except Exception:
+    async_mode = 'threading'
 
 import socket
 from datetime import datetime
@@ -192,7 +201,9 @@ def on_register_teacher():
 def on_disconnect():
     if request.sid == _teacher_capture.get('sid'):
         _teacher_capture['running'] = False
-        socketio.emit('teacher_screen', {'activa': False}, broadcast=True)
+        # socketio.emit sin 'to' ya difunde a todos; broadcast=True provoca
+        # TypeError con python-socketio/flask-socketio modernos (apt).
+        socketio.emit('teacher_screen', {'activa': False})
     if request.sid in students:
         name = students[request.sid]['name']
         del students[request.sid]
@@ -301,7 +312,7 @@ def on_update_config(data):
         'webrtc_fps':     int(data.get('webrtc_fps', 30)),
         'live_quality':   int(data.get('live_quality', 70)),
     }
-    socketio.emit('config_update', cfg, broadcast=True, include_self=False)
+    socketio.emit('config_update', cfg, include_self=False)
     print(f"[*] Configuración actualizada: intervalo={cfg['thumb_interval']}s, "
           f"JPEG live={cfg['live_fps']}fps, WebRTC={cfg['webrtc_fps']}fps")
 
@@ -317,28 +328,51 @@ def _get_window_region(wid):
 
 
 def _teacher_capture_loop():
-    """Captura la pantalla del profesor con mss y emite los frames por Socket.IO."""
+    """Captura la pantalla del profesor y emite los frames por Socket.IO.
+    Usa screen_capture (mss en X11, spectacle/grim en Wayland)."""
     try:
-        import mss
         from PIL import Image
     except ImportError:
-        socketio.emit('teacher_screen_preview', {'error': 'Instala mss y Pillow en el servidor: pip install mss Pillow'},
+        socketio.emit('teacher_screen_preview',
+                      {'error': 'Instala Pillow en el servidor: sudo apt install python3-pil'},
                       to=_teacher_capture['sid'])
         return
 
-    with mss.mss() as sct:
+    capturer = None
+    sct = None
+    if _teacher_capture.get('type') == 'window':
+        # Captura de ventana: solo X11 (mss + xdotool)
+        try:
+            import mss
+            sct = mss.mss()
+        except Exception as e:
+            socketio.emit('teacher_screen_preview',
+                          {'error': f'Captura de ventana no disponible (requiere X11): {e}'},
+                          to=_teacher_capture['sid'])
+            return
+    else:
+        try:
+            capturer = screen_capture.create_capturer()
+            if hasattr(capturer, 'set_monitor'):
+                capturer.set_monitor(_teacher_capture.get('monitor', 1))
+        except Exception as e:
+            socketio.emit('teacher_screen_preview',
+                          {'error': f'Captura de pantalla no disponible: {e}'},
+                          to=_teacher_capture['sid'])
+            return
+
+    try:
         while _teacher_capture['running']:
             try:
-                if _teacher_capture.get('type') == 'window':
+                if sct is not None:
                     region = _get_window_region(_teacher_capture['wid'])
                     if region is None:
                         socketio.sleep(0.5)
                         continue
                     cap = sct.grab(region)
+                    img = Image.frombytes('RGB', (cap.width, cap.height), cap.rgb)
                 else:
-                    mon = sct.monitors[_teacher_capture.get('monitor', 1)]
-                    cap = sct.grab(mon)
-                img = Image.frombytes('RGB', (cap.width, cap.height), cap.rgb)
+                    img = capturer.grab()
                 max_w = 1920
                 if img.width > max_w:
                     ratio = max_w / img.width
@@ -351,11 +385,18 @@ def _teacher_capture_loop():
                     for _sid in _sids:
                         socketio.emit('teacher_screen', {'activa': True, 'image': data_uri}, to=_sid)
                 else:
-                    socketio.emit('teacher_screen', {'activa': True, 'image': data_uri}, broadcast=True)
+                    socketio.emit('teacher_screen', {'activa': True, 'image': data_uri})
                 socketio.emit('teacher_screen_preview', {'image': data_uri}, to=_teacher_capture['sid'])
             except Exception as e:
                 print(f'[!] Error capturando pantalla del profesor: {e}')
-            socketio.sleep(0.1)  # 10 FPS — cede el event loop de eventlet
+            socketio.sleep(0.1)  # 10 FPS — cede el event loop (eventlet/threading)
+    finally:
+        for c in (capturer, sct):
+            try:
+                if c is not None:
+                    c.close()
+            except Exception:
+                pass
 
 
 def _capture_thumb(sct, region, max_w=192):
@@ -514,35 +555,62 @@ def _get_window_app_icon(wid):
         return None
 
 
+def _thumb_from_image(img, max_w=192):
+    """Genera un thumbnail JPEG base64 a partir de una PIL.Image."""
+    try:
+        th = max(1, round(max_w * img.height / img.width))
+        img = img.resize((max_w, th))
+        buf = io.BytesIO()
+        img.save(buf, 'JPEG', quality=60)
+        return 'data:image/jpeg;base64,' + base64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return None
+
+
 @socketio.on('get_screens')
 def on_get_screens():
     try:
-        import mss
         screens = []
-        with mss.mss() as sct:
-            for i, mon in enumerate(sct.monitors):
-                label = f'Pantalla completa ({mon["width"]}×{mon["height"]})' if i == 0 \
-                        else f'Monitor {i} ({mon["width"]}×{mon["height"]})'
+        capturer = screen_capture.create_capturer(verbose=False)
+        try:
+            if capturer.name == 'mss':
+                sct = capturer._sct
+                for i, mon in enumerate(sct.monitors):
+                    label = f'Pantalla completa ({mon["width"]}×{mon["height"]})' if i == 0 \
+                            else f'Monitor {i} ({mon["width"]}×{mon["height"]})'
+                    screens.append({
+                        'type': 'monitor', 'index': i, 'label': label,
+                        'thumb': _capture_thumb(sct, mon),
+                    })
+                for win in _get_window_list():
+                    # Capturar via Xlib (contenido real de la ventana, sin solapamiento)
+                    # Si falla, usar mss como fallback (región de pantalla)
+                    thumb = _capture_window_thumb(win['wid'])
+                    if thumb is None:
+                        region = {'left': win['x'], 'top': win['y'],
+                                  'width': win['w'], 'height': win['h']}
+                        thumb = _capture_thumb(sct, region)
+                    screens.append({
+                        'type': 'window', 'wid': win['wid'], 'label': win['title'],
+                        'thumb': thumb,
+                        'icon': _get_window_app_icon(win['wid']),
+                    })
+            else:
+                # Wayland (spectacle/grim/gnome-screenshot): solo pantalla completa.
+                # La lista de ventanas/monitores individuales requiere X11.
+                img = capturer.grab()
                 screens.append({
-                    'type': 'monitor', 'index': i, 'label': label,
-                    'thumb': _capture_thumb(sct, mon),
+                    'type': 'monitor', 'index': 1,
+                    'label': f'Pantalla completa ({img.width}×{img.height})',
+                    'thumb': _thumb_from_image(img),
                 })
-            for win in _get_window_list():
-                # Capturar via Xlib (contenido real de la ventana, sin solapamiento)
-                # Si falla, usar mss como fallback (región de pantalla)
-                thumb = _capture_window_thumb(win['wid'])
-                if thumb is None:
-                    region = {'left': win['x'], 'top': win['y'],
-                              'width': win['w'], 'height': win['h']}
-                    thumb = _capture_thumb(sct, region)
-                screens.append({
-                    'type': 'window', 'wid': win['wid'], 'label': win['title'],
-                    'thumb': thumb,
-                    'icon': _get_window_app_icon(win['wid']),
-                })
+        finally:
+            capturer.close()
         emit('screens_list', {'screens': screens})
     except Exception as e:
-        emit('screens_list', {'error': f'Error al obtener pantallas: {e}\nAsegúrate de tener mss instalado: pip install mss Pillow'})
+        emit('screens_list', {'error': f'Error al obtener pantallas: {e}\n'
+                              'En X11 instala mss (pip install mss); en Wayland '
+                              'instala spectacle (KDE), grim o gnome-screenshot.'})
 
 
 @socketio.on('start_teacher_capture')
@@ -565,7 +633,7 @@ def on_start_teacher_capture(data=None):
 @socketio.on('stop_teacher_capture')
 def on_stop_teacher_capture():
     _teacher_capture['running'] = False
-    socketio.emit('teacher_screen', {'activa': False}, broadcast=True)
+    socketio.emit('teacher_screen', {'activa': False})
     print('[📺] Compartir pantalla del profesor: detenido')
 
 

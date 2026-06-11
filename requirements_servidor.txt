@@ -1,3 +1,7 @@
 flask>=3.0
 flask-socketio>=5.3
-eventlet>=0.35
+simple-websocket>=1.0
+mss>=9.0
+# Pillow se instala vía apt (python3-pil): pip puede requerir compilación
+# en versiones nuevas de Python. eventlet eliminado (greenlet/extensión C
+# frágil); el servidor usa threading + simple-websocket.
