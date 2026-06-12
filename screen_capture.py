@@ -211,6 +211,72 @@ class CliBackend:
             pass
 
 
+# ── Backend PipeWire (Wayland fluido, vía portal ScreenCast) ──────────────────
+# Un único stream del portal compartido por todos los consumidores (miniaturas y
+# WebRTC): así solo hay UNA sesión de screencast y UN diálogo de permiso (la 1ª
+# vez; luego silencioso por restore_token). Refcount para no cerrarlo hasta que
+# el último consumidor llame a close().
+
+_pw_backend = None
+_pw_refcount = 0
+_pw_ref_lock = threading.Lock()
+_pw_grab_lock = threading.Lock()
+_pw_disabled = False   # True si el portal falló/denegó: no reintentar este proceso
+
+
+class _SharedPipeWire:
+    """Vista con refcount sobre el PipeWireBackend único del proceso."""
+    name = 'pipewire'
+
+    def __init__(self, backend):
+        self._b = backend
+        self._closed = False
+
+    def monitor(self):
+        with _pw_grab_lock:
+            return self._b.monitor()
+
+    def grab(self):
+        with _pw_grab_lock:
+            return self._b.grab()
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        _release_pipewire()
+
+
+def _acquire_pipewire():
+    """Devuelve un _SharedPipeWire o lanza si el portal no está disponible."""
+    global _pw_backend, _pw_refcount, _pw_disabled
+    with _pw_ref_lock:
+        if _pw_disabled:
+            raise CaptureError('pipewire deshabilitado tras fallo previo')
+        if _pw_backend is None:
+            try:
+                import pipewire_capture
+                _pw_backend = pipewire_capture.create_backend(timeout=30)
+            except Exception as e:
+                _pw_disabled = True
+                raise CaptureError(f'pipewire no disponible: {e}')
+        _pw_refcount += 1
+        return _SharedPipeWire(_pw_backend)
+
+
+def _release_pipewire():
+    global _pw_backend, _pw_refcount
+    with _pw_ref_lock:
+        _pw_refcount -= 1
+        if _pw_refcount <= 0 and _pw_backend is not None:
+            try:
+                _pw_backend.close()
+            except Exception:
+                pass
+            _pw_backend = None
+            _pw_refcount = 0
+
+
 # ── Fábrica ──────────────────────────────────────────────────────────────────
 
 def _cli_tool_order():
@@ -230,6 +296,18 @@ def create_capturer(verbose=True):
     """
     sess = session_type()
     errors = []
+
+    # En Wayland, intentar PRIMERO PipeWire (portal ScreenCast): captura fluida
+    # a 30-60 fps. Si el portal no está, falla o se deniega, se cae a spectacle.
+    if sess == 'wayland':
+        try:
+            backend = _acquire_pipewire()
+            if verbose:
+                print("  [✓] Captura de pantalla: backend 'pipewire' "
+                      "(Wayland, portal ScreenCast)")
+            return backend
+        except Exception as e:
+            errors.append(f'pipewire: {e}')
 
     if sess in ('x11', 'windows', 'unknown'):
         order = ['mss'] + _cli_tool_order()

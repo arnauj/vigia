@@ -39,6 +39,7 @@ cp "$SCRIPT_DIR/server.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/vigia-launcher.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/platform_utils.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/screen_capture.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
+cp "$SCRIPT_DIR/pipewire_capture.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/templates/"* "$SERVER_BUILD_DIR/opt/vigia-server/templates/"
 cp "$SCRIPT_DIR/img/logo2.png" "$SERVER_BUILD_DIR/opt/vigia-server/img/"
 cp "$SCRIPT_DIR/img/logo2_mini.png" "$SERVER_BUILD_DIR/opt/vigia-server/img/"
@@ -64,7 +65,7 @@ Maintainer: VIGIA
 Section: education
 Priority: optional
 Depends: python3, python3-venv, python3-flask, python3-flask-socketio, python3-socketio, python3-engineio, python3-pil
-Recommends: python3-simple-websocket, python3-gi, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, libwebkit2gtk-4.1-0, libgtk-3-0, chromium-browser | chromium | google-chrome-stable, kde-spectacle | grim | gnome-screenshot
+Recommends: python3-simple-websocket, python3-gi, python3-dbus, python3-gst-1.0, gstreamer1.0-pipewire, gstreamer1.0-plugins-base, gir1.2-gstreamer-1.0, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, libwebkit2gtk-4.1-0, libgtk-3-0, chromium-browser | chromium | google-chrome-stable, kde-spectacle | grim | gnome-screenshot
 Description: VIGIA Server - Classroom Monitoring System (Teacher)
  VIGIA allows teachers to monitor student screens in real-time.
  This package installs the teacher's dashboard and relay server.
@@ -218,6 +219,7 @@ cp "$SCRIPT_DIR/client.py"          "$CLIENT_BUILD_DIR/opt/vigia-client/"
 cp "$SCRIPT_DIR/vigia_overlay.py"   "$CLIENT_BUILD_DIR/opt/vigia-client/"
 cp "$SCRIPT_DIR/platform_utils.py"  "$CLIENT_BUILD_DIR/opt/vigia-client/"
 cp "$SCRIPT_DIR/screen_capture.py"  "$CLIENT_BUILD_DIR/opt/vigia-client/"
+cp "$SCRIPT_DIR/pipewire_capture.py" "$CLIENT_BUILD_DIR/opt/vigia-client/"
 cp "$SCRIPT_DIR/img/logo2_mini.png" "$CLIENT_BUILD_DIR/opt/vigia-client/img/"
 cp "$SCRIPT_DIR/img/logo2_mini.png" "$CLIENT_BUILD_DIR/usr/share/pixmaps/vigia-client.png"
 
@@ -238,8 +240,8 @@ Architecture: all
 Maintainer: VIGIA
 Section: education
 Priority: optional
-Depends: python3, python3-venv, python3-tk, python3-pil, python3-pil.imagetk, python3-socketio, python3-engineio, python3-websocket, python3-requests, python3-pynput, python3-numpy, xdotool, ydotool, kde-spectacle | grim | gnome-screenshot, debconf
-Recommends: python3-aiortc, xclip, python3-gi, python3-gi-cairo, gir1.2-gtk-3.0
+Depends: python3, python3-venv, python3-tk, python3-pil, python3-pil.imagetk, python3-socketio, python3-engineio, python3-websocket, python3-requests, python3-pynput, python3-numpy, xdotool, ydotool, kde-spectacle | grim | gnome-screenshot, python3-gi, python3-dbus, python3-gst-1.0, gstreamer1.0-pipewire, gstreamer1.0-plugins-base, gir1.2-gstreamer-1.0, debconf
+Recommends: python3-aiortc, xdg-desktop-portal, xdg-desktop-portal-kde, xclip, python3-gi-cairo, gir1.2-gtk-3.0
 Description: VIGIA Client - Classroom Monitoring System (Student)
  VIGIA allows teachers to monitor student screens in real-time.
  This package installs the student client.

@@ -48,7 +48,10 @@ sudo apt-get install -y python3-pip python3-tk python3-pil python3-pil.imagetk \
     xdotool xclip xsel curl wget -qq 2>/dev/null || true
 for p in python3-pynput python3-numpy python3-aiortc \
          python3-socketio python3-websocket python3-requests \
-         ydotool kde-spectacle; do
+         ydotool kde-spectacle \
+         python3-gi python3-dbus python3-gst-1.0 gstreamer1.0-pipewire \
+         gstreamer1.0-plugins-base gir1.2-gstreamer-1.0 \
+         xdg-desktop-portal xdg-desktop-portal-kde; do
   sudo apt-get install -y "$p" -qq 2>/dev/null || true
 done
 
