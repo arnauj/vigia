@@ -335,8 +335,10 @@ fi
 # Habilitar el daemon si el paquete está instalado; el nombre de la unidad
 # varía entre versiones (ydotool.service / ydotoold.service).
 if command -v ydotoold >/dev/null 2>&1 || command -v ydotool >/dev/null 2>&1; then
+  _YDO_UID="$(id -u "$REAL_USER" 2>/dev/null || echo 0)"
   systemctl enable --now ydotool.service 2>/dev/null \
     || systemctl enable --now ydotoold.service 2>/dev/null \
+    || su "$REAL_USER" -c "XDG_RUNTIME_DIR=/run/user/$_YDO_UID DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$_YDO_UID/bus systemctl --user enable --now ydotool.service" 2>/dev/null \
     || echo "[!] Aviso: no se pudo habilitar el servicio de ydotool (control remoto Wayland limitado)."
 fi
 
@@ -403,9 +405,19 @@ if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
   _ENV_PREFIX="$(echo "$_SESS_ENV" | tr '\n' ' ')"
   [ -z "$_ENV_PREFIX" ] && _ENV_PREFIX="DISPLAY=:0"
 
-  su "$REAL_USER" -c \
-    "env $_ENV_PREFIX setsid /usr/local/bin/vigia-client >/tmp/vigia-cliente.log 2>&1 </dev/null &" \
-    2>/dev/null || true
+  # IMPORTANTE: cerrar los descriptores heredados de apt/dpkg/debconf antes
+  # de lanzar el cliente en segundo plano. Si el cliente mantiene abiertos
+  # esos pipes, apt se queda esperando su EOF y la barra de progreso se
+  # congela (~96%) aunque el postinst ya haya terminado.
+  db_stop 2>/dev/null || true
+  su "$REAL_USER" -c "
+    for _fd in /proc/self/fd/*; do
+      _n=\"\${_fd##*/}\"
+      [ \"\$_n\" -gt 2 ] 2>/dev/null && eval \"exec \$_n>&-\" || true
+    done
+    env $_ENV_PREFIX setsid /usr/local/bin/vigia-client \
+        >/tmp/vigia-cliente.log 2>&1 </dev/null &
+  " 2>/dev/null || true
   echo "Cliente VIGIA iniciado para $REAL_USER."
 fi
 
