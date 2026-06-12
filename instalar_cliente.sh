@@ -56,10 +56,38 @@ done
 if [ "${XDG_SESSION_TYPE:-}" = "wayland" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
   echo "[*] Sesión Wayland detectada:"
   echo "    - Captura de pantalla: spectacle/grim (instalado arriba)."
-  echo "    - Control remoto: ydotool (habilitando su servicio...)"
-  sudo systemctl enable --now ydotool.service 2>/dev/null \
-    || sudo systemctl enable --now ydotoold.service 2>/dev/null \
-    || echo "    [!] No se pudo habilitar ydotoold; el control remoto será limitado."
+  echo "    - Control remoto: ydotool vía servicio de sistema (uinput como root)."
+  # La unidad de USUARIO de ydotool (ydotool.service) falla: /dev/uinput es
+  # root:input 0660 y el alumno no está en 'input'. Creamos una unidad de
+  # SISTEMA propia con ydotoold como root y socket accesible (igual que el .deb).
+  sudo modprobe uinput 2>/dev/null || true
+  echo uinput | sudo tee /etc/modules-load.d/vigia-uinput.conf >/dev/null 2>&1 || true
+  sudo usermod -aG input "$USER" 2>/dev/null || true
+  _YDOTOOLD="$(command -v ydotoold)"
+  if [ -n "$_YDOTOOLD" ]; then
+    sudo tee /etc/systemd/system/vigia-ydotoold.service >/dev/null <<UNIT
+[Unit]
+Description=Demonio ydotoold para control remoto VIGIA (Wayland)
+Documentation=man:ydotoold(8)
+
+[Service]
+Type=simple
+RuntimeDirectory=ydotoold
+ExecStartPre=-/sbin/modprobe uinput
+ExecStart=$_YDOTOOLD --socket-path=/run/ydotoold/socket --socket-perm=0666
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+    sudo systemctl daemon-reload 2>/dev/null || true
+    sudo systemctl enable --now vigia-ydotoold.service 2>/dev/null \
+      && echo "    [OK] Servicio vigia-ydotoold habilitado." \
+      || echo "    [!] No se pudo habilitar vigia-ydotoold; el control remoto será limitado."
+  else
+    echo "    [!] ydotoold no encontrado; instala el paquete 'ydotool'."
+  fi
 fi
 
 # ── Detectar o instalar pip ───────────────────────────────────

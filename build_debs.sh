@@ -238,8 +238,8 @@ Architecture: all
 Maintainer: VIGIA
 Section: education
 Priority: optional
-Depends: python3, python3-venv, python3-tk, python3-pil, python3-pil.imagetk, python3-socketio, python3-engineio, python3-websocket, python3-requests, python3-pynput, python3-numpy, xdotool, debconf
-Recommends: python3-aiortc, ydotool, kde-spectacle | grim | gnome-screenshot, xclip, python3-gi, python3-gi-cairo, gir1.2-gtk-3.0
+Depends: python3, python3-venv, python3-tk, python3-pil, python3-pil.imagetk, python3-socketio, python3-engineio, python3-websocket, python3-requests, python3-pynput, python3-numpy, xdotool, ydotool, kde-spectacle | grim | gnome-screenshot, debconf
+Recommends: python3-aiortc, xclip, python3-gi, python3-gi-cairo, gir1.2-gtk-3.0
 Description: VIGIA Client - Classroom Monitoring System (Student)
  VIGIA allows teachers to monitor student screens in real-time.
  This package installs the student client.
@@ -337,6 +337,15 @@ fi
 # /dev/uinput es root:input 0660 y el alumno no está en el grupo 'input'
 # (y meterle requeriría re-login). Solución: unidad de SISTEMA propia con
 # ydotoold como root y socket accesible para la sesión del alumno.
+# Asegurar que el módulo uinput está cargado AHORA y en cada arranque: ydotoold
+# necesita /dev/uinput para crear el dispositivo virtual que inyecta los eventos.
+modprobe uinput 2>/dev/null || true
+echo uinput > /etc/modules-load.d/vigia-uinput.conf 2>/dev/null || true
+# El alumno en el grupo 'input' permite también el fallback de unidad de usuario
+# de ydotool si la unidad de sistema no estuviera disponible.
+if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+  usermod -aG input "$REAL_USER" 2>/dev/null || true
+fi
 if command -v ydotoold >/dev/null 2>&1; then
   _YDOTOOLD="$(command -v ydotoold)"
   cat > /etc/systemd/system/vigia-ydotoold.service <<UNIT
@@ -347,8 +356,9 @@ Documentation=man:ydotoold(8)
 [Service]
 Type=simple
 RuntimeDirectory=ydotoold
+ExecStartPre=-/sbin/modprobe uinput
 ExecStart=$_YDOTOOLD --socket-path=/run/ydotoold/socket --socket-perm=0666
-Restart=on-failure
+Restart=always
 RestartSec=2
 
 [Install]

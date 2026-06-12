@@ -27,10 +27,58 @@ class CaptureError(Exception):
     """No hay ningún backend de captura funcional."""
 
 
+def _find_wayland_socket():
+    """Nombre del socket wayland (p.ej. 'wayland-0') si existe en
+    XDG_RUNTIME_DIR, o None.
+
+    Permite detectar una sesión Wayland aunque el proceso se haya lanzado SIN
+    `WAYLAND_DISPLAY` en el entorno (caso típico de XDG autostart / systemd en
+    Kubuntu 26). Sin esta detección, `session_type()` veía solo `DISPLAY=:0`
+    (XWayland) y devolvía 'x11', con lo que se usaba `mss` — que en Wayland
+    captura el root VACÍO de XWayland: pantalla NEGRA.
+    """
+    rt = os.environ.get('XDG_RUNTIME_DIR')
+    if not rt and hasattr(os, 'getuid'):
+        rt = '/run/user/%d' % os.getuid()
+    if not rt or not os.path.isdir(rt):
+        return None
+    try:
+        socks = sorted(f for f in os.listdir(rt)
+                       if f.startswith('wayland-') and not f.endswith('.lock'))
+    except OSError:
+        return None
+    return socks[0] if socks else None
+
+
+def ensure_session_env():
+    """Garantiza WAYLAND_DISPLAY y XDG_RUNTIME_DIR en os.environ si la sesión es
+    Wayland.
+
+    Es imprescindible: las herramientas hijas (spectacle para captura, ydotool
+    para control remoto) heredan este entorno. Sin WAYLAND_DISPLAY, spectacle no
+    conecta con el compositor y ydotool/ydotoold no localizan la sesión. Llamar
+    pronto (al importar el módulo) propaga el arreglo a todo el proceso.
+    """
+    if sys.platform == 'win32':
+        return
+    if 'XDG_RUNTIME_DIR' not in os.environ and hasattr(os, 'getuid'):
+        rt = '/run/user/%d' % os.getuid()
+        if os.path.isdir(rt):
+            os.environ['XDG_RUNTIME_DIR'] = rt
+    # No suplantar una sesión X11 declarada explícitamente.
+    if os.environ.get('XDG_SESSION_TYPE', '').lower() == 'x11':
+        return
+    if 'WAYLAND_DISPLAY' not in os.environ:
+        sock = _find_wayland_socket()
+        if sock:
+            os.environ['WAYLAND_DISPLAY'] = sock
+
+
 def session_type():
     """Devuelve 'windows', 'wayland', 'x11' o 'unknown'."""
     if sys.platform == 'win32':
         return 'windows'
+    ensure_session_env()
     if os.environ.get('WAYLAND_DISPLAY') or \
        os.environ.get('XDG_SESSION_TYPE', '').lower() == 'wayland':
         return 'wayland'
@@ -43,6 +91,11 @@ def is_wayland():
     return session_type() == 'wayland'
 
 
+# Fijar WAYLAND_DISPLAY/XDG_RUNTIME_DIR al importar, para que cualquier
+# subprocess lanzado luego (spectacle, ydotool) herede el entorno correcto.
+ensure_session_env()
+
+
 # ── Backend mss (X11 / Windows) ──────────────────────────────────────────────
 
 class MssBackend:
@@ -53,7 +106,18 @@ class MssBackend:
         self._sct = mss.mss()
         self.index = 1   # 0 = espacio virtual completo, 1..n = monitores
         # Validar que realmente puede capturar (lanza si no hay DISPLAY)
-        self._sct.grab(self._sct.monitors[1])
+        cap = self._sct.grab(self._sct.monitors[1])
+        # Guarda anti-pantalla-negra: en Wayland, mss lee el root VACÍO de
+        # XWayland y devuelve un frame TODO negro sin lanzar excepción. Si el
+        # frame de prueba es íntegramente negro en Linux, rechazamos este
+        # backend para que create_capturer caiga a spectacle/grim (que sí ven
+        # el escritorio Wayland real).
+        if sys.platform.startswith('linux'):
+            raw = bytes(cap.rgb)
+            if raw and raw.count(0) == len(raw):
+                raise CaptureError(
+                    'mss devolvió un frame completamente negro '
+                    '(probable XWayland en sesión Wayland)')
 
     def set_monitor(self, index):
         if 0 <= int(index) < len(self._sct.monitors):

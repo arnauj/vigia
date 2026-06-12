@@ -556,8 +556,21 @@ class TestScreenCaptureSession(unittest.TestCase):
             self.assertFalse(self.sc.is_wayland())
 
     def test_sin_entorno_grafico(self):
-        with self._with_env({}):
+        # Sin variables y sin socket wayland en el runtime dir → 'unknown'.
+        # (En esta caja de desarrollo SÍ hay socket, así que lo mockeamos para
+        #  comprobar la rama 'unknown' de forma determinista.)
+        with self._with_env({}), \
+             patch.object(self.sc, '_find_wayland_socket', return_value=None):
             self.assertEqual(self.sc.session_type(), 'unknown')
+
+    def test_wayland_por_socket_sin_wayland_display(self):
+        # Caso real que rompía a los alumnos: lanzado SIN WAYLAND_DISPLAY pero
+        # con DISPLAY=:0 (XWayland). El sondeo del socket debe detectar Wayland
+        # y fijar WAYLAND_DISPLAY para los procesos hijos (spectacle/ydotool).
+        with self._with_env({'DISPLAY': ':0'}), \
+             patch.object(self.sc, '_find_wayland_socket', return_value='wayland-0'):
+            self.assertEqual(self.sc.session_type(), 'wayland')
+            self.assertEqual(os.environ.get('WAYLAND_DISPLAY'), 'wayland-0')
 
     def test_orden_herramientas_kde(self):
         with self._with_env({'XDG_CURRENT_DESKTOP': 'KDE'}):
