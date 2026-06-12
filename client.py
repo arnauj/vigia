@@ -195,6 +195,13 @@ _ydo_env    = None   # entorno con YDOTOOL_SOCKET resuelto
 _xdo_env    = None   # entorno precalculado para xdotool (evita copiar os.environ en cada evento)
 _mon_left   = 0      # offset X del monitor capturado en el espacio virtual X11
 _mon_top    = 0      # offset Y del monitor capturado en el espacio virtual X11
+_mon_width  = 1920   # ancho del monitor capturado (para normalizar coords abs)
+_mon_height = 1080   # alto  del monitor capturado (para normalizar coords abs)
+
+# Inyección de input absoluto en Wayland vía demonio uinput root (vigia_input).
+# Resuelve el bug del ratón pegado en la esquina (ydotool no tiene eje absoluto).
+_VIGIA_INPUT = None
+_VI_ABS_MAX  = 32767
 
 # ── Terminal remoto: directorio de trabajo persistente ────────────────────────
 _term_cwd = os.path.expanduser('~')   # cwd actual del terminal del profesor
@@ -335,12 +342,32 @@ def _init_input():
                   "afectará a apps XWayland. Instala 'ydotool' y habilita su "
                   "servicio para control completo.")
 
+    # 4. vigia_input (Wayland): dispositivo uinput ABSOLUTO propio (demonio root).
+    #    Es el ÚNICO que posiciona el ratón correctamente en Wayland; ydotool no
+    #    tiene eje absoluto y deja el cursor pegado en la esquina. El puntero y el
+    #    bloqueo (EVIOCGRAB) van por aquí; el teclado sigue por ydotool.
+    global _VIGIA_INPUT
+    if platform_utils.IS_LINUX:
+        try:
+            import vigia_input
+            vi = vigia_input.VigiaInput()
+            _VIGIA_INPUT = vi
+            global _VI_ABS_MAX
+            _VI_ABS_MAX = vigia_input.ABS_MAX
+            if vi.available():
+                print("  [✓] Control de ratón vía vigia_input (uinput absoluto).")
+            else:
+                print("  [!] vigia_input aún sin demonio (se reintenta al usarlo).")
+        except Exception as e:
+            print(f"  [!] vigia_input no disponible: {e}")
+
     # Precalcular entorno para xdotool (se reutiliza en cada evento)
     _xdo_env = dict(os.environ)
     if platform_utils.IS_LINUX and 'DISPLAY' not in _xdo_env:
         _xdo_env['DISPLAY'] = ':0'
 
-    return (_mouse_ctrl is not None) or (_XDO_CMD is not None) or (_YDO_CMD is not None)
+    return ((_mouse_ctrl is not None) or (_XDO_CMD is not None)
+            or (_YDO_CMD is not None) or (_VIGIA_INPUT is not None))
 
 INPUT_OK = _init_input()
 
@@ -481,10 +508,12 @@ if WEBRTC_OK:
                 if self._cap is None:
                     self._cap = screen_capture.create_capturer(verbose=False)
                 mon = self._cap.monitor()
-                # Mantener offset sincronizado para el mapeo de coordenadas
-                global _mon_left, _mon_top
+                # Mantener offset/tamaño sincronizados para el mapeo de coordenadas
+                global _mon_left, _mon_top, _mon_width, _mon_height
                 _mon_left = mon.get('left', 0)
                 _mon_top  = mon.get('top',  0)
+                _mon_width  = mon.get('width',  _mon_width)
+                _mon_height = mon.get('height', _mon_height)
                 img = self._cap.grab()   # PIL.Image RGB
                 # Cap at 1920px wide for good resolution; VP8 at 4 Mbps handles 1080p well.
                 if img.width > 1920:
@@ -537,9 +566,11 @@ def bucle_capturas():
             monitor = cap.monitor()
             orig_w, orig_h = monitor['width'], monitor['height']
             # Actualizar offset global del monitor para el mapeo de coordenadas
-            global _mon_left, _mon_top
+            global _mon_left, _mon_top, _mon_width, _mon_height
             _mon_left = monitor.get('left', 0)
             _mon_top  = monitor.get('top',  0)
+            _mon_width  = orig_w
+            _mon_height = orig_h
 
             if (now - _ultimo_screenshot) >= INTERVALO_SEG:
                 img = cap.grab()
@@ -608,6 +639,34 @@ def _procesar_input_ydo(tipo, data, x, y):
         _ydo_sync('key', *args)
 
 
+def _procesar_pointer_vigia(tipo, data):
+    """Enruta eventos de ratón al demonio uinput absoluto (vigia_input).
+
+    El dashboard envía x,y en píxeles del frame capturado (0..ancho_monitor).
+    Se normaliza a 0..ABS_MAX, que KWin mapea a toda la pantalla → mapeo 1:1
+    (sin el salto a la esquina de ydotool). Devuelve True si se inyectó.
+    """
+    try:
+        px = int(data.get('x', 0)); py = int(data.get('y', 0))
+    except (TypeError, ValueError):
+        px = py = 0
+    w = _mon_width or 1920
+    h = _mon_height or 1080
+    xn = max(0, min(_VI_ABS_MAX, round(px * _VI_ABS_MAX / max(1, w))))
+    yn = max(0, min(_VI_ABS_MAX, round(py * _VI_ABS_MAX / max(1, h))))
+    if tipo == 'mousemove':
+        return _VIGIA_INPUT.move(xn, yn)
+    if tipo == 'scroll':
+        _VIGIA_INPUT.move(xn, yn)
+        return _VIGIA_INPUT.scroll(int(data.get('dy', 0)))
+    if tipo == 'mousedown':
+        _VIGIA_INPUT.move(xn, yn)
+        return _VIGIA_INPUT.button(data.get('button', 'left'), 1)
+    if tipo == 'mouseup':
+        return _VIGIA_INPUT.button(data.get('button', 'left'), 0)
+    return False
+
+
 def _procesar_input(data):
     """Ejecuta un evento de entrada. Llamar SOLO desde el hilo _input_worker."""
     tipo = data.get('type', '')
@@ -619,7 +678,14 @@ def _procesar_input(data):
     except:
         x = y = 0
 
-    # En Wayland, ydotool es el único backend que inyecta en todo el escritorio
+    # Ratón en Wayland: SIEMPRE vía vigia_input (uinput absoluto). Si el demonio
+    # estuviera caído, _send devuelve False y caemos a ydotool/pynput.
+    if _VIGIA_INPUT is not None and tipo in (
+            'mousemove', 'mousedown', 'mouseup', 'scroll'):
+        if _procesar_pointer_vigia(tipo, data):
+            return
+
+    # En Wayland, ydotool inyecta teclado (y ratón solo como fallback)
     if _YDO_CMD:
         _procesar_input_ydo(tipo, data, x, y)
         return
@@ -1193,6 +1259,15 @@ class _VentanaBloqueo:
         tk.Label(m, text='🔒', bg='#0a0c14', fg='#fc8181', font=('Segoe UI', 80)).pack()
         tk.Label(m, text='Pantalla bloqueada', bg='#0a0c14', fg='#e2e8f0', font=('Segoe UI', 24, 'bold')).pack()
         self.top.update(); self.top.focus_force()
+        # Bloqueo REAL en Wayland: agarrar (EVIOCGRAB) el teclado/ratón físicos
+        # del alumno vía el demonio root. grab_set_global() solo funciona en X11.
+        self._vi_grab = False
+        if _VIGIA_INPUT is not None:
+            try:
+                if _VIGIA_INPUT.grab(True):
+                    self._vi_grab = True
+            except Exception:
+                pass
         try: self.top.grab_set_global()
         except: self.top.grab_set()
         self._activa = True; self._mantener()
@@ -1200,7 +1275,13 @@ class _VentanaBloqueo:
         if self._activa:
             try: self.top.lift(); self.top.focus_force(); self.top.after(100, self._mantener)
             except: pass
-    def desbloquear(self): self._activa = False; self.top.destroy()
+    def desbloquear(self):
+        self._activa = False
+        if self._vi_grab and _VIGIA_INPUT is not None:
+            try: _VIGIA_INPUT.grab(False)
+            except Exception: pass
+            self._vi_grab = False
+        self.top.destroy()
 
 class _VentanaPizarra:
     """Overlay visual para anotaciones del profesor (click-through en X11)."""

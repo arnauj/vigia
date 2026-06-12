@@ -48,7 +48,7 @@ sudo apt-get install -y python3-pip python3-tk python3-pil python3-pil.imagetk \
     xdotool xclip xsel curl wget -qq 2>/dev/null || true
 for p in python3-pynput python3-numpy python3-aiortc \
          python3-socketio python3-websocket python3-requests \
-         ydotool kde-spectacle \
+         ydotool kde-spectacle python3-evdev \
          python3-gi python3-dbus python3-gst-1.0 gstreamer1.0-pipewire \
          gstreamer1.0-plugins-base gir1.2-gstreamer-1.0 \
          xdg-desktop-portal xdg-desktop-portal-kde; do
@@ -91,6 +91,29 @@ UNIT
   else
     echo "    [!] ydotoold no encontrado; instala el paquete 'ydotool'."
   fi
+
+  # Demonio vigia-input: dispositivo uinput ABSOLUTO (puntero correcto, no salta
+  # a la esquina) + bloqueo del input físico (EVIOCGRAB). Corre como root.
+  echo "    - Ratón absoluto + bloqueo: servicio vigia-input (uinput como root)."
+  sudo tee /etc/systemd/system/vigia-input.service >/dev/null <<UNIT
+[Unit]
+Description=Demonio de inyeccion de input y bloqueo VIGIA (Wayland, uinput absoluto)
+
+[Service]
+Type=simple
+ExecStartPre=-/sbin/modprobe uinput
+ExecStart=$PYTHON3 $SCRIPT_DIR/vigia_input.py --daemon
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  sudo systemctl daemon-reload 2>/dev/null || true
+  sudo systemctl enable vigia-input.service 2>/dev/null || true
+  sudo systemctl restart vigia-input.service 2>/dev/null \
+    && echo "    [OK] Servicio vigia-input habilitado." \
+    || echo "    [!] No se pudo habilitar vigia-input; ratón/bloqueo limitados."
 fi
 
 # ── Detectar o instalar pip ───────────────────────────────────

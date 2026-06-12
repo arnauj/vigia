@@ -111,6 +111,8 @@ class TestProcesarInput(unittest.TestCase):
     def setUp(self):
         # Asegurar que xdotool está disponible y pynput no
         client._XDO_CMD = '/usr/bin/xdotool'
+        client._YDO_CMD = None
+        client._VIGIA_INPUT = None   # forzar ruta xdotool (no uinput)
         client._mouse_ctrl = None
         client._kbd_ctrl   = None
         client._PBtn       = None
@@ -475,6 +477,7 @@ class TestProcesarInputYdotool(unittest.TestCase):
         client._YDO_CMD  = '/usr/bin/ydotool'
         client._ydo_env  = dict(os.environ)
         client._XDO_CMD  = '/usr/bin/xdotool'   # presente pero NO debe usarse
+        client._VIGIA_INPUT = None              # forzar ruta ydotool (no uinput)
         client._mouse_ctrl = None
         client._kbd_ctrl   = None
         client._PBtn       = None
@@ -529,6 +532,58 @@ class TestProcesarInputYdotool(unittest.TestCase):
     def test_tecla_no_mapeada_es_noop(self):
         calls = self._run({'type': 'keypress', 'key': 'teclainventada'})
         self.assertEqual(calls, [])
+
+
+class _FakeVigiaInput:
+    """Doble de vigia_input.VigiaInput que registra las llamadas."""
+    def __init__(self):
+        self.calls = []
+    def move(self, xn, yn): self.calls.append(('move', xn, yn)); return True
+    def button(self, btn, s): self.calls.append(('button', btn, s)); return True
+    def scroll(self, dy, dx=0): self.calls.append(('scroll', dy)); return True
+    def grab(self, on): self.calls.append(('grab', on)); return True
+
+
+class TestVigiaInputPointer(unittest.TestCase):
+    """El puntero en Wayland se enruta a vigia_input con coords absolutas."""
+
+    def setUp(self):
+        self.vi = _FakeVigiaInput()
+        client._VIGIA_INPUT = self.vi
+        client._VI_ABS_MAX = 32767
+        client._mon_width = 1920
+        client._mon_height = 1080
+
+    def tearDown(self):
+        client._VIGIA_INPUT = None
+
+    def test_centro_se_normaliza(self):
+        client._procesar_input({'type': 'mousemove', 'x': 960, 'y': 540})
+        # 960/1920*32767 = 16383.5 → 16384 ; 540/1080*32767 = 16383.5 → 16384
+        self.assertEqual(self.vi.calls, [('move', 16384, 16384)])
+
+    def test_esquina_inferior_derecha_satura_al_max(self):
+        client._procesar_input({'type': 'mousemove', 'x': 1920, 'y': 1080})
+        self.assertEqual(self.vi.calls, [('move', 32767, 32767)])
+
+    def test_mousedown_mueve_y_pulsa(self):
+        client._procesar_input({'type': 'mousedown', 'x': 0, 'y': 0,
+                                'button': 'right'})
+        self.assertEqual(self.vi.calls,
+                         [('move', 0, 0), ('button', 'right', 1)])
+
+    def test_scroll_va_a_vigia_input(self):
+        client._procesar_input({'type': 'scroll', 'x': 960, 'y': 540, 'dy': -1})
+        self.assertIn(('scroll', -1), self.vi.calls)
+
+    def test_teclado_no_va_a_vigia_input(self):
+        # El teclado NO debe ir por vigia_input (sigue por ydotool/xdotool).
+        client._YDO_CMD = None
+        client._XDO_CMD = None
+        client._mouse_ctrl = None
+        client._kbd_ctrl = None
+        client._procesar_input({'type': 'keypress', 'key': 'a'})
+        self.assertEqual(self.vi.calls, [])
 
 
 class TestScreenCaptureSession(unittest.TestCase):
@@ -591,7 +646,8 @@ if __name__ == '__main__':
     suite  = unittest.TestSuite()
     for cls in (TestKeyMaps, TestProcesarInput, TestInputQueue,
                 TestCoordenadas, TestDataChannelRouting,
-                TestProcesarInputYdotool, TestScreenCaptureSession):
+                TestProcesarInputYdotool, TestVigiaInputPointer,
+                TestScreenCaptureSession):
         suite.addTests(loader.loadTestsFromTestCase(cls))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)

@@ -220,6 +220,7 @@ cp "$SCRIPT_DIR/vigia_overlay.py"   "$CLIENT_BUILD_DIR/opt/vigia-client/"
 cp "$SCRIPT_DIR/platform_utils.py"  "$CLIENT_BUILD_DIR/opt/vigia-client/"
 cp "$SCRIPT_DIR/screen_capture.py"  "$CLIENT_BUILD_DIR/opt/vigia-client/"
 cp "$SCRIPT_DIR/pipewire_capture.py" "$CLIENT_BUILD_DIR/opt/vigia-client/"
+cp "$SCRIPT_DIR/vigia_input.py"     "$CLIENT_BUILD_DIR/opt/vigia-client/"
 cp "$SCRIPT_DIR/img/logo2_mini.png" "$CLIENT_BUILD_DIR/opt/vigia-client/img/"
 cp "$SCRIPT_DIR/img/logo2_mini.png" "$CLIENT_BUILD_DIR/usr/share/pixmaps/vigia-client.png"
 
@@ -240,7 +241,7 @@ Architecture: all
 Maintainer: VIGIA
 Section: education
 Priority: optional
-Depends: python3, python3-venv, python3-tk, python3-pil, python3-pil.imagetk, python3-socketio, python3-engineio, python3-websocket, python3-requests, python3-pynput, python3-numpy, xdotool, ydotool, kde-spectacle | grim | gnome-screenshot, python3-gi, python3-dbus, python3-gst-1.0, gstreamer1.0-pipewire, gstreamer1.0-plugins-base, gir1.2-gstreamer-1.0, debconf
+Depends: python3, python3-venv, python3-tk, python3-pil, python3-pil.imagetk, python3-socketio, python3-engineio, python3-websocket, python3-requests, python3-pynput, python3-numpy, xdotool, ydotool, kde-spectacle | grim | gnome-screenshot, python3-gi, python3-dbus, python3-gst-1.0, gstreamer1.0-pipewire, gstreamer1.0-plugins-base, gir1.2-gstreamer-1.0, python3-evdev, debconf
 Recommends: python3-aiortc, xdg-desktop-portal, xdg-desktop-portal-kde, xclip, python3-gi-cairo, gir1.2-gtk-3.0
 Description: VIGIA Client - Classroom Monitoring System (Student)
  VIGIA allows teachers to monitor student screens in real-time.
@@ -376,6 +377,34 @@ elif command -v ydotool >/dev/null 2>&1; then
   echo "[!] Aviso: ydotoold no encontrado (control remoto Wayland limitado)."
 fi
 
+# ── vigia-input: demonio root con dispositivo uinput ABSOLUTO ──
+# El dispositivo de ydotool solo tiene ejes RELATIVOS, así que en Wayland el
+# ratón se queda pegado en la esquina (y dispara los hot-corners de KDE). Este
+# demonio crea un uinput con eje ABSOLUTO (mapeo 1:1) para el puntero y, además,
+# bloquea el input físico del alumno (EVIOCGRAB) en el modo «bloquear pantalla».
+# Corre como root (necesita /dev/uinput y /dev/input/event*).
+cat > /etc/systemd/system/vigia-input.service <<UNIT
+[Unit]
+Description=Demonio de inyeccion de input y bloqueo VIGIA (Wayland, uinput absoluto)
+
+[Service]
+Type=simple
+ExecStartPre=-/sbin/modprobe uinput
+ExecStart=/usr/bin/python3 /opt/vigia-client/vigia_input.py --daemon
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload 2>/dev/null || true
+systemctl enable vigia-input.service 2>/dev/null || true
+if systemctl restart vigia-input.service 2>/dev/null; then
+  echo "[OK] Servicio vigia-input habilitado (raton absoluto + bloqueo Wayland)."
+else
+  echo "[!] Aviso: no se pudo habilitar vigia-input (raton/bloqueo Wayland limitados)."
+fi
+
 # ── Script lanzador global ────────────────────────────────────
 # Lee la IP del servidor en tiempo de ejecución desde /etc/vigia/client.conf,
 # de modo que funciona para cualquier usuario sin necesitar la IP en el .desktop
@@ -478,6 +507,11 @@ cat > "$CLIENT_BUILD_DIR/DEBIAN/prerm" <<'EOF'
 # Matar instancias del cliente por ruta exacta (evitar matar a dpkg mismo)
 pkill -f "/opt/vigia-client/client\.py" 2>/dev/null || true
 pkill -f "python.*client\.py" 2>/dev/null || true
+# Parar/eliminar el demonio de input (libera cualquier grab de teclado/ratón)
+systemctl stop vigia-input.service 2>/dev/null || true
+systemctl disable vigia-input.service 2>/dev/null || true
+rm -f /etc/systemd/system/vigia-input.service 2>/dev/null || true
+systemctl daemon-reload 2>/dev/null || true
 rm -f /etc/xdg/autostart/vigia-alumno.desktop 2>/dev/null || true
 rm -f /usr/share/applications/vigia-client.desktop 2>/dev/null || true
 rm -f /usr/local/bin/vigia-client 2>/dev/null || true

@@ -9,7 +9,8 @@ Classroom monitoring software for Linux (Kubuntu/Ubuntu). The teacher runs a ser
 **Critical constraint (sesiones gráficas):** `mss` (captura) y `xdotool`/`pynput` (control remoto) solo funcionan en X11. Kubuntu 25.10+/26.04 usa **Wayland como única sesión por defecto**, así que existe una capa de compatibilidad:
 - **Captura:** `screen_capture.py` abstrae el backend — `mss` en X11/Windows; en Wayland se prefiere **PipeWire vía el portal ScreenCast** (`pipewire_capture.py`, ~30-60 fps, fluido como RustDesk) y, si el portal no está/se deniega, cae a `spectacle -b -n -f -o` (KDE), `grim` (wlroots) o `gnome-screenshot` (GNOME) (~1-3 fps). El portal PipeWire muestra UN diálogo de permiso la primera vez por usuario; con `restore_token` (guardado en `~/.config/vigia/screencast.token`) las siguientes sesiones son silenciosas.
 - **Detección de sesión robusta:** `session_type()` detecta Wayland aunque el proceso se lance sin `WAYLAND_DISPLAY` (sondea el socket `wayland-*` en `XDG_RUNTIME_DIR`) y fija el entorno para los hijos (spectacle/ydotool). Sin esto, el cliente veía solo `DISPLAY=:0` (XWayland), usaba `mss` y capturaba el root vacío de XWayland = **pantalla negra**.
-- **Control remoto:** en Wayland el cliente usa `ydotool` (uinput; requiere el servicio `ydotoold` activo — el postinst del .deb lo habilita best-effort). xdotool/pynput siguen siendo el backend X11.
+- **Control remoto:** en Wayland el **puntero** (mover/clic/scroll) va por `vigia_input.py` — un demonio root propio que crea un dispositivo uinput con eje **ABSOLUTO** (servicio `vigia-input`). Es imprescindible: el dispositivo de ydotool solo tiene ejes RELATIVOS, así que `ydotool mousemove -a` deja el cursor pegado en la esquina superior izquierda (disparando además los hot-corners de KDE). El **teclado** sigue por `ydotool` (servicio `vigia-ydotoold`). xdotool/pynput son el backend X11.
+- **Bloqueo de pantalla:** en Wayland `grab_set_global()` (XGrabKeyboard) NO funciona. El bloqueo real lo hace el demonio `vigia-input` con `EVIOCGRAB` sobre los dispositivos de entrada FÍSICOS del alumno (su teclado/ratón quedan inertes), mientras el ratón virtual del profesor sigue inyectando. Se libera automáticamente si la conexión del cliente se cae (fail-safe: el alumno nunca queda bloqueado permanentemente).
 - Captura de ventanas individuales, bloqueo global de pantalla y captura a ~30 fps siguen requiriendo X11 (`plasma-session-x11` sigue en el archive de Ubuntu 26.04, sin soporte oficial de Kubuntu).
 
 ## Running the application
@@ -81,6 +82,18 @@ pipewire_capture.py ────────────────────
   Deps (apt): python3-gi, python3-dbus, python3-gst-1.0, gstreamer1.0-pipewire,
   gstreamer1.0-plugins-base, gir1.2-gstreamer-1.0, xdg-desktop-portal-kde.
   Ejecutable en solitario para probar: `python3 pipewire_capture.py`.
+
+vigia_input.py ──────────────────────────────────────────────────────
+  Inyección de input ABSOLUTO + bloqueo en Wayland (demonio root + cliente).
+  Demonio (`python3 vigia_input.py --daemon`, servicio `vigia-input`):
+  crea un uinput con ABS_X/ABS_Y (0..32767 → toda la pantalla, mapeo 1:1),
+  BTN_LEFT/RIGHT/MIDDLE y REL_WHEEL/HWHEEL. Escucha JSON por líneas en
+  /run/vigia-input.sock (0666): {"t":"m","x","y"} mover abs,
+  {"t":"b","btn","s"} botón, {"t":"s","dy"} rueda, {"t":"grab","on"} bloquear
+  (EVIOCGRAB de los dispositivos físicos del alumno excepto el virtual). El
+  grab se libera SOLO si la conexión que lo pidió se cierra (fail-safe).
+  Cliente: clase VigiaInput (la usa client.py). Requiere python3-evdev (apt).
+  Coordenadas: client.py normaliza x_px/ancho_monitor*32767 antes de enviar.
 
 vigia-launcher.py ──────────────────────────────────────────────────
   Lanzador principal del panel del profesor. Orden de preferencia:
@@ -283,7 +296,7 @@ Esto garantiza que `dist/vigia-server_1.2_amd64.deb` y `dist/vigia-client_1.2_al
 | Archivo/componente modificado | Paquete a regenerar |
 |---|---|
 | `server.py`, `vigia-launcher.py`, `templates/`, `instalar_servidor.sh`, `img/` | `vigia-server_1.2_amd64.deb` |
-| `client.py`, `vigia_overlay.py`, `instalar_cliente.sh` | `vigia-client_1.2_all.deb` |
+| `client.py`, `vigia_overlay.py`, `vigia_input.py`, `instalar_cliente.sh` | `vigia-client_1.2_all.deb` |
 | `platform_utils.py`, `screen_capture.py`, `pipewire_capture.py` o cualquier cambio global | **Ambos** paquetes |
 
 > Nunca entregar ni documentar un cambio sin haber ejecutado `bash build_debs.sh` y verificado que los `.deb` de `dist/` se han actualizado correctamente.
