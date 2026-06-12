@@ -1254,20 +1254,25 @@ class _VentanaMensaje:
 
 class _VentanaBloqueo:
     def __init__(self, root):
-        self.top = tk.Toplevel(root); self.top.attributes('-fullscreen', True, '-topmost', True); self.top.configure(bg='#0a0c14'); self.top.overrideredirect(True)
-        m = tk.Frame(self.top, bg='#0a0c14'); m.place(relx=0.5, rely=0.5, anchor='center')
-        tk.Label(m, text='🔒', bg='#0a0c14', fg='#fc8181', font=('Segoe UI', 80)).pack()
-        tk.Label(m, text='Pantalla bloqueada', bg='#0a0c14', fg='#e2e8f0', font=('Segoe UI', 24, 'bold')).pack()
-        self.top.update(); self.top.focus_force()
-        # Bloqueo REAL en Wayland: agarrar (EVIOCGRAB) el teclado/ratón físicos
-        # del alumno vía el demonio root. grab_set_global() solo funciona en X11.
+        # Bloqueo REAL en Wayland PRIMERO (antes del overlay): agarrar (EVIOCGRAB)
+        # el teclado/ratón físicos del alumno vía el demonio root. Así el input
+        # queda bloqueado aunque la creación del overlay Tkinter falle.
+        # grab_set_global() solo funciona en X11.
         self._vi_grab = False
         if _VIGIA_INPUT is not None:
             try:
                 if _VIGIA_INPUT.grab(True):
                     self._vi_grab = True
-            except Exception:
-                pass
+                    print("  [✓] Pantalla bloqueada (input físico agarrado).")
+                else:
+                    print("  [!] Bloqueo: el demonio vigia-input no respondió.")
+            except Exception as e:
+                print(f"  [!] Bloqueo: fallo al agarrar input: {e}")
+        self.top = tk.Toplevel(root); self.top.attributes('-fullscreen', True, '-topmost', True); self.top.configure(bg='#0a0c14'); self.top.overrideredirect(True)
+        m = tk.Frame(self.top, bg='#0a0c14'); m.place(relx=0.5, rely=0.5, anchor='center')
+        tk.Label(m, text='🔒', bg='#0a0c14', fg='#fc8181', font=('Segoe UI', 80)).pack()
+        tk.Label(m, text='Pantalla bloqueada', bg='#0a0c14', fg='#e2e8f0', font=('Segoe UI', 24, 'bold')).pack()
+        self.top.update(); self.top.focus_force()
         try: self.top.grab_set_global()
         except: self.top.grab_set()
         self._activa = True; self._mantener()

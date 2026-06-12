@@ -241,8 +241,8 @@ Architecture: all
 Maintainer: VIGIA
 Section: education
 Priority: optional
-Depends: python3, python3-venv, python3-tk, python3-pil, python3-pil.imagetk, python3-socketio, python3-engineio, python3-websocket, python3-requests, python3-pynput, python3-numpy, xdotool, ydotool, kde-spectacle | grim | gnome-screenshot, python3-gi, python3-dbus, python3-gst-1.0, gstreamer1.0-pipewire, gstreamer1.0-plugins-base, gir1.2-gstreamer-1.0, python3-evdev, debconf
-Recommends: python3-aiortc, xdg-desktop-portal, xdg-desktop-portal-kde, xclip, python3-gi-cairo, gir1.2-gtk-3.0
+Depends: python3, python3-venv, python3-tk, python3-pil, python3-pil.imagetk, python3-socketio, python3-engineio, python3-websocket, python3-requests, python3-pynput, python3-numpy, xdotool, ydotool, kde-spectacle | grim | gnome-screenshot, python3-gi, python3-dbus, python3-gst-1.0, gstreamer1.0-pipewire, gstreamer1.0-plugins-base, gir1.2-gstreamer-1.0, python3-evdev, python3-aiortc, debconf
+Recommends: xdg-desktop-portal, xdg-desktop-portal-kde, xclip, python3-gi-cairo, gir1.2-gtk-3.0
 Description: VIGIA Client - Classroom Monitoring System (Student)
  VIGIA allows teachers to monitor student screens in real-time.
  This package installs the student client.

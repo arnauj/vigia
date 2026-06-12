@@ -2112,6 +2112,12 @@ async function _iniciarWebRTC(sid, mode) {
       if (ev.track.kind !== 'video') return;
       const vid = document.getElementById('liveview-video');
       vid.srcObject = ev.streams[0];
+      // Mínima latencia para control remoto: reducir el jitter buffer del
+      // navegador (prioriza responsividad sobre suavidad). Cut ~50-100 ms.
+      try {
+        if ('jitterBufferTarget' in ev.receiver) ev.receiver.jitterBufferTarget = 0;
+        if ('playoutDelayHint' in ev.receiver)   ev.receiver.playoutDelayHint = 0;
+      } catch (e) { /* navegador sin soporte: ignorar */ }
       vid.onloadedmetadata = () => {
         // La resolución real de la pantalla llega por screen_info (Socket.IO) y es la que
         // se usa para mapear coordenadas. Solo usar dimensiones del stream como último

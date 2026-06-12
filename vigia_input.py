@@ -123,20 +123,27 @@ class _Grabber:
     def _is_physical_input(self, dev):
         from evdev import ecodes as e
         if dev.name == _DEV_NAME:
-            return False
+            return False     # nunca agarrar nuestro propio dispositivo virtual
         try:
             caps = dev.capabilities()
         except OSError:
             return False
-        keys = caps.get(e.EV_KEY, [])
-        # teclado (tiene KEY_A) o ratón (tiene BTN_LEFT)
-        return (e.KEY_A in keys) or (e.BTN_LEFT in keys) or (e.BTN_TOUCH in keys)
+        keys = set(caps.get(e.EV_KEY, []))
+        # Teclado real: tiene teclas de escritura (no solo botones de encendido).
+        is_keyboard = bool(keys & {e.KEY_A, e.KEY_SPACE, e.KEY_ENTER, e.KEY_ESC})
+        # Ratón: botón izquierdo, o ejes relativos (REL_X/Y).
+        rel = set(caps.get(e.EV_REL, []))
+        is_mouse = (e.BTN_LEFT in keys) or (e.REL_X in rel) or (e.REL_Y in rel)
+        # Touchpad / pantalla táctil.
+        is_touch = (e.BTN_TOUCH in keys) or (e.BTN_TOOL_FINGER in keys)
+        return is_keyboard or is_mouse or is_touch
 
     def grab(self):
         from evdev import InputDevice, list_devices
         with self._lock:
             if self._grabbed:
                 return
+            grabbed_names, failed = [], []
             for path in list_devices():
                 try:
                     dev = InputDevice(path)
@@ -148,11 +155,20 @@ class _Grabber:
                 try:
                     dev.grab()
                     self._grabbed.append(dev)
-                except OSError:
+                    grabbed_names.append('%s (%s)' % (dev.name, path))
+                except OSError as ex:
+                    failed.append('%s (%s): %s' % (dev.name, path, ex))
                     dev.close()
+            sys.stderr.write('vigia_input: BLOQUEO — %d dispositivos agarrados: %s\n'
+                             % (len(self._grabbed), '; '.join(grabbed_names) or 'NINGUNO'))
+            if failed:
+                sys.stderr.write('vigia_input: no se pudieron agarrar: %s\n'
+                                 % '; '.join(failed))
+            sys.stderr.flush()
 
     def ungrab(self):
         with self._lock:
+            n = len(self._grabbed)
             for dev in self._grabbed:
                 try:
                     dev.ungrab()
@@ -163,6 +179,9 @@ class _Grabber:
                 except OSError:
                     pass
             self._grabbed = []
+            if n:
+                sys.stderr.write('vigia_input: DESBLOQUEO — %d dispositivos liberados\n' % n)
+                sys.stderr.flush()
 
 
 def _run_daemon():
@@ -233,12 +252,16 @@ def _run_daemon():
                     except ValueError:
                         continue
                     if obj.get('t') == 'grab':
-                        if obj.get('on'):
-                            grabber.grab()
-                            holds_grab = True
-                        else:
-                            grabber.ungrab()
-                            holds_grab = False
+                        try:
+                            if obj.get('on'):
+                                grabber.grab()
+                                holds_grab = True
+                            else:
+                                grabber.ungrab()
+                                holds_grab = False
+                        except Exception as ex:
+                            sys.stderr.write('vigia_input: error en grab: %s\n' % ex)
+                            sys.stderr.flush()
                     else:
                         try:
                             handle(obj)
