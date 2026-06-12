@@ -128,7 +128,13 @@ except ImportError:
 try:
     from PIL import Image
 except ImportError:
-    _instalar("Pillow"); from PIL import Image
+    # Pillow es una librería NATIVA: en Linux SIEMPRE por apt (un wheel pip
+    # para otro Python falla con "No matching distribution found for Pillow").
+    if platform_utils.IS_LINUX:
+        os.system('sudo apt-get install -y python3-pil python3-pil.imagetk -qq 2>/dev/null')
+    else:
+        _instalar("Pillow")
+    from PIL import Image
 
 try:
     import tkinter as tk
@@ -148,17 +154,22 @@ if TK_OK:
             from PIL import ImageTk
             IMGTK_OK = True
         except ImportError:
-            print("  [*] No se pudo cargar ImageTk vía apt. Reinstalando Pillow...")
-            _instalar("--force-reinstall Pillow")
-            try:
-                # Forzar relectura de PIL
-                for _k in list(sys.modules.keys()):
-                    if _k == 'PIL' or _k.startswith('PIL.'): del sys.modules[_k]
-                from PIL import Image, ImageTk
-                IMGTK_OK = True
-            except ImportError:
-                print("  [!] Error crítico: No se pudo cargar ImageTk.")
+            if platform_utils.IS_LINUX:
+                # En Linux NO reinstalar Pillow con pip (librería nativa: solo apt).
+                print("  [!] ImageTk no disponible. Instala: sudo apt install python3-pil.imagetk")
                 IMGTK_OK = False
+            else:
+                print("  [*] No se pudo cargar ImageTk. Reinstalando Pillow...")
+                _instalar("--force-reinstall Pillow")
+                try:
+                    # Forzar relectura de PIL
+                    for _k in list(sys.modules.keys()):
+                        if _k == 'PIL' or _k.startswith('PIL.'): del sys.modules[_k]
+                    from PIL import Image, ImageTk
+                    IMGTK_OK = True
+                except ImportError:
+                    print("  [!] Error crítico: No se pudo cargar ImageTk.")
+                    IMGTK_OK = False
 else:
     ImageTk = None; IMGTK_OK = False
 
@@ -981,6 +992,141 @@ class _VentanaProfesor:
 
     def destruir(self): self.top.destroy()
 
+def _render_html_mensaje(txt, html_src):
+    """Renderiza un subconjunto de HTML (negrita, cursiva, subrayado, listas,
+    enlaces, títulos, colores) en un tk.Text usando tags de estilo.
+    Es el formato que genera el compositor contenteditable del dashboard."""
+    from html.parser import HTMLParser
+
+    class _R(HTMLParser):
+        _H = {'h1': 20, 'h2': 17, 'h3': 15, 'h4': 13}
+
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.bold = 0; self.italic = 0; self.under = 0
+            self.strike = 0; self.mono = 0; self.pre = 0
+            self.sizes = [12]; self.colors = ['#e2e8f0']
+            self.lists = []          # [tipo, contador] por nivel (ul/ol)
+            self.href = None; self._nlink = 0
+            self.elems = []          # pila (tag, ops_de_deshacer)
+            self.tags = {}           # estilo → nombre de tag ya configurado
+
+        def _linestart(self):
+            return txt.index('end-1c').split('.')[1] == '0'
+
+        def _nl(self):
+            if not self._linestart():
+                txt.insert('end', '\n')
+
+        def _emit(self, s):
+            if not s:
+                return
+            key = (self.bold > 0, self.italic > 0, self.under > 0,
+                   self.strike > 0, self.mono > 0, self.sizes[-1], self.colors[-1])
+            name = self.tags.get(key)
+            if name is None:
+                name = f'st{len(self.tags)}'
+                fam = 'DejaVu Sans Mono' if self.mono else 'Segoe UI'
+                style = (('bold ' if self.bold else '') +
+                         ('italic' if self.italic else '')).strip() or 'normal'
+                color = self.colors[-1]
+                try: txt.winfo_rgb(color)
+                except Exception: color = '#e2e8f0'
+                txt.tag_configure(name, font=(fam, self.sizes[-1], style),
+                                  foreground=color,
+                                  underline=bool(self.under),
+                                  overstrike=bool(self.strike))
+                self.tags[key] = name
+            tags = (name,)
+            if self.href:
+                ln = f'lnk{self._nlink}'; self._nlink += 1
+                txt.tag_configure(ln, foreground='#6ea8ff', underline=True)
+                url = self.href
+                txt.tag_bind(ln, '<Button-1>',
+                             lambda _e, u=url: __import__('webbrowser').open(u))
+                txt.tag_bind(ln, '<Enter>', lambda _e: txt.config(cursor='hand2'))
+                txt.tag_bind(ln, '<Leave>', lambda _e: txt.config(cursor=''))
+                tags = (name, ln)
+            txt.insert('end', s, tags)
+
+        @staticmethod
+        def _color_de(attrs):
+            c = attrs.get('color')
+            m = re.search(r'(?:^|;)\s*color\s*:\s*([^;]+)', attrs.get('style', ''))
+            if m: c = m.group(1).strip()
+            if not c: return None
+            m = re.match(r'rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)', c)
+            if m: c = '#%02x%02x%02x' % tuple(int(v) for v in m.groups())
+            return c
+
+        def handle_starttag(self, tag, attrs):
+            a = dict(attrs); undo = []
+            if tag in ('b', 'strong'): self.bold += 1; undo.append('bold')
+            elif tag in ('i', 'em'): self.italic += 1; undo.append('italic')
+            elif tag in ('u', 'ins'): self.under += 1; undo.append('under')
+            elif tag in ('s', 'strike', 'del'): self.strike += 1; undo.append('strike')
+            elif tag in ('code', 'tt', 'kbd'): self.mono += 1; undo.append('mono')
+            elif tag == 'pre':
+                self._nl(); self.mono += 1; self.pre += 1
+                undo += ['mono', 'pre']
+            elif tag in self._H:
+                self._nl(); self.bold += 1; self.sizes.append(self._H[tag])
+                undo += ['bold', 'size']
+            elif tag in ('p', 'div', 'blockquote', 'tr'):
+                self._nl()
+            elif tag == 'br':
+                txt.insert('end', '\n')
+            elif tag in ('ul', 'ol'):
+                self._nl(); self.lists.append([tag, 0]); undo.append('list')
+            elif tag == 'li':
+                self._nl()
+                indent = '   ' * max(0, len(self.lists) - 1)
+                if self.lists and self.lists[-1][0] == 'ol':
+                    self.lists[-1][1] += 1
+                    self._emit(f'{indent}{self.lists[-1][1]}. ')
+                else:
+                    self._emit(f'{indent}• ')
+            elif tag == 'a':
+                self.href = a.get('href'); undo.append('href')
+            c = self._color_de(a)
+            if c:
+                self.colors.append(c); undo.append('color')
+            self.elems.append((tag, undo))
+
+        def handle_endtag(self, tag):
+            for i in range(len(self.elems) - 1, -1, -1):
+                if self.elems[i][0] == tag:
+                    _t, undo = self.elems.pop(i)
+                    for op in undo:
+                        if op == 'bold': self.bold -= 1
+                        elif op == 'italic': self.italic -= 1
+                        elif op == 'under': self.under -= 1
+                        elif op == 'strike': self.strike -= 1
+                        elif op == 'mono': self.mono -= 1
+                        elif op == 'pre': self.pre -= 1
+                        elif op == 'size': self.sizes.pop()
+                        elif op == 'color': self.colors.pop()
+                        elif op == 'list': self.lists and self.lists.pop()
+                        elif op == 'href': self.href = None
+                    break
+            if tag in ('p', 'div', 'blockquote', 'tr', 'li', 'ul', 'ol',
+                       'pre', 'h1', 'h2', 'h3', 'h4'):
+                self._nl()
+
+        def handle_data(self, data):
+            if self.pre:
+                self._emit(data)
+                return
+            s = re.sub(r'\s+', ' ', data)
+            if s == ' ' and self._linestart():
+                return
+            if self._linestart():
+                s = s.lstrip()
+            self._emit(s)
+
+    _R().feed(html_src)
+
+
 class _VentanaMensaje:
     def __init__(self, root, msg):
         import pathlib
@@ -990,12 +1136,20 @@ class _VentanaMensaje:
         t.attributes('-topmost', True)
         c = tk.Frame(t, bg='#1a1d27', padx=20, pady=20)
         c.pack()
-        body_text = re.sub(r'<[^>]+>', '', msg.get('body', '')).strip()
+        body_html = msg.get('body', '')
+        body_text = re.sub(r'<[^>]+>', '', body_html).strip()
         if body_text:
             txt = tk.Text(c, bg='#1a1d27', fg='#e2e8f0', font=('Segoe UI', 12),
-                          wrap='word', height=6, width=44, relief='flat')
-            txt.insert('end', body_text)
-            txt.config(state='disabled')
+                          wrap='word', height=6, width=52, relief='flat',
+                          highlightthickness=0)
+            try:
+                _render_html_mensaje(txt, body_html)
+            except Exception:
+                txt.delete('1.0', 'end')
+                txt.insert('end', body_text)
+            # Altura adaptativa al contenido renderizado
+            lineas = int(txt.index('end-1c').split('.')[0])
+            txt.config(height=max(3, min(18, lineas + 1)), state='disabled')
             txt.pack()
         adjuntos = msg.get('attachments', [])
         if adjuntos:

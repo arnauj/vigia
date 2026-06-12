@@ -92,15 +92,20 @@ VPY="$VIGIA_DIR/venv/bin/python3"
 VPIP="$VIGIA_DIR/venv/bin/pip"
 
 # Instalar SOLO lo que falte; nunca abortar la instalación del paquete.
+# pip escribe sus "ERROR:" por stdout: silenciar AMBOS flujos para que los
+# intentos fallidos (p.ej. --no-index sin wheel) no asusten durante apt install.
 _pip_install() {
     "$VPIP" install -q --no-warn-script-location --no-index \
-        --find-links "$VIGIA_DIR/wheels/" "$1" 2>/dev/null \
-    || "$VPIP" install -q --no-warn-script-location "$1" 2>/dev/null \
+        --find-links "$VIGIA_DIR/wheels/" "$1" >/dev/null 2>&1 \
+    || "$VPIP" install -q --no-warn-script-location "$1" >/dev/null 2>&1 \
     || echo "[!] Aviso: no se pudo instalar $1 (se usará el paquete del sistema si existe)."
 }
+# Solo paquetes Python PUROS. Pillow es NATIVA y va por apt (Depends:
+# python3-pil); intentar instalarla con pip aquí producía
+# "No matching distribution found for Pillow" en Kubuntu 26.
 for spec in "flask:flask" "flask_socketio:flask-socketio" \
             "socketio:python-socketio" "engineio:python-engineio" \
-            "simple_websocket:simple-websocket" "mss:mss" "PIL:Pillow"; do
+            "simple_websocket:simple-websocket" "mss:mss"; do
     mod="${spec%%:*}"; pkg="${spec#*:}"
     "$VPY" -c "import $mod" 2>/dev/null || _pip_install "$pkg"
 done
@@ -303,16 +308,19 @@ python3 -m venv --system-site-packages "$VIGIA_DIR/venv"
 VPY="$VIGIA_DIR/venv/bin/python3"
 VPIP="$VIGIA_DIR/venv/bin/pip"
 
+# pip escribe sus "ERROR:" por stdout: silenciar AMBOS flujos.
 _pip_install() {
     "$VPIP" install -q --no-warn-script-location --no-index \
-        --find-links "$VIGIA_DIR/wheels/" "$1" 2>/dev/null \
-    || "$VPIP" install -q --no-warn-script-location "$1" 2>/dev/null \
+        --find-links "$VIGIA_DIR/wheels/" "$1" >/dev/null 2>&1 \
+    || "$VPIP" install -q --no-warn-script-location "$1" >/dev/null 2>&1 \
     || echo "[!] Aviso: no se pudo instalar $1 (se usará el paquete del sistema si existe)."
 }
+# Solo paquetes Python PUROS. Pillow y pynput son NATIVOS y van por apt
+# (Depends: python3-pil, python3-pil.imagetk, python3-pynput); con pip
+# fallaban en Kubuntu 26 ("No matching distribution found for Pillow").
 for spec in "socketio:python-socketio" "engineio:python-engineio" \
             "websocket:websocket-client" "requests:requests" \
-            "simple_websocket:simple-websocket" "mss:mss" \
-            "PIL:Pillow" "pynput:pynput"; do
+            "simple_websocket:simple-websocket" "mss:mss"; do
     mod="${spec%%:*}"; pkg="${spec#*:}"
     "$VPY" -c "import $mod" 2>/dev/null || _pip_install "$pkg"
 done

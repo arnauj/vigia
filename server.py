@@ -272,7 +272,9 @@ def on_send_message(data):
         'attachments': data.get('attachments', []),
     }
     if payload['body'] or payload['attachments']:
-        emit('show_message', payload, broadcast=True, include_self=False)
+        # Sin broadcast=True (TypeError con flask-socketio moderno); emitir sin
+        # 'to' difunde a todos y skip_sid excluye al dashboard emisor.
+        socketio.emit('show_message', payload, skip_sid=request.sid)
         n = len(payload['attachments'])
         print(f"[*] Mensaje enviado a todos: {payload['title']}" + (f" ({n} adjunto(s))" if n else ""))
 
@@ -646,7 +648,7 @@ def on_teacher_screenshot(data):
         for sid in sids:
             socketio.emit('teacher_screen', payload, to=sid)
     else:
-        emit('teacher_screen', payload, broadcast=True)
+        socketio.emit('teacher_screen', payload, skip_sid=request.sid)
 
 
 @socketio.on('run_command')
@@ -879,4 +881,11 @@ if __name__ == '__main__':
         t.daemon = True
         t.start()
 
-    socketio.run(app, host='0.0.0.0', port=port, debug=False)
+    if async_mode == 'threading':
+        # Sin eventlet, flask-socketio usa Werkzeug y exige confirmar su uso
+        # fuera de desarrollo (RuntimeError si no). Es el modo soportado en
+        # Kubuntu 26 (eventlet/greenlet rotos); WebSocket vía simple-websocket.
+        socketio.run(app, host='0.0.0.0', port=port, debug=False,
+                     allow_unsafe_werkzeug=True)
+    else:
+        socketio.run(app, host='0.0.0.0', port=port, debug=False)
