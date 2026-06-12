@@ -269,6 +269,12 @@ def _xdo_sync(*args):
 
 def _ydo_sync(*args):
     """Ejecuta ydotool de forma síncrona. Usar solo desde el hilo de entrada."""
+    global _ydo_env
+    # Re-resolver el socket si aún no se encontró o desapareció: ydotoold
+    # puede arrancar DESPUÉS que el cliente (carrera en el login de sesión).
+    sock = (_ydo_env or {}).get('YDOTOOL_SOCKET')
+    if not sock or not os.path.exists(sock):
+        _ydo_env = _ydo_resolver_socket()
     try:
         subprocess.run([_YDO_CMD] + [str(a) for a in args],
                        env=_ydo_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -281,9 +287,9 @@ def _ydo_resolver_socket():
     env = dict(os.environ)
     if 'YDOTOOL_SOCKET' not in env:
         candidatos = [
-            f"/run/user/{os.getuid()}/.ydotool_socket",
-            '/run/ydotoold/socket',
-            '/tmp/.ydotool_socket',
+            '/run/ydotoold/socket',                      # vigia-ydotoold.service (root)
+            f"/run/user/{os.getuid()}/.ydotool_socket",  # ydotoold de usuario
+            '/tmp/.ydotool_socket',                      # ydotoold lanzado a mano
         ]
         for cand in candidatos:
             if os.path.exists(cand):

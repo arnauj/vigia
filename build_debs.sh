@@ -332,14 +332,36 @@ else
 fi
 
 # ── ydotool (control remoto en Wayland — Kubuntu 26 es solo Wayland) ──
-# Habilitar el daemon si el paquete está instalado; el nombre de la unidad
-# varía entre versiones (ydotool.service / ydotoold.service).
-if command -v ydotoold >/dev/null 2>&1 || command -v ydotool >/dev/null 2>&1; then
-  _YDO_UID="$(id -u "$REAL_USER" 2>/dev/null || echo 0)"
-  systemctl enable --now ydotool.service 2>/dev/null \
-    || systemctl enable --now ydotoold.service 2>/dev/null \
-    || su "$REAL_USER" -c "XDG_RUNTIME_DIR=/run/user/$_YDO_UID DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$_YDO_UID/bus systemctl --user enable --now ydotool.service" 2>/dev/null \
-    || echo "[!] Aviso: no se pudo habilitar el servicio de ydotool (control remoto Wayland limitado)."
+# El paquete 'ydotool' de Ubuntu NO trae unidad de sistema: solo una unidad
+# de USUARIO (/usr/lib/systemd/user/ydotool.service) que además falla porque
+# /dev/uinput es root:input 0660 y el alumno no está en el grupo 'input'
+# (y meterle requeriría re-login). Solución: unidad de SISTEMA propia con
+# ydotoold como root y socket accesible para la sesión del alumno.
+if command -v ydotoold >/dev/null 2>&1; then
+  _YDOTOOLD="$(command -v ydotoold)"
+  cat > /etc/systemd/system/vigia-ydotoold.service <<UNIT
+[Unit]
+Description=Demonio ydotoold para control remoto VIGIA (Wayland)
+Documentation=man:ydotoold(8)
+
+[Service]
+Type=simple
+RuntimeDirectory=ydotoold
+ExecStart=$_YDOTOOLD --socket-path=/run/ydotoold/socket --socket-perm=0666
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  systemctl daemon-reload 2>/dev/null || true
+  if systemctl enable --now vigia-ydotoold.service 2>/dev/null; then
+    echo "[OK] Servicio vigia-ydotoold habilitado (control remoto Wayland)."
+  else
+    echo "[!] Aviso: no se pudo habilitar vigia-ydotoold (control remoto Wayland limitado)."
+  fi
+elif command -v ydotool >/dev/null 2>&1; then
+  echo "[!] Aviso: ydotoold no encontrado (control remoto Wayland limitado)."
 fi
 
 # ── Script lanzador global ────────────────────────────────────

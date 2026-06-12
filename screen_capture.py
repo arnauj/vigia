@@ -13,11 +13,13 @@ Las importaciones de mss/PIL son perezosas para que los tests puedan
 mockearlas antes de importar client.py.
 """
 
+import itertools
 import os
 import sys
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 
 
@@ -91,14 +93,23 @@ class CliBackend:
         'gnome-screenshot': ['gnome-screenshot', '-f', '{out}'],
     }
 
+    # Serializa las capturas CLI de TODO el proceso: dos spectacle/grim en
+    # paralelo (miniaturas + WebRTC) compiten por la herramienta y producen
+    # frames corruptos o negros.
+    _GRAB_LOCK = threading.Lock()
+    _SEQ = itertools.count()
+
     def __init__(self, tool):
         self.name = tool
         self._cmd = self.TOOLS[tool]
         self._path = shutil.which(tool)
         if not self._path:
             raise CaptureError(f'{tool} no encontrado')
+        # Fichero temporal único por INSTANCIA: el cliente usa dos capturadores
+        # simultáneos (miniaturas y WebRTC) y no pueden compartir el mismo PNG.
         self._tmp = os.path.join(
-            tempfile.gettempdir(), f'vigia_cap_{os.getpid()}.png')
+            tempfile.gettempdir(),
+            f'vigia_cap_{os.getpid()}_{next(self._SEQ)}.png')
         self._geom = None
         # Captura de prueba: valida permisos/entorno en el constructor
         self.grab()
@@ -110,20 +121,21 @@ class CliBackend:
 
     def grab(self):
         from PIL import Image
-        try:
-            os.remove(self._tmp)
-        except OSError:
-            pass
-        args = [a.format(out=self._tmp) if '{out}' in a else a
-                for a in self._cmd]
-        args[0] = self._path
-        r = subprocess.run(args, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=10)
-        if r.returncode != 0 or not os.path.isfile(self._tmp):
-            raise CaptureError(f'{self.name} devolvió {r.returncode}')
-        img = Image.open(self._tmp).convert('RGB')
-        if img.width < 2 or img.height < 2:
-            raise CaptureError(f'{self.name} produjo una imagen vacía')
+        with self._GRAB_LOCK:
+            try:
+                os.remove(self._tmp)
+            except OSError:
+                pass
+            args = [a.format(out=self._tmp) if '{out}' in a else a
+                    for a in self._cmd]
+            args[0] = self._path
+            r = subprocess.run(args, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=10)
+            if r.returncode != 0 or not os.path.isfile(self._tmp):
+                raise CaptureError(f'{self.name} devolvió {r.returncode}')
+            img = Image.open(self._tmp).convert('RGB')
+            if img.width < 2 or img.height < 2:
+                raise CaptureError(f'{self.name} produjo una imagen vacía')
         self._geom = {'left': 0, 'top': 0,
                       'width': img.width, 'height': img.height}
         return img
