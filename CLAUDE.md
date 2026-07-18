@@ -75,8 +75,12 @@ pipewire_capture.py ────────────────────
   (CreateSession → SelectSources → Start → OpenPipeWireRemote) bombeando el
   contexto GLib EN EL MISMO HILO (libdbus no es thread-safe con un loop en
   otro hilo). PipeWireBackend tira frames con GStreamer
-  (pipewiresrc fd=.. path=.. ! videoconvert ! RGB ! appsink, drop=true,
-  max-buffers=1). persist_mode=2 → restore_token persistido en
+  (pipewiresrc fd=.. path=.. ! videoconvert ! BGRx ! appsink, drop=true,
+  max-buffers=1). BGRx es el formato NATIVO de KWin → videoconvert queda en
+  passthrough (forzar RGB convertía el frame completo por software a 30-60
+  fps y ralentizaba todo el equipo del alumno). API extra: .grab_raw() →
+  (data BGRx, w, h, stride) sin pasar por PIL (vía rápida WebRTC).
+  persist_mode=2 → restore_token persistido en
   ~/.config/vigia/screencast.token (1 diálogo por usuario, luego silencioso).
   cursor_mode=2 (embedded) para que el cursor del alumno viaje en el vídeo.
   Deps (apt): python3-gi, python3-dbus, python3-gst-1.0, gstreamer1.0-pipewire,
@@ -136,8 +140,13 @@ client.py ───────────────────────�
     Los adjuntos (base64) se guardan en ~/Descargas y se abren con xdg-open.
   WebRTC (opcional, requiere python3-aiortc):
     - Hilo asyncio dedicado (_asyncio_runner / _webrtc_loop).
-    - ScreenStreamTrack: captura mss a 15 fps en thread pool, devuelve
-      av.VideoFrame RGB para aiortc.
+    - ScreenStreamTrack: captura vía screen_capture en un executor propio de
+      1 hilo. Vía rápida: .grab_raw() (PipeWire/mss) entrega BGRx crudo y
+      swscale hace escala+conversión a yuv420p en UN paso SIMD
+      (frame.reformat con FAST_BILINEAR); el encoder VP8 recibe yuv420p y no
+      reconvierte. Los topes de bitrate de aiortc (VP8/H264) se elevan de
+      1.5 a 8 Mbps al importar (a 1080p el capado por defecto emborronaba la
+      imagen y hundía los fps).
     - _procesar_offer: crea RTCPeerConnection, añade track, gestiona
       DataChannel entrante (llama a on_do_input con los mensajes JSON).
     - _webrtc_activo = True cuando ICE conecta; suprime envío JPEG.

@@ -204,9 +204,13 @@ class PipeWireBackend:
         self._fd = fd
 
         # drop=true + max-buffers=1: appsink siempre sirve el frame más reciente.
+        # Se negocia BGRx: es el formato nativo que entrega KWin/PipeWire, así
+        # videoconvert queda en passthrough (coste 0 por frame). Con RGB se
+        # forzaba una conversión software del frame COMPLETO a 30-60 fps, que
+        # cargaba la CPU del alumno y hacía ir lento todo el sistema.
         desc = (
             'pipewiresrc fd=%d path=%d do-timestamp=true keepalive-time=1000 ! '
-            'videoconvert ! video/x-raw,format=RGB ! '
+            'videoconvert n-threads=0 ! video/x-raw,format=BGRx ! '
             'appsink name=sink emit-signals=false max-buffers=1 drop=true sync=false'
             % (fd, node_id))
         self._pipe = Gst.parse_launch(desc)
@@ -244,15 +248,20 @@ class PipeWireBackend:
 
     def grab(self):
         from PIL import Image
+        data, w, h, stride = self.grab_raw()
+        # El decoder raw 'BGRX' de PIL descarta el canal de relleno y acepta el
+        # stride real (séptimo argumento) por si GStreamer añade padding.
+        return Image.frombuffer('RGB', (w, h), data, 'raw', 'BGRX', stride, 1)
+
+    def grab_raw(self):
+        """Frame crudo BGRx sin pasar por PIL: (data, w, h, stride_bytes).
+
+        Es la vía rápida para WebRTC: el cliente lo convierte/escala con
+        swscale (libav) en un único paso SIMD, sin PIL ni copias extra."""
         w, h, data = self._pull()
-        # GStreamer alinea cada fila a múltiplo de 4 bytes: para anchos cuyo
-        # w*3 no es múltiplo de 4 hay padding al final de cada fila. Derivamos
-        # el stride real del tamaño del buffer y se lo pasamos al decoder de PIL
-        # (séptimo argumento) para que salte el relleno correctamente.
-        if h <= 0 or len(data) < w * h * 3:
+        if h <= 0 or len(data) < w * h * 4:
             raise RuntimeError('pipewire: frame incompleto')
-        stride = len(data) // h
-        return Image.frombuffer('RGB', (w, h), data, 'raw', 'RGB', stride, 1)
+        return data, w, h, len(data) // h
 
     def close(self):
         try:
