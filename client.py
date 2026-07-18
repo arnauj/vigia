@@ -178,10 +178,24 @@ WEBRTC_OK = False
 try:
     import asyncio, fractions
     import numpy as np
+    from concurrent.futures import ThreadPoolExecutor
     from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
     import av
     WEBRTC_OK = True
     print("  [✓] aiortc disponible — WebRTC habilitado.")
+    # aiortc capa el encoder VP8 a 1.5 Mbps (MAX_BITRATE): a 1080p la imagen
+    # sale borrosa y el control de tasa hunde los fps. Se elevan los topes al
+    # rango que usa RustDesk en LAN; el REMB del navegador sigue autorregulando
+    # el bitrate real según el ancho de banda disponible.
+    for _codec_mod in ('vp8', 'h264'):
+        try:
+            import importlib
+            _cm = importlib.import_module(f'aiortc.codecs.{_codec_mod}')
+            _cm.DEFAULT_BITRATE = 3_000_000
+            _cm.MIN_BITRATE     = 500_000
+            _cm.MAX_BITRATE     = 8_000_000
+        except Exception:
+            pass
 except ImportError:
     print("  [!] aiortc no instalado — usando fallback JPEG.")
 
@@ -464,6 +478,7 @@ _cola_overlay       = queue.Queue(maxsize=300)
 _en_observacion = False
 _webrtc_loop   = None   # event loop asyncio dedicado
 _webrtc_pc     = None   # RTCPeerConnection activa
+_webrtc_track  = None   # ScreenStreamTrack activo (cerrarlo libera la captura)
 _webrtc_prof   = None   # prof_sid del profesor conectado
 _webrtc_activo = False  # True cuando P2P establecido
 _pending_ice   = []     # ICE candidates recibidos antes del offer
@@ -475,6 +490,7 @@ if WEBRTC_OK:
     class ScreenStreamTrack(VideoStreamTrack):
         kind = "video"
         _CLOCK_RATE = 90000
+        _MAX_W      = 1920   # tope de anchura codificada (1080p)
 
         @property
         def _TARGET_FPS(self):
@@ -482,10 +498,14 @@ if WEBRTC_OK:
 
         def __init__(self):
             super().__init__()
-            self._cap      = None   # backend de screen_capture
-            self._ts       = 0
-            self._t0       = None
-            self._last_rgb = None   # último frame válido; se sirve si la captura falla
+            self._cap        = None   # backend de screen_capture
+            self._ts         = 0
+            self._t0         = None
+            self._last_frame = None   # último frame válido; se sirve si la captura falla
+            # Executor propio de un hilo: la captura no compite con otras tareas
+            # del pool por defecto y los frames se producen siempre en orden.
+            self._pool = ThreadPoolExecutor(max_workers=1,
+                                            thread_name_prefix='vigia-cap')
 
         async def recv(self):
             if self._t0 is None:
@@ -496,12 +516,32 @@ if WEBRTC_OK:
                 await asyncio.sleep(drift)
 
             loop = asyncio.get_event_loop()
-            rgb = await loop.run_in_executor(None, self._capturar)
-
-            frame = av.VideoFrame.from_ndarray(rgb, format='rgb24')
+            frame = await loop.run_in_executor(self._pool, self._capturar)
             frame.pts       = self._ts
             frame.time_base = fractions.Fraction(1, self._CLOCK_RATE)
             return frame
+
+        def _out_size(self, w, h):
+            """Tamaño de salida: tope _MAX_W y dimensiones pares (yuv420p)."""
+            if w > self._MAX_W:
+                h = int(h * self._MAX_W / w)
+                w = self._MAX_W
+            return w & ~1, h & ~1
+
+        def _a_frame(self, arr, fmt):
+            """ndarray → av.VideoFrame yuv420p ya escalado.
+
+            swscale (libav) hace conversión de color + escala en UN paso SIMD;
+            el encoder VP8 de aiortc recibe yuv420p y no vuelve a convertir.
+            Esto sustituye la cadena PIL resize → numpy → conversión del
+            encoder, que consumía la CPU del alumno a 30 fps."""
+            frame = av.VideoFrame.from_ndarray(arr, format=fmt)
+            out_w, out_h = self._out_size(frame.width, frame.height)
+            try:
+                return frame.reformat(out_w, out_h, 'yuv420p',
+                                      interpolation='FAST_BILINEAR')
+            except (TypeError, ValueError):
+                return frame.reformat(out_w, out_h, 'yuv420p')
 
         def _capturar(self):
             try:
@@ -514,14 +554,23 @@ if WEBRTC_OK:
                 _mon_top  = mon.get('top',  0)
                 _mon_width  = mon.get('width',  _mon_width)
                 _mon_height = mon.get('height', _mon_height)
-                img = self._cap.grab()   # PIL.Image RGB
-                # Cap at 1920px wide for good resolution; VP8 at 4 Mbps handles 1080p well.
-                if img.width > 1920:
-                    img = img.resize((1920, int(img.height * 1920 / img.width)),
-                                     Image.BILINEAR)
-                rgb = np.array(img)
-                self._last_rgb = rgb
-                return rgb
+                if hasattr(self._cap, 'grab_raw'):
+                    # Vía rápida (PipeWire en Wayland, mss en X11): frame BGRx
+                    # crudo, sin PIL. Igual que RustDesk: captura nativa → swscale.
+                    data, w, h, stride = self._cap.grab_raw()
+                    arr = np.frombuffer(data, dtype=np.uint8)
+                    if stride == w * 4:
+                        arr = arr.reshape(h, w, 4)
+                    else:  # filas con padding: compactar
+                        arr = np.ascontiguousarray(
+                            arr.reshape(h, stride)[:, :w * 4]).reshape(h, w, 4)
+                    frame = self._a_frame(arr, 'bgra')
+                else:
+                    # Backends CLI (spectacle/grim): siguen entregando PIL
+                    img = self._cap.grab()
+                    frame = self._a_frame(np.asarray(img), 'rgb24')
+                self._last_frame = frame
+                return frame
             except Exception as e:
                 print(f"  [WebRTC] Captura: {e}")
                 if self._cap:
@@ -529,9 +578,18 @@ if WEBRTC_OK:
                     except: pass
                     self._cap = None
                 # Devolver el último frame válido (imagen congelada) en lugar de negro
-                if self._last_rgb is not None:
-                    return self._last_rgb
-                return np.zeros((1080, 1920, 3), dtype=np.uint8)
+                if self._last_frame is not None:
+                    return self._last_frame
+                return self._a_frame(np.zeros((720, 1280, 3), dtype=np.uint8),
+                                     'rgb24')
+
+        def stop(self):
+            super().stop()
+            if self._cap:
+                try: self._cap.close()
+                except Exception: pass
+                self._cap = None
+            self._pool.shutdown(wait=False)
 
 def _asyncio_runner():
     global _webrtc_loop
@@ -925,17 +983,21 @@ if WEBRTC_OK:
         _wrtc(_procesar_offer(data))
 
     async def _procesar_offer(data):
-        global _webrtc_pc, _webrtc_prof, _webrtc_activo, _pending_ice
+        global _webrtc_pc, _webrtc_track, _webrtc_prof, _webrtc_activo, _pending_ice
         if _webrtc_pc:
             await _webrtc_pc.close()
-        _webrtc_pc = None; _webrtc_activo = False
+        if _webrtc_track:
+            try: _webrtc_track.stop()
+            except Exception: pass
+        _webrtc_pc = None; _webrtc_track = None; _webrtc_activo = False
 
         prof_sid = data.get('prof_sid')
         _webrtc_prof = prof_sid
 
         pc = RTCPeerConnection()
         _webrtc_pc = pc
-        pc.addTrack(ScreenStreamTrack())
+        _webrtc_track = ScreenStreamTrack()
+        pc.addTrack(_webrtc_track)
 
         @pc.on("datachannel")
         def on_dc(channel):
@@ -1012,9 +1074,13 @@ if WEBRTC_OK:
             pass  # Candidatos inválidos/tardíos: ignorar silenciosamente
 
     async def _cerrar_webrtc():
-        global _webrtc_pc, _webrtc_activo, _webrtc_prof
+        global _webrtc_pc, _webrtc_track, _webrtc_activo, _webrtc_prof
         if _webrtc_pc: await _webrtc_pc.close()
-        _webrtc_pc = None; _webrtc_activo = False; _webrtc_prof = None
+        if _webrtc_track:
+            try: _webrtc_track.stop()
+            except Exception: pass
+        _webrtc_pc = None; _webrtc_track = None
+        _webrtc_activo = False; _webrtc_prof = None
 
 # ── Overlay pizarra (cliente) ───────────────────────────────────────────────
 # Click-through ahora delegado a platform_utils.set_clickthrough()

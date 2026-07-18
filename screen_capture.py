@@ -138,6 +138,13 @@ class MssBackend:
         cap = self._sct.grab(self._sct.monitors[self.index])
         return Image.frombytes('RGB', cap.size, cap.bgra, 'raw', 'BGRX')
 
+    def grab_raw(self):
+        """Frame crudo BGRA sin PIL: (data, w, h, stride_bytes).
+        Vía rápida para WebRTC (conversión/escala vía swscale)."""
+        cap = self._sct.grab(self._sct.monitors[self.index])
+        w, h = cap.size
+        return cap.bgra, w, h, w * 4
+
     def close(self):
         try:
             self._sct.close()
@@ -239,6 +246,10 @@ class _SharedPipeWire:
     def grab(self):
         with _pw_grab_lock:
             return self._b.grab()
+
+    def grab_raw(self):
+        with _pw_grab_lock:
+            return self._b.grab_raw()
 
     def close(self):
         if self._closed:
