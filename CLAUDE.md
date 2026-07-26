@@ -9,7 +9,7 @@ Classroom monitoring software for Linux (Kubuntu/Ubuntu). The teacher runs a ser
 **Critical constraint (sesiones gráficas):** `mss` (captura) y `xdotool`/`pynput` (control remoto) solo funcionan en X11. Kubuntu 25.10+/26.04 usa **Wayland como única sesión por defecto**, así que existe una capa de compatibilidad:
 - **Captura:** `screen_capture.py` abstrae el backend — `mss` en X11/Windows; en Wayland se prefiere **PipeWire vía el portal ScreenCast** (`pipewire_capture.py`, ~30-60 fps, fluido como RustDesk) y, si el portal no está/se deniega, cae a `spectacle -b -n -f -o` (KDE), `grim` (wlroots) o `gnome-screenshot` (GNOME) (~1-3 fps). El portal PipeWire muestra UN diálogo de permiso la primera vez por usuario; con `restore_token` (guardado en `~/.config/vigia/screencast.token`) las siguientes sesiones son silenciosas.
 - **Detección de sesión robusta:** `session_type()` detecta Wayland aunque el proceso se lance sin `WAYLAND_DISPLAY` (sondea el socket `wayland-*` en `XDG_RUNTIME_DIR`) y fija el entorno para los hijos (spectacle/ydotool). Sin esto, el cliente veía solo `DISPLAY=:0` (XWayland), usaba `mss` y capturaba el root vacío de XWayland = **pantalla negra**.
-- **Control remoto:** en Wayland el **puntero** (mover/clic/scroll) va por `vigia_input.py` — un demonio root propio que crea un dispositivo uinput con eje **ABSOLUTO** (servicio `vigia-input`). Es imprescindible: el dispositivo de ydotool solo tiene ejes RELATIVOS, así que `ydotool mousemove -a` deja el cursor pegado en la esquina superior izquierda (disparando además los hot-corners de KDE). El **teclado** sigue por `ydotool` (servicio `vigia-ydotoold`). xdotool/pynput son el backend X11.
+- **Control remoto:** en Wayland el **puntero** (mover/clic/scroll) va por `vigia_input.py` — un demonio root propio que crea un dispositivo uinput con eje **ABSOLUTO** (servicio `vigia-input`). Es imprescindible: el dispositivo de ydotool solo tiene ejes RELATIVOS, así que `ydotool mousemove -a` deja el cursor pegado en la esquina superior izquierda (disparando además los hot-corners de KDE). El **teclado** va también por ese demonio (comando `{"t":"k"}`, códigos de kernel) cuando anuncia la capacidad `kb`: cada tecla por `ydotool` costaba un fork+exec (~20-30 ms) y escribir en remoto se notaba pegajoso. `ydotool` (servicio `vigia-ydotoold`) sigue siendo el respaldo y el único que escribe caracteres Unicode arbitrarios (`type`). xdotool/pynput son el backend X11.
 - **Bloqueo de pantalla:** en Wayland `grab_set_global()` (XGrabKeyboard) NO funciona. El bloqueo real lo hace el demonio `vigia-input` con `EVIOCGRAB` sobre los dispositivos de entrada FÍSICOS del alumno (su teclado/ratón quedan inertes), mientras el ratón virtual del profesor sigue inyectando. Se libera automáticamente si la conexión del cliente se cae (fail-safe: el alumno nunca queda bloqueado permanentemente).
 - Captura de ventanas individuales, bloqueo global de pantalla y captura a ~30 fps siguen requiriendo X11 (`plasma-session-x11` sigue en el archive de Ubuntu 26.04, sin soporte oficial de Kubuntu).
 
@@ -55,6 +55,9 @@ server.py ───────────────────────�
   Ruta /img/<filename>: sirve iconos estáticos (icon-192.png, icon-512.png).
   _teacher_capture_loop: usa socketio.start_background_task + socketio.sleep;
   captura vía screen_capture (mss en X11, spectacle/grim en Wayland).
+  No reenvía frames idénticos (pantalla quieta = 0 tráfico; refresco forzado
+  cada 2 s para los que acaban de conectarse), escala con BILINEAR a
+  _share_cfg['width'] y manda la vista previa al profesor a 2 fps.
   Captura de ventana individual: solo X11 (mss + xdotool).
 
 screen_capture.py ──────────────────────────────────────────────────
@@ -62,8 +65,11 @@ screen_capture.py ────────────────────�
   session_type() → 'x11' | 'wayland' | 'windows' | 'unknown'
   create_capturer() → MssBackend (X11/Win) o CliBackend (Wayland:
   spectacle/grim/gnome-screenshot, orden según XDG_CURRENT_DESKTOP).
-  API: .grab() → PIL.Image RGB, .monitor() → {left,top,width,height},
+  API: .grab(max_age=0) → PIL.Image RGB, .monitor() → {left,top,width,height},
   .close(). MssBackend además: .set_monitor(i), .monitors().
+  max_age reutiliza el último frame capturado si es más reciente que ese
+  tiempo (miniaturas + WebRTC comparten frame en vez de capturar dos veces);
+  grab_shared(cap, max_age) lo aplica tolerando backends antiguos.
   Importa mss/PIL de forma perezosa (los tests los mockean).
   En Wayland prueba PRIMERO PipeWireBackend (pipewire_capture) compartido por
   refcount (un solo stream/sesión del portal para miniaturas + WebRTC); si falla
@@ -80,6 +86,9 @@ pipewire_capture.py ────────────────────
   passthrough (forzar RGB convertía el frame completo por software a 30-60
   fps y ralentizaba todo el equipo del alumno). API extra: .grab_raw() →
   (data BGRx, w, h, stride) sin pasar por PIL (vía rápida WebRTC).
+  La tasa se negocia con tope MAX_FPS=30 (caps framerate=[0/1,30/1]): KWin
+  compone y copia la mitad de frames que a 60 Hz. Si esa negociación falla se
+  reconstruye la tubería sin tope (fd duplicado por intento).
   persist_mode=2 → restore_token persistido en
   ~/.config/vigia/screencast.token (1 diálogo por usuario, luego silencioso).
   cursor_mode=2 (embedded) para que el cursor del alumno viaje en el vídeo.
@@ -96,6 +105,10 @@ vigia_input.py ─────────────────────�
   {"t":"b","btn","s"} botón, {"t":"s","dy"} rueda, {"t":"grab","on"} bloquear
   (EVIOCGRAB de los dispositivos físicos del alumno excepto el virtual). El
   grab se libera SOLO si la conexión que lo pidió se cierra (fail-safe).
+  El dispositivo declara además TODO el teclado (códigos 1..248) y acepta
+  {"t":"k","code","s"}: las teclas dejan de costar un fork+exec de ydotool
+  (~20-30 ms cada una). {"t":"hello"} responde {"ok":1,"feat":["kb"]}; un
+  demonio antiguo no contesta y el cliente sigue con ydotool (compatibilidad).
   Cliente: clase VigiaInput (la usa client.py). Requiere python3-evdev (apt).
   Coordenadas: client.py normaliza x_px/ancho_monitor*32767 antes de enviar.
 
@@ -138,15 +151,31 @@ client.py ───────────────────────�
   Auto-instala sus dependencias pip al arrancar si faltan.
   _VentanaMensaje: muestra texto enriquecido + archivos adjuntos recibidos.
     Los adjuntos (base64) se guardan en ~/Descargas y se abren con xdg-open.
+  Las miniaturas usan grab_shared(cap, max_age=…): si WebRTC acaba de
+  capturar un frame se reaprovecha (ni doble captura ni pelea por el
+  appsink de PipeWire) y se escalan con BILINEAR+reducing_gap, no LANCZOS.
   WebRTC (opcional, requiere python3-aiortc):
     - Hilo asyncio dedicado (_asyncio_runner / _webrtc_loop).
     - ScreenStreamTrack: captura vía screen_capture en un executor propio de
       1 hilo. Vía rápida: .grab_raw() (PipeWire/mss) entrega BGRx crudo y
       swscale hace escala+conversión a yuv420p en UN paso SIMD
       (frame.reformat con FAST_BILINEAR); el encoder VP8 recibe yuv420p y no
-      reconvierte. Los topes de bitrate de aiortc (VP8/H264) se elevan de
-      1.5 a 8 Mbps al importar (a 1080p el capado por defecto emborronaba la
-      imagen y hundía los fps).
+      reconvierte.
+    - PTS por RELOJ REAL (no por contador de frames). Con el contador, un
+      equipo que solo daba 15 de los 30 fps pedidos marcaba cada frame con el
+      doble de duración: el navegador lo reproducía a cámara lenta y el
+      retardo del control remoto crecía sin parar.
+    - Resolución ADAPTATIVA (_ESCALONES 1920→1600→1280→1024→800). Se mide el
+      intervalo real entre llamadas a recv() (captura+escala+codificación) y
+      se baja un escalón si no se llega al objetivo. Si bajar NO mejora el
+      ritmo (cuello de botella en la captura, p. ej. spectacle), se vuelve al
+      escalón anterior y se congela la adaptación (60 s, duplicándose).
+    - Topes de bitrate de aiortc elevados de 1.5 a 8 Mbps al importar. OJO: el
+      módulo es `aiortc.codecs.vpx` (NO `vp8`, que no existe en aiortc ≥1.x);
+      con el nombre equivocado el parche se perdía en silencio y el vídeo
+      seguía capado a 1.5 Mbps = borroso a 1080p.
+    - number_of_threads() de aiortc se sustituye para que libvpx use todos los
+      núcleos (el reparto original dejaba 1080p con 2 hilos en un PC de 4).
     - _procesar_offer: crea RTCPeerConnection, añade track, gestiona
       DataChannel entrante (llama a on_do_input con los mensajes JSON).
     - _webrtc_activo = True cuando ICE conecta; suprime envío JPEG.
@@ -179,10 +208,11 @@ instalar_cliente.sh ────────────────────
   Arranca el cliente inmediatamente sin esperar al siguiente reinicio.
 
 test_remote_control.py ─────────────────────────────────────────────
-  Suite de tests (unittest) para el control remoto. 55 tests. Ejecutar:
+  Suite de tests (unittest) para el control remoto. 70 tests. Ejecutar:
     python3 test_remote_control.py
   Cubre: mapas de teclas xdotool, _procesar_input (ratón + teclado),
-  backend ydotool (Wayland), detección de sesión de screen_capture,
+  backend ydotool (Wayland), teclado por uinput (vigia_input), caché de
+  capturas (grab_shared), detección de sesión de screen_capture,
   encolado en _input_q, traducción de coordenadas (letterbox/pillarbox),
   enrutamiento DataChannel (_enviarInput). No requiere servidor ni X11.
 
@@ -251,6 +281,13 @@ Dashboard → Cliente            : eventos teclado (RTCDataChannel 'vigia-input'
 - **Bloqueo de pantalla** usa `grab_set_global()` de Tkinter (XGrabPointer + XGrabKeyboard) para capturar todos los eventos X11.
 - **Backends de control remoto:** en Wayland, ydotool (uinput) es el único que inyecta en todo el escritorio; `_procesar_input` lo usa en exclusiva si `_YDO_CMD` está definido. En X11, xdotool es el backend principal y pynput el fallback automático.
 - **Captura en Wayland:** spectacle/grim escriben un PNG por frame (~0,5 s), así que la observación en vivo baja a ~1-3 fps y WebRTC se autorregula a ese ritmo. Las miniaturas de 1 s no se ven afectadas.
+- **Rendimiento (dónde se va el tiempo).** Las palancas que de verdad mueven la aguja en Kubuntu 26, en orden:
+  1. *Bitrate del encoder*: el parche de `MAX_BITRATE` debe apuntar a `aiortc.codecs.vpx`. Si al arrancar el cliente no aparece «Bitrate WebRTC elevado a 8 Mbps», el vídeo irá capado a 1.5 Mbps (borroso a 1080p).
+  2. *PTS por reloj real* en `ScreenStreamTrack.recv()`: cualquier vuelta a un contador de frames reintroduce el retardo creciente del control remoto.
+  3. *Hilos de libvpx*: sin el parche de `number_of_threads`, 1080p usa 2 hilos en un PC de 4 núcleos.
+  4. *Capturar una sola vez*: miniaturas y WebRTC comparten frame con `max_age`; capturar dos veces satura el appsink de PipeWire (max-buffers=1) y el compositor.
+  5. *No reenviar lo que no cambia*: la pantalla compartida del profesor omite los frames idénticos (dashboard y servidor).
+  6. *Teclado sin fork*: con el demonio `vigia-input` nuevo las teclas van por uinput; con uno antiguo, cada pulsación cuesta un proceso ydotool.
 - **Coordenadas en modo control WebRTC:** el `<video>` usa `max-width:100%;max-height:100%` (no `width:100%;height:100%`) para que `getBoundingClientRect()` devuelva el área real del contenido, igual que el `<img>`.
 - **Adjuntos en mensajes:** el dashboard codifica los archivos en base64 (límite 10 MB total) y los envía junto al mensaje. El cliente los decodifica y guarda en `~/Descargas`, con botón para abrir cada uno con `xdg-open`.
 - **IP por defecto del cliente:** `instalar_cliente.sh` auto-detecta la IP local con `ip route get 1.1.1.1` y sustituye el último octeto por `.2` para apuntar al servidor por convención.

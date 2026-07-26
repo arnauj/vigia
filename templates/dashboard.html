@@ -2566,7 +2566,10 @@ let _shareRunning = false;
 let _shareTimeout = null;
 const _shareVideo  = document.createElement('video');
 const _shareCanvas = document.createElement('canvas');
-const _shareCtx    = _shareCanvas.getContext('2d', { willReadFrequently: true });
+// alpha:false evita arrastrar un canal alfa que el JPEG ni siquiera usa, en
+// cada drawImage y en cada toDataURL. willReadFrequently se mantiene: este
+// canvas se lee entero (toDataURL) en cada frame.
+const _shareCtx    = _shareCanvas.getContext('2d', { alpha: false, willReadFrequently: true });
 _shareVideo.autoplay = true; _shareVideo.muted = true; _shareVideo.playsInline = true;
 // Insertar el video oculto en el DOM para que los eventos (loadedmetadata, etc.)
 // se disparen correctamente en todos los navegadores/plataformas.
@@ -2574,7 +2577,9 @@ _shareVideo.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;h
 document.addEventListener('DOMContentLoaded', () => document.body.appendChild(_shareVideo));
 let FPS_SHARE     = 10;
 let CALIDAD_SHARE = 0.70;
-const ANCHO_SHARE   = 1920;
+// 1600 px basta para texto nítido a pantalla completa y recorta ~30% de píxeles
+// (y de bytes) frente a 1920 en cada frame enviado a TODOS los alumnos.
+const ANCHO_SHARE   = 1600;
 
 function _canGetDisplayMedia() {
   // getDisplayMedia requiere contexto seguro (HTTPS o localhost).
@@ -2705,23 +2710,44 @@ socket.on('teacher_screen_preview', data => {
 
 // ── Loop captura local (Chrome) ──
 let _shareFrameCount = 0;
+let _shareUltimoJpeg = null;   // último frame enviado (para no repetirlo)
+let _shareUltimoEnvio = 0;
+let _shareUltimaPrev  = 0;
 function _loopCompartir() {
   if (!_shareRunning || !_shareStream) return;
   if (_shareVideo.videoWidth) {
     const vw = _shareVideo.videoWidth, vh = _shareVideo.videoHeight;
-    _shareCanvas.width  = Math.min(vw, ANCHO_SHARE);
-    _shareCanvas.height = Math.round(_shareCanvas.width * vh / vw);
+    const ancho = Math.min(vw, ANCHO_SHARE);
+    if (_shareCanvas.width !== ancho) {
+      _shareCanvas.width  = ancho;
+      _shareCanvas.height = Math.round(ancho * vh / vw);
+    }
     _shareCtx.drawImage(_shareVideo, 0, 0, _shareCanvas.width, _shareCanvas.height);
     const img = _shareCanvas.toDataURL('image/jpeg', CALIDAD_SHARE);
-    const _sharePayload = { image: img, activa: true };
-    if (_shareSids) _sharePayload.sids = [..._shareSids];
-    socket.emit('teacher_screenshot', _sharePayload);
-    _shareFrameCount++;
-    if (_shareFrameCount <= 3 || _shareFrameCount % 100 === 0)
-      console.log('[VIGIA] Frame #' + _shareFrameCount + ' enviado (' + Math.round(img.length/1024) + ' KB)');
-    const prev = document.getElementById('share-preview');
-    prev.src = img;
-    if (!prev.classList.contains('show')) prev.classList.add('show');
+    const ahora = Date.now();
+    // Con la pantalla quieta (una diapositiva, un documento) el JPEG sale
+    // idéntico byte a byte: reenviarlo 10 veces por segundo a TODOS los alumnos
+    // era lo que saturaba la red del aula. Se refresca cada 2 s de todas formas
+    // para quien acabe de conectarse.
+    const repetido = (img === _shareUltimoJpeg) && (ahora - _shareUltimoEnvio < 2000);
+    if (!repetido) {
+      _shareUltimoJpeg = img;
+      _shareUltimoEnvio = ahora;
+      const _sharePayload = { image: img, activa: true };
+      if (_shareSids) _sharePayload.sids = [..._shareSids];
+      socket.emit('teacher_screenshot', _sharePayload);
+      _shareFrameCount++;
+      if (_shareFrameCount <= 3 || _shareFrameCount % 100 === 0)
+        console.log('[VIGIA] Frame #' + _shareFrameCount + ' enviado (' + Math.round(img.length/1024) + ' KB)');
+    }
+    // La miniatura propia no necesita 10 fps: decodificar el JPEG completo en
+    // cada frame solo para la vista previa costaba más que la propia captura.
+    if (!repetido && ahora - _shareUltimaPrev >= 500) {
+      _shareUltimaPrev = ahora;
+      const prev = document.getElementById('share-preview');
+      prev.src = img;
+      if (!prev.classList.contains('show')) prev.classList.add('show');
+    }
   } else {
     console.warn('[VIGIA] _loopCompartir: videoWidth=0, esperando...');
   }
@@ -2731,6 +2757,7 @@ function _loopCompartir() {
 function detenerCompartir() {
   _sharing = false; _shareRunning = false;
   _shareSids = null;
+  _shareUltimoJpeg = null;   // la próxima sesión debe enviar su primer frame
   clearTimeout(_shareTimeout);
   if (_shareStream) {
     _shareStream.getTracks().forEach(t => t.stop());

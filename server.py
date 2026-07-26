@@ -107,6 +107,10 @@ viewers: dict = {}
 # Estado de compartir pantalla del profesor
 _teacher_capture = {'running': False, 'sid': None, 'sids': None}
 
+# Parámetros de la captura del profesor (fallback sin getDisplayMedia).
+# Los ajusta el panel desde «Rendimiento» (update_config).
+_share_cfg = {'width': 1600, 'quality': 70, 'sleep': 0.1}
+
 
 def get_local_ip():
     """Detecta la IP local de la máquina."""
@@ -315,6 +319,10 @@ def on_update_config(data):
         'live_quality':   int(data.get('live_quality', 70)),
     }
     socketio.emit('config_update', cfg, include_self=False)
+    # La captura del profesor (fallback sin getDisplayMedia) sigue los mismos
+    # ajustes de calidad/fps que el resto del vídeo en vivo.
+    _share_cfg['quality'] = max(20, min(95, cfg['live_quality']))
+    _share_cfg['sleep']   = 1.0 / max(1, cfg['live_fps'])
     print(f"[*] Configuración actualizada: intervalo={cfg['thumb_interval']}s, "
           f"JPEG live={cfg['live_fps']}fps, WebRTC={cfg['webrtc_fps']}fps")
 
@@ -363,6 +371,9 @@ def _teacher_capture_loop():
                           to=_teacher_capture['sid'])
             return
 
+    ultimo_hash = None
+    ultimo_envio = 0.0
+    ultima_preview = 0.0
     try:
         while _teacher_capture['running']:
             try:
@@ -375,23 +386,45 @@ def _teacher_capture_loop():
                     img = Image.frombytes('RGB', (cap.width, cap.height), cap.rgb)
                 else:
                     img = capturer.grab()
-                max_w = 1920
+                max_w = _share_cfg['width']
                 if img.width > max_w:
                     ratio = max_w / img.width
-                    img = img.resize((max_w, int(img.height * ratio)), Image.LANCZOS)
+                    # BILINEAR + reducing_gap: a 10 fps, LANCZOS sobre 1080p
+                    # consumía un núcleo entero del equipo del profesor.
+                    img = img.resize((max_w, int(img.height * ratio)),
+                                     Image.BILINEAR, reducing_gap=2.0)
                 buf = io.BytesIO()
-                img.save(buf, 'JPEG', quality=70)
-                data_uri = 'data:image/jpeg;base64,' + base64.b64encode(buf.getvalue()).decode()
+                img.save(buf, 'JPEG', quality=_share_cfg['quality'])
+                jpeg = buf.getvalue()
+
+                # Los frames idénticos (diapositiva fija, documento sin tocar)
+                # no se reenvían: es lo que más satura la red del aula, porque
+                # cada frame va a TODOS los alumnos. Se refresca igualmente cada
+                # 2 s para los alumnos que acaban de conectarse.
+                ahora = time.monotonic()
+                h = hash(jpeg)
+                if h == ultimo_hash and (ahora - ultimo_envio) < 2.0:
+                    socketio.sleep(_share_cfg['sleep'])
+                    continue
+                ultimo_hash = h
+                ultimo_envio = ahora
+
+                data_uri = 'data:image/jpeg;base64,' + base64.b64encode(jpeg).decode()
                 _sids = _teacher_capture.get('sids')
                 if _sids:
                     for _sid in _sids:
                         socketio.emit('teacher_screen', {'activa': True, 'image': data_uri}, to=_sid)
                 else:
                     socketio.emit('teacher_screen', {'activa': True, 'image': data_uri})
-                socketio.emit('teacher_screen_preview', {'image': data_uri}, to=_teacher_capture['sid'])
+                # La miniatura de control del profesor no necesita ir a la misma
+                # tasa que los alumnos: duplicaba el tráfico del servidor.
+                if (ahora - ultima_preview) >= 0.5:
+                    ultima_preview = ahora
+                    socketio.emit('teacher_screen_preview', {'image': data_uri},
+                                  to=_teacher_capture['sid'])
             except Exception as e:
                 print(f'[!] Error capturando pantalla del profesor: {e}')
-            socketio.sleep(0.1)  # 10 FPS — cede el event loop (eventlet/threading)
+            socketio.sleep(_share_cfg['sleep'])  # cede el event loop (eventlet/threading)
     finally:
         for c in (capturer, sct):
             try:

@@ -541,6 +541,7 @@ class _FakeVigiaInput:
     def move(self, xn, yn): self.calls.append(('move', xn, yn)); return True
     def button(self, btn, s): self.calls.append(('button', btn, s)); return True
     def scroll(self, dy, dx=0): self.calls.append(('scroll', dy)); return True
+    def key(self, code, s): self.calls.append(('key', code, s)); return True
     def grab(self, on): self.calls.append(('grab', on)); return True
 
 
@@ -577,13 +578,100 @@ class TestVigiaInputPointer(unittest.TestCase):
         self.assertIn(('scroll', -1), self.vi.calls)
 
     def test_teclado_no_va_a_vigia_input(self):
-        # El teclado NO debe ir por vigia_input (sigue por ydotool/xdotool).
+        # Con un demonio antiguo (sin capacidad 'kb') el teclado sigue por
+        # ydotool/xdotool.
+        client._VI_TECLADO = False
         client._YDO_CMD = None
         client._XDO_CMD = None
         client._mouse_ctrl = None
         client._kbd_ctrl = None
         client._procesar_input({'type': 'keypress', 'key': 'a'})
         self.assertEqual(self.vi.calls, [])
+
+
+class TestVigiaInputTeclado(unittest.TestCase):
+    """Con un demonio que anuncia 'kb', el teclado va por uinput (sin ydotool)."""
+
+    def setUp(self):
+        self.vi = _FakeVigiaInput()
+        self._ydo = client._YDO_CMD
+        client._VIGIA_INPUT = self.vi
+        client._VI_TECLADO = True
+        client._YDO_CMD = '/usr/bin/ydotool'   # existe, pero no debe usarse
+
+    def tearDown(self):
+        client._VIGIA_INPUT = None
+        client._VI_TECLADO = False
+        client._YDO_CMD = self._ydo
+
+    def test_keypress_pulsa_y_suelta(self):
+        with patch('subprocess.run') as run:
+            client._procesar_input({'type': 'keypress', 'key': 'a'})
+        # 'a' = KEY_A (30) en códigos de kernel
+        self.assertEqual(self.vi.calls, [('key', 30, 1), ('key', 30, 0)])
+        run.assert_not_called()
+
+    def test_keydown_y_keyup(self):
+        client._procesar_input({'type': 'keydown', 'key': 'ctrl'})
+        client._procesar_input({'type': 'keyup', 'key': 'ctrl'})
+        self.assertEqual(self.vi.calls, [('key', 29, 1), ('key', 29, 0)])
+
+    def test_keycombo_orden_inverso_al_soltar(self):
+        client._procesar_input({'type': 'keycombo', 'combo': 'ctrl+c'})
+        self.assertEqual(self.vi.calls,
+                         [('key', 29, 1), ('key', 46, 1),
+                          ('key', 46, 0), ('key', 29, 0)])
+
+    def test_tecla_desconocida_cae_a_ydotool(self):
+        with patch.object(client, '_procesar_input_ydo') as ydo:
+            client._procesar_input({'type': 'keypress', 'key': 'ñ'})
+        self.assertEqual(self.vi.calls, [])
+        ydo.assert_called_once()
+
+    def test_demonio_que_arranca_tarde_se_detecta_luego(self):
+        # El servicio vigia-input puede arrancar DESPUÉS que el cliente: el
+        # saludo se reintenta y el teclado pasa a uinput sin reiniciar nada.
+        client._VI_TECLADO = False
+        client._VI_KB_PROBE = 0.0
+        self.vi.features = lambda timeout=0.8: {'kb'}
+        with patch.object(client, '_ES_WAYLAND', True):
+            self.assertTrue(client._vi_teclado_disponible())
+            client._procesar_input({'type': 'keypress', 'key': 'enter'})
+        self.assertEqual(self.vi.calls, [('key', 28, 1), ('key', 28, 0)])
+
+    def test_escritura_sigue_yendo_por_ydotool(self):
+        # 'type' admite cualquier carácter Unicode: eso lo resuelve ydotool
+        # (remapea el teclado), no los códigos de kernel.
+        with patch.object(client, '_procesar_input_ydo') as ydo:
+            client._procesar_input({'type': 'type', 'char': 'á'})
+        self.assertEqual(self.vi.calls, [])
+        ydo.assert_called_once()
+
+
+class TestCacheCapturas(unittest.TestCase):
+    """grab_shared reutiliza el último frame para no capturar dos veces."""
+
+    def setUp(self):
+        import screen_capture
+        self.sc = screen_capture
+
+    def test_reutiliza_frame_reciente(self):
+        cap = MagicMock()
+        cap.grab.return_value = 'frame'
+        self.assertEqual(self.sc.grab_shared(cap, max_age=1.0), 'frame')
+        cap.grab.assert_called_once_with(max_age=1.0)
+
+    def test_backend_sin_max_age_no_rompe(self):
+        cap = MagicMock()
+        cap.grab.side_effect = [TypeError('sin max_age'), 'frame']
+        self.assertEqual(self.sc.grab_shared(cap, max_age=1.0), 'frame')
+        self.assertEqual(cap.grab.call_args_list, [call(max_age=1.0), call()])
+
+    def test_sin_max_age_captura_siempre(self):
+        cap = MagicMock()
+        cap.grab.return_value = 'frame'
+        self.sc.grab_shared(cap)
+        cap.grab.assert_called_once_with()
 
 
 class TestScreenCaptureSession(unittest.TestCase):
@@ -647,6 +735,7 @@ if __name__ == '__main__':
     for cls in (TestKeyMaps, TestProcesarInput, TestInputQueue,
                 TestCoordenadas, TestDataChannelRouting,
                 TestProcesarInputYdotool, TestVigiaInputPointer,
+                TestVigiaInputTeclado, TestCacheCapturas,
                 TestScreenCaptureSession):
         suite.addTests(loader.loadTestsFromTestCase(cls))
     runner = unittest.TextTestRunner(verbosity=2)

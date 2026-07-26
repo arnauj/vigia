@@ -11,6 +11,11 @@ captura con varios backends, en orden de preferencia según la sesión:
 
 Las importaciones de mss/PIL son perezosas para que los tests puedan
 mockearlas antes de importar client.py.
+
+Todos los backends aceptan `grab(max_age=segundos)` / `grab_raw(max_age=…)`:
+si el último frame capturado es más reciente que `max_age` se reutiliza en
+lugar de pedir otro al compositor. Así las miniaturas (1 fps) aprovechan el
+frame que acaba de tirar WebRTC en vez de duplicar la captura.
 """
 
 import itertools
@@ -105,6 +110,9 @@ class MssBackend:
         import mss
         self._sct = mss.mss()
         self.index = 1   # 0 = espacio virtual completo, 1..n = monitores
+        self._cache = None      # (data, w, h, stride) del último grab
+        self._cache_idx = None
+        self._cache_ts = 0.0
         # Validar que realmente puede capturar (lanza si no hay DISPLAY)
         cap = self._sct.grab(self._sct.monitors[1])
         # Guarda anti-pantalla-negra: en Wayland, mss lee el root VACÍO de
@@ -132,18 +140,28 @@ class MssBackend:
         return {'left': m.get('left', 0), 'top': m.get('top', 0),
                 'width': m['width'], 'height': m['height']}
 
-    def grab(self):
+    def grab(self, max_age=0.0):
         """Devuelve una PIL.Image RGB del monitor seleccionado."""
         from PIL import Image
-        cap = self._sct.grab(self._sct.monitors[self.index])
-        return Image.frombytes('RGB', cap.size, cap.bgra, 'raw', 'BGRX')
+        data, w, h, stride = self.grab_raw(max_age=max_age)
+        return Image.frombuffer('RGB', (w, h), data, 'raw', 'BGRX', stride, 1)
 
-    def grab_raw(self):
+    def grab_raw(self, max_age=0.0):
         """Frame crudo BGRA sin PIL: (data, w, h, stride_bytes).
-        Vía rápida para WebRTC (conversión/escala vía swscale)."""
+        Vía rápida para WebRTC (conversión/escala vía swscale).
+
+        `max_age` reutiliza el último frame si aún es reciente: evita una
+        segunda captura cuando miniaturas y WebRTC coinciden en el tiempo."""
+        if max_age > 0 and self._cache is not None and \
+                self._cache_idx == self.index and \
+                (time.monotonic() - self._cache_ts) <= max_age:
+            return self._cache
         cap = self._sct.grab(self._sct.monitors[self.index])
         w, h = cap.size
-        return cap.bgra, w, h, w * 4
+        self._cache = (cap.bgra, w, h, w * 4)
+        self._cache_idx = self.index
+        self._cache_ts = time.monotonic()
+        return self._cache
 
     def close(self):
         try:
@@ -182,6 +200,8 @@ class CliBackend:
             tempfile.gettempdir(),
             f'vigia_cap_{os.getpid()}_{next(self._SEQ)}.png')
         self._geom = None
+        self._cache = None      # última PIL.Image capturada
+        self._cache_ts = 0.0
         # Captura de prueba: valida permisos/entorno en el constructor
         self.grab()
 
@@ -190,8 +210,14 @@ class CliBackend:
             self.grab()
         return self._geom
 
-    def grab(self):
+    def grab(self, max_age=0.0):
         from PIL import Image
+        # spectacle/grim lanzan un proceso y escriben un PNG (~0,5 s): compartir
+        # el último frame entre miniaturas y observación en vivo evita duplicar
+        # ese coste (y la espera en _GRAB_LOCK) cuando ambos coinciden.
+        if max_age > 0 and self._cache is not None and \
+                (time.monotonic() - self._cache_ts) <= max_age:
+            return self._cache
         with self._GRAB_LOCK:
             try:
                 os.remove(self._tmp)
@@ -209,6 +235,8 @@ class CliBackend:
                 raise CaptureError(f'{self.name} produjo una imagen vacía')
         self._geom = {'left': 0, 'top': 0,
                       'width': img.width, 'height': img.height}
+        self._cache = img
+        self._cache_ts = time.monotonic()
         return img
 
     def close(self):
@@ -243,13 +271,13 @@ class _SharedPipeWire:
         with _pw_grab_lock:
             return self._b.monitor()
 
-    def grab(self):
+    def grab(self, max_age=0.0):
         with _pw_grab_lock:
-            return self._b.grab()
+            return self._b.grab(max_age=max_age)
 
-    def grab_raw(self):
+    def grab_raw(self, max_age=0.0):
         with _pw_grab_lock:
-            return self._b.grab_raw()
+            return self._b.grab_raw(max_age=max_age)
 
     def close(self):
         if self._closed:
@@ -340,6 +368,20 @@ def create_capturer(verbose=True):
         'En Wayland instala spectacle (KDE) o gnome-screenshot/grim; '
         'en X11 instala mss (pip install mss).'.format(
             sess, '\n  '.join(errors)))
+
+
+def grab_shared(cap, max_age=0.0):
+    """`cap.grab(max_age=…)` tolerante con backends que no acepten el parámetro.
+
+    Permite reutilizar el último frame capturado (por ejemplo el que acaba de
+    tirar WebRTC) en vez de pedir otro al compositor.
+    """
+    if max_age > 0:
+        try:
+            return cap.grab(max_age=max_age)
+        except TypeError:
+            pass
+    return cap.grab()
 
 
 def get_monitor_geometry(default=(1920, 1080)):
