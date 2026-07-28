@@ -1010,14 +1010,14 @@
     }
 
     /* Preview miniatura de lo que se comparte */
-    #share-preview {
+    #share-preview, #share-preview-video {
       display: none;
       width: 140px;
       border-radius: 6px;
       border: 1px solid var(--card-border);
       object-fit: contain;
     }
-    #share-preview.show { display: block; }
+    #share-preview.show, #share-preview-video.show { display: block; }
 
     .spin {
       animation: lucide-spin 2s linear infinite;
@@ -1147,6 +1147,7 @@
     <i data-lucide="settings" size="12"></i> Configuración
   </button>
   <img id="share-preview" alt="Previsualización" title="Lo que ven los alumnos" />
+  <video id="share-preview-video" muted autoplay playsinline title="Lo que ven los alumnos"></video>
 </div>
 
 <!-- ── Barra de selección múltiple ── -->
@@ -1332,6 +1333,7 @@ socket.on('full_student_list', (list) => {
       image: s.image, last_seen: s.last_seen,
       connected_at: s.connected_at,
       locked: s.locked || false,
+      vstream: !!s.vstream,   // sabe descodificar el vídeo del profesor
     };
     renderCard(s.sid);
     if (s.locked) updateLockState(s.sid, true);
@@ -1345,7 +1347,13 @@ socket.on('student_connected', (data) => {
     name: data.name, ip: data.ip,
     image: null, last_seen: '—',
     connected_at: data.connected_at,
+    vstream: !!data.vstream,
   };
+  // Alumno que llega con la pantalla ya compartida por vídeo: el servidor le
+  // manda la configuración al registrarse, pero si no sabe descodificar hay
+  // que decírselo al profesor (ese alumno no verá nada).
+  if (_shareModo === 'video' && !data.vstream && !_shareSids)
+    toast(`⚠️ ${data.name} no puede ver la pantalla compartida (falta python3-av)`, 'disconnect');
   renderCard(data.sid);
   updateCount();
   toggleEmpty();
@@ -2604,13 +2612,13 @@ function toggleCompartir() {
           console.log('[VIGIA] Video listo, videoWidth=' + _shareVideo.videoWidth);
           _shareVideo.play()
             .then(() => {
-              console.log('[VIGIA] play() OK, iniciando loop de captura');
-              _shareRunning = true; _loopCompartir(); _actualizarBoton(true);
+              console.log('[VIGIA] play() OK, iniciando envío');
+              _arrancarEnvio();
             })
             .catch(e => {
-              // play() puede fallar pero si autoplay funciona, forzar el loop igualmente
-              console.warn('[VIGIA] play() rechazado:', e.message, '— forzando loop');
-              _shareRunning = true; _loopCompartir(); _actualizarBoton(true);
+              // play() puede fallar pero si autoplay funciona, forzar el envío igualmente
+              console.warn('[VIGIA] play() rechazado:', e.message, '— forzando envío');
+              _arrancarEnvio();
             });
         };
         if (_shareVideo.videoWidth) {
@@ -2708,11 +2716,202 @@ socket.on('teacher_screen_preview', data => {
   if (!prev.classList.contains('show')) prev.classList.add('show');
 });
 
-// ── Loop captura local (Chrome) ──
+// ── Envío de la pantalla del profesor ─────────────────────────────────────
+// Vía preferente: UN solo codificador de vídeo (WebCodecs) y el servidor
+// reparte los trozos. Es la misma topología que el JPEG —una codificación, N
+// envíos— pero con compresión entre fotogramas: una pantalla de aula baja de
+// ~20 Mbps por alumno a ~1-2 Mbps. Si algo no está disponible (navegador sin
+// WebCodecs, o algún alumno sin PyAV para descodificar) se usa el JPEG de
+// siempre, que sigue intacto más abajo.
+let _shareModo   = 'jpeg';   // 'video' | 'jpeg'
+let _shareEnc    = null;     // VideoEncoder
+let _shareReader = null;     // lector de MediaStreamTrackProcessor
+let _shareStreamVivo = false;// se anunció teacher_stream_start a los alumnos
+let _shareTrozos = 0;        // trozos codificados emitidos (vigilante de arranque)
+
+function _shareDestinos() {
+  const ids = _shareSids ? [..._shareSids] : Object.keys(students);
+  return ids.filter(id => students[id]);
+}
+
+function _todosDescodifican() {
+  const ids = _shareDestinos();
+  return ids.length > 0 && ids.every(id => students[id].vstream);
+}
+
+async function _configVideo(w, h) {
+  // H.264 primero (más rápido de codificar y de descodificar que VP8, y con
+  // annexb el alumno no necesita metadatos aparte para arrancar).
+  const candidatos = [
+    { codec: 'avc1.42E01F', avc: { format: 'annexb' } },
+    { codec: 'vp8' },
+  ];
+  for (const c of candidatos) {
+    const cfg = Object.assign({}, c, {
+      width: w, height: h,
+      bitrate: Math.round(2_500_000 * CALIDAD_SHARE + 500_000),
+      framerate: FPS_SHARE,
+      latencyMode: 'realtime',
+    });
+    try {
+      const r = await VideoEncoder.isConfigSupported(cfg);
+      if (r && r.supported) return cfg;
+    } catch (e) { /* códec no reconocido: probar el siguiente */ }
+  }
+  return null;
+}
+
+async function _arrancarEnvio() {
+  _shareRunning = true;
+  _actualizarBoton(true);
+  _mostrarPreviewLocal(true);
+  if (typeof VideoEncoder !== 'undefined' &&
+      typeof MediaStreamTrackProcessor !== 'undefined' && _todosDescodifican()) {
+    if (await _iniciarStreamVideo()) { _shareModo = 'video'; return; }
+  } else if (!_todosDescodifican()) {
+    console.log('[VIGIA] Algún alumno no descodifica vídeo — se envía JPEG.');
+  }
+  _shareModo = 'jpeg';
+  _loopCompartir();
+}
+
+async function _iniciarStreamVideo() {
+  try {
+    const track = _shareStream.getVideoTracks()[0];
+    // Pedir la captura ya reducida: escalar en el compositor del navegador es
+    // gratis comparado con codificar 4K.
+    try { await track.applyConstraints({ width: { max: ANCHO_SHARE } }); }
+    catch (e) { /* el navegador no permite reescalar la captura: se codifica tal cual */ }
+    const st = track.getSettings();
+    let w = (st.width  || 1280) & ~1;
+    let h = (st.height || 720)  & ~1;
+    const cfg = await _configVideo(w, h);
+    if (!cfg) { console.warn('[VIGIA] Sin códec de vídeo soportado'); return false; }
+
+    _shareTrozos = 0;
+    _shareEnc = new VideoEncoder({
+      output: (chunk) => {
+        const buf = new ArrayBuffer(chunk.byteLength);
+        chunk.copyTo(buf);
+        _shareTrozos++;
+        socket.emit('teacher_stream_chunk', { k: chunk.type === 'key' ? 1 : 0, d: buf });
+      },
+      error: (e) => {
+        console.warn('[VIGIA] VideoEncoder:', e.message, '— volviendo a JPEG');
+        _volverAJpeg();
+      },
+    });
+    _shareEnc.configure(cfg);
+    _shareReader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+    // El <video> oculto solo hace falta para el camino JPEG (dibuja al canvas);
+    // se suelta para no tener dos consumidores del mismo track.
+    _shareVideo.srcObject = null;
+    _emitirInicioStream(cfg, w, h);
+    console.log(`[VIGIA] Compartiendo por vídeo ${cfg.codec} ${w}x${h}`);
+    _bucleStreamVideo(w, h);
+    // Vigilante: si en 3 s no ha salido ni un trozo (WebCodecs presente pero
+    // que no entrega, track que no produce fotogramas…), volver al JPEG en vez
+    // de dejar a la clase mirando una pantalla en blanco.
+    setTimeout(() => {
+      if (_shareRunning && _shareModo === 'video' && _shareTrozos === 0) {
+        console.warn('[VIGIA] El vídeo no arrancó en 3 s — volviendo a JPEG');
+        _volverAJpeg();
+      }
+    }, 3000);
+    return true;
+  } catch (e) {
+    console.warn('[VIGIA] No se pudo iniciar el vídeo:', e.message);
+    _pararStreamVideo();
+    return false;
+  }
+}
+
+function _emitirInicioStream(cfg, w, h) {
+  const payload = { codec: cfg.codec.startsWith('avc') ? 'h264' : 'vp8', w, h };
+  if (_shareSids) payload.sids = [..._shareSids];
+  socket.emit('teacher_stream_start', payload);
+  _shareStreamVivo = true;
+}
+
+async function _bucleStreamVideo(w, h) {
+  let ultimo = 0, ultimaClave = 0;
+  const reader = _shareReader;
+  while (_shareRunning && _shareEnc && _shareReader === reader) {
+    let frame;
+    try {
+      const r = await reader.read();
+      if (r.done) break;
+      frame = r.value;
+    } catch (e) { break; }
+    try {
+      const ahora = performance.now();
+      // Limitar a los fps configurados y no acumular cola si el codificador
+      // va justo: más vale saltarse fotogramas que retrasarlo todo.
+      if (ahora - ultimo < 1000 / FPS_SHARE - 2 || _shareEnc.encodeQueueSize > 2) continue;
+      ultimo = ahora;
+      if (frame.codedWidth !== w || frame.codedHeight !== h) {
+        // La pantalla compartida cambió de tamaño: reconfigurar y avisar.
+        w = frame.codedWidth & ~1; h = frame.codedHeight & ~1;
+        const cfg = await _configVideo(w, h);
+        if (!cfg) break;
+        _shareEnc.configure(cfg);
+        _emitirInicioStream(cfg, w, h);
+        ultimaClave = 0;
+      }
+      // Fotograma clave cada 2 s: acota a eso lo que tarda en ver la pantalla
+      // un alumno que se conecta con la clase empezada.
+      const clave = (ahora - ultimaClave) > 2000;
+      if (clave) ultimaClave = ahora;
+      _shareEnc.encode(frame, { keyFrame: clave });
+    } catch (e) {
+      console.warn('[VIGIA] encode:', e.message);
+    } finally {
+      frame.close();
+    }
+  }
+}
+
+function _volverAJpeg() {
+  _pararStreamVideo();
+  if (!_shareRunning || !_shareStream) return;
+  _shareModo = 'jpeg';
+  _shareVideo.srcObject = _shareStream;   // el camino JPEG dibuja desde aquí
+  _shareVideo.play().catch(() => {});
+  _loopCompartir();
+}
+
+function _pararStreamVideo() {
+  try { if (_shareEnc && _shareEnc.state !== 'closed') _shareEnc.close(); } catch (e) {}
+  try { if (_shareReader) _shareReader.cancel(); } catch (e) {}
+  _shareEnc = null; _shareReader = null;
+  // Avisar SIEMPRE que se anunció un stream, también si se corta por un error
+  // del codificador: si no, los alumnos se quedan con la ventana congelada.
+  if (_shareStreamVivo) {
+    _shareStreamVivo = false;
+    socket.emit('teacher_stream_stop', {});
+  }
+}
+
+function _mostrarPreviewLocal(mostrar) {
+  // La vista previa sale del propio stream local: no cuesta ni un byte de red
+  // ni una descodificación de JPEG por fotograma.
+  const vid = document.getElementById('share-preview-video');
+  const img = document.getElementById('share-preview');
+  if (mostrar && _shareStream) {
+    vid.srcObject = _shareStream;
+    vid.classList.add('show');
+    vid.play().catch(() => {});
+    img.classList.remove('show');
+  } else {
+    vid.classList.remove('show');
+    vid.srcObject = null;
+  }
+}
+
+// ── Loop captura local por JPEG (respaldo) ──
 let _shareFrameCount = 0;
 let _shareUltimoJpeg = null;   // último frame enviado (para no repetirlo)
 let _shareUltimoEnvio = 0;
-let _shareUltimaPrev  = 0;
 function _loopCompartir() {
   if (!_shareRunning || !_shareStream) return;
   if (_shareVideo.videoWidth) {
@@ -2740,14 +2939,8 @@ function _loopCompartir() {
       if (_shareFrameCount <= 3 || _shareFrameCount % 100 === 0)
         console.log('[VIGIA] Frame #' + _shareFrameCount + ' enviado (' + Math.round(img.length/1024) + ' KB)');
     }
-    // La miniatura propia no necesita 10 fps: decodificar el JPEG completo en
-    // cada frame solo para la vista previa costaba más que la propia captura.
-    if (!repetido && ahora - _shareUltimaPrev >= 500) {
-      _shareUltimaPrev = ahora;
-      const prev = document.getElementById('share-preview');
-      prev.src = img;
-      if (!prev.classList.contains('show')) prev.classList.add('show');
-    }
+    // La vista previa sale del <video> local (_mostrarPreviewLocal), así que
+    // aquí no se decodifica el JPEG otra vez solo para verlo en pequeño.
   } else {
     console.warn('[VIGIA] _loopCompartir: videoWidth=0, esperando...');
   }
@@ -2759,10 +2952,14 @@ function detenerCompartir() {
   _shareSids = null;
   _shareUltimoJpeg = null;   // la próxima sesión debe enviar su primer frame
   clearTimeout(_shareTimeout);
+  const eraVideo = _shareModo === 'video';
+  _shareModo = 'jpeg';
+  _pararStreamVideo();          // emite teacher_stream_stop si había stream
+  _mostrarPreviewLocal(false);
   if (_shareStream) {
     _shareStream.getTracks().forEach(t => t.stop());
     _shareStream = null; _shareVideo.srcObject = null;
-    socket.emit('teacher_screenshot', { activa: false });
+    if (!eraVideo) socket.emit('teacher_screenshot', { activa: false });
   } else {
     socket.emit('stop_teacher_capture');
   }

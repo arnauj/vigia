@@ -59,6 +59,11 @@ server.py ───────────────────────�
   cada 2 s para los que acaban de conectarse), escala con BILINEAR a
   _share_cfg['width'] y manda la vista previa al profesor a 2 fps.
   Captura de ventana individual: solo X11 (mss + xdotool).
+  Pantalla del profesor como VÍDEO (vía preferente): _teacher_stream guarda
+  {active, sid, sids, codec, w, h} y los eventos teacher_stream_start/chunk/stop
+  se reparten con _emitir_a_alumnos(). Los bytes del trozo NO se tocan (se
+  reenvía el mismo dict). Al registrarse un alumno con la clase empezada se le
+  manda el start; el fotograma clave (cada 2 s) le compone la imagen.
 
 screen_capture.py ──────────────────────────────────────────────────
   Abstracción de captura compartida por server.py y client.py.
@@ -151,6 +156,12 @@ client.py ───────────────────────�
   Auto-instala sus dependencias pip al arrancar si faltan.
   _VentanaMensaje: muestra texto enriquecido + archivos adjuntos recibidos.
     Los adjuntos (base64) se guardan en ~/Descargas y se abren con xdg-open.
+  Pantalla del profesor por vídeo: hilo `vigia-stream` (_bucle_stream_profesor)
+    descodifica los trozos H.264/VP8 con PyAV y escala con swscale al tamaño de
+    la ventana (_prof_destino) antes de pasar la PIL.Image a Tk. Si se pierde
+    un trozo (cola llena) se marca _stream_perdido y se espera al siguiente
+    fotograma clave en vez de pintar basura. El alumno anuncia en `register`
+    caps={'vstream': _AV_OK} y el panel solo usa esta vía si TODOS pueden.
   Las miniaturas usan grab_shared(cap, max_age=…): si WebRTC acaba de
   capturar un frame se reaprovecha (ni doble captura ni pelea por el
   appsink de PipeWire) y se escalan con BILINEAR+reducing_gap, no LANCZOS.
@@ -176,6 +187,15 @@ client.py ───────────────────────�
       seguía capado a 1.5 Mbps = borroso a 1080p.
     - number_of_threads() de aiortc se sustituye para que libvpx use todos los
       núcleos (el reparto original dejaba 1080p con 2 hilos en un PC de 4).
+    - H.264 EN VEZ DE VP8 (WEBRTC_H264): _preferir_h264(pc) llama a
+      setCodecPreferences ANTES de setRemoteDescription — si no, aiortc respeta
+      el orden del navegador, que pone VP8 primero. Además _H264EncoderRapido
+      sustituye a aiortc.codecs.H264Encoder porque el original crea x264 SIN
+      preset (= «medium», codificación offline) y con level 3.1 fijo: con
+      preset ultrafast + tune zerolatency + multihilo, 1080p de escritorio baja
+      de ~9 ms/frame (VP8) a ~3 ms. Solo se activa si libx264 existe de verdad
+      en el libavcodec del equipo; si no, VP8 (nunca vídeo negro). VP8 va al
+      final de las preferencias, así que un Chromium sin H.264 sigue conectando.
     - _procesar_offer: crea RTCPeerConnection, añade track, gestiona
       DataChannel entrante (llama a on_do_input con los mensajes JSON).
     - _webrtc_activo = True cuando ICE conecta; suprime envío JPEG.
@@ -208,11 +228,12 @@ instalar_cliente.sh ────────────────────
   Arranca el cliente inmediatamente sin esperar al siguiente reinicio.
 
 test_remote_control.py ─────────────────────────────────────────────
-  Suite de tests (unittest) para el control remoto. 70 tests. Ejecutar:
+  Suite de tests (unittest) para el control remoto. 77 tests. Ejecutar:
     python3 test_remote_control.py
   Cubre: mapas de teclas xdotool, _procesar_input (ratón + teclado),
   backend ydotool (Wayland), teclado por uinput (vigia_input), caché de
-  capturas (grab_shared), detección de sesión de screen_capture,
+  capturas (grab_shared), stream de vídeo del profesor (teacher_stream_*),
+  detección de sesión de screen_capture,
   encolado en _input_q, traducción de coordenadas (letterbox/pillarbox),
   enrutamiento DataChannel (_enviarInput). No requiere servidor ni X11.
 
@@ -253,10 +274,24 @@ build_debs.sh ──────────────────────
 | `show_message` | servidor → cliente | Popup con HTML + adjuntos base64 |
 | `send_message` | dashboard → servidor | Enviar mensaje a todos (title, body, attachments) |
 | `send_message_to` | dashboard → servidor | Enviar mensaje a un alumno (sid, title, body, attachments) |
-| `teacher_screenshot` | dashboard → servidor → clientes | Pantalla del profesor en alumnos |
+| `teacher_screenshot` | dashboard → servidor → clientes | Pantalla del profesor en alumnos (respaldo JPEG) |
+| `teacher_stream_start` | dashboard → servidor → clientes | Empieza el vídeo del profesor (codec, w, h) |
+| `teacher_stream_chunk` | dashboard → servidor → clientes | Trozo codificado `{k: clave?, d: bytes}` |
+| `teacher_stream_stop` | dashboard → servidor → clientes | Fin del vídeo del profesor |
 | `webrtc_offer` | dashboard → servidor → cliente | SDP offer para WebRTC |
 | `webrtc_answer` | cliente → servidor → dashboard | SDP answer para WebRTC |
 | `webrtc_ice` | bidireccional vía servidor | ICE candidates |
+
+**Flujo de la pantalla del profesor (vía preferente, «una codificación → N envíos»):**
+```
+Panel (WebCodecs)  : getDisplayMedia → MediaStreamTrackProcessor → VideoEncoder
+Panel → servidor   : teacher_stream_start {codec,w,h[,sids]}  +  teacher_stream_chunk {k,d}
+Servidor → alumnos : los MISMOS bytes, sin recodificar ni copiar
+Alumno (PyAV)      : CodecContext.decode → reformat(swscale) → PIL → Tk
+```
+Requisitos: navegador con WebCodecs (Chrome/Chromium) y TODOS los alumnos
+destinatarios con `python3-av` (`caps.vstream`). Si falta cualquiera de las dos
+cosas se usa el camino JPEG de siempre, que sigue intacto.
 
 **Flujo WebRTC (P2P tras señalización):**
 ```
@@ -272,7 +307,8 @@ Dashboard → Cliente            : eventos teclado (RTCDataChannel 'vigia-input'
 
 - **Sin base de datos.** Todo el estado vive en los dicts `students` y `viewers` de `server.py`. Al reiniciar el servidor se pierde.
 - **Imágenes como base64.** Los frames JPEG se envían como `data:image/jpeg;base64,…` por Socket.IO (máx. 8 MB). Solo se usan como fallback cuando WebRTC no está activo.
-- **WebRTC P2P.** Si `python3-aiortc` está instalado en el cliente, el stream de vídeo viaja directamente alumno→profesor por UDP (H.264/VP9). Los eventos de input van por dos DataChannels con `priority:'high'`: `vigia-mouse` (unordered, sin retransmisiones) para ratón y `vigia-input` (ordered, fiable) para teclado. Fallback automático a JPEG si WebRTC falla (incluido tras P2P establecido).
+- **Pantalla del profesor en vídeo, no en JPEG.** Enviar un JPEG de 1600 px 10 veces por segundo son ~20 Mbps POR ALUMNO: con 30 equipos se come una red de gigabit entera. El panel codifica una sola vez con WebCodecs (H.264, VP8 de respaldo) y el servidor reparte los mismos bytes: ~1-2 Mbps en total y el alumno descodifica en C con PyAV (~3 ms/frame) en vez de descomprimir un JPEG enorme y reescalarlo con PIL. Se conserva el camino JPEG completo como respaldo automático.
+- **WebRTC P2P.** Si `python3-aiortc` está instalado en el cliente, el stream de vídeo viaja directamente alumno→profesor por UDP (H.264 preferido, VP8 de respaldo). Los eventos de input van por dos DataChannels con `priority:'high'`: `vigia-mouse` (unordered, sin retransmisiones) para ratón y `vigia-input` (ordered, fiable) para teclado. Fallback automático a JPEG si WebRTC falla (incluido tras P2P establecido).
 - **Lanzador Chrome --app.** `vigia-launcher.py` usa un perfil temporal aislado (`tempfile.mkdtemp`) para no interferir con el Chrome del usuario. `--class=vigia` hace que KDE asocie la ventana al `.desktop` y muestre el icono correcto.
 - **Detección de Flask ya activo.** `vigia-launcher.py` sondea el puerto 5000 durante 1,5 s antes de arrancar Flask. Si ya corre (servicio systemd), lo reutiliza y no lo mata al cerrar la ventana.
 - **GPU desactivado en WebKit2GTK.** Las variables `WEBKIT_DISABLE_DMABUF_RENDERER=1`, `WEBKIT_DISABLE_COMPOSITING_MODE=1`, `LIBGL_ALWAYS_SOFTWARE=1` se fijan antes de importar GTK para evitar el deadlock con KWin/KDE que produce pantalla negra.
@@ -300,7 +336,7 @@ Dashboard → Cliente            : eventos teclado (RTCDataChannel 'vigia-input'
 |---|---|---|
 | Servidor | `flask flask-socketio simple-websocket mss` | `python3-flask python3-flask-socketio python3-pil` |
 | Cliente | `python-socketio[client] websocket-client mss` | `python3-tk python3-pil python3-pil.imagetk python3-pynput xdotool` |
-| Cliente (WebRTC) | — | `python3-aiortc python3-numpy` |
+| Cliente (WebRTC + vídeo del profesor) | — | `python3-aiortc python3-av python3-numpy` |
 | Cliente (Wayland) | — | `ydotool` + `kde-spectacle`/`grim`/`gnome-screenshot` |
 | Ventana nativa fallback (profesor) | — | `python3-gi gir1.2-webkit2-4.1 libwebkit2gtk-4.1-0 libgtk-3-0` |
 

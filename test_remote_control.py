@@ -674,6 +674,73 @@ class TestCacheCapturas(unittest.TestCase):
         cap.grab.assert_called_once_with()
 
 
+class TestStreamProfesor(unittest.TestCase):
+    """Recepción de la pantalla del profesor como vídeo comprimido."""
+
+    def setUp(self):
+        # El hilo descodificador no corre en los tests (no hay PyAV), así que
+        # los trozos se quedan en la cola y se pueden inspeccionar.
+        self._vaciar(client._cola_stream)
+        self._vaciar(client._cola_profesor)
+        client._stream_perdido = False
+
+    @staticmethod
+    def _vaciar(q):
+        while True:
+            try:
+                q.get_nowait()
+            except queue.Empty:
+                return
+
+    def test_chunk_se_encola_con_marca_de_clave(self):
+        with patch.object(client, '_AV_OK', True):
+            client.on_teacher_stream_start({'codec': 'h264', 'w': 1600, 'h': 900})
+            client.on_teacher_stream_chunk({'k': 1, 'd': b'abc'})
+            client.on_teacher_stream_chunk({'k': 0, 'd': b'de'})
+        self.assertEqual(client._cola_stream.get_nowait(), ('start', 'h264'))
+        self.assertEqual(client._cola_stream.get_nowait(), ('chunk', b'abc', True))
+        self.assertEqual(client._cola_stream.get_nowait(), ('chunk', b'de', False))
+
+    def test_codec_desconocido_cae_a_h264(self):
+        with patch.object(client, '_AV_OK', True):
+            client.on_teacher_stream_start({'codec': 'av1'})
+        self.assertEqual(client._cola_stream.get_nowait(), ('start', 'h264'))
+
+    def test_vp8_se_respeta(self):
+        with patch.object(client, '_AV_OK', True):
+            client.on_teacher_stream_start({'codec': 'vp8'})
+        self.assertEqual(client._cola_stream.get_nowait(), ('start', 'vp8'))
+
+    def test_sin_pyav_se_ignora_el_video(self):
+        with patch.object(client, '_AV_OK', False):
+            client.on_teacher_stream_start({'codec': 'h264'})
+            client.on_teacher_stream_chunk({'k': 1, 'd': b'abc'})
+        self.assertTrue(client._cola_stream.empty())
+
+    def test_stop_sin_pyav_cierra_la_ventana(self):
+        with patch.object(client, '_AV_OK', False):
+            client.on_teacher_stream_stop()
+        self.assertEqual(client._cola_profesor.get_nowait(), {'activa': False})
+
+    def test_cola_llena_marca_desincronizado(self):
+        # Perder un trozo rompe la cadena de fotogramas diferenciales: hay que
+        # esperar al siguiente fotograma clave en vez de pintar basura.
+        with patch.object(client, '_AV_OK', True):
+            for i in range(client._cola_stream.maxsize + 5):
+                client.on_teacher_stream_chunk({'k': 0, 'd': b'x'})
+        self.assertTrue(client._stream_perdido)
+        self.assertEqual(client._cola_stream.qsize(), client._cola_stream.maxsize)
+
+    def test_fotograma_viejo_se_descarta(self):
+        # _cola_profesor tiene hueco para 2: siempre gana el más reciente.
+        for i in range(6):
+            client._poner_profesor({'activa': True, 'n': i})
+        restantes = []
+        while not client._cola_profesor.empty():
+            restantes.append(client._cola_profesor.get_nowait()['n'])
+        self.assertEqual(restantes, [4, 5])
+
+
 class TestScreenCaptureSession(unittest.TestCase):
     """Detección de tipo de sesión en screen_capture (Wayland vs X11)."""
 
@@ -735,7 +802,7 @@ if __name__ == '__main__':
     for cls in (TestKeyMaps, TestProcesarInput, TestInputQueue,
                 TestCoordenadas, TestDataChannelRouting,
                 TestProcesarInputYdotool, TestVigiaInputPointer,
-                TestVigiaInputTeclado, TestCacheCapturas,
+                TestVigiaInputTeclado, TestCacheCapturas, TestStreamProfesor,
                 TestScreenCaptureSession):
         suite.addTests(loader.loadTestsFromTestCase(cls))
     runner = unittest.TextTestRunner(verbosity=2)

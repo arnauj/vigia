@@ -175,6 +175,7 @@ else:
 
 # ── WebRTC con aiortc (opcional, instalado via apt en instalar_cliente.sh) ───
 WEBRTC_OK = False
+WEBRTC_H264 = False   # True si se pudo preferir H.264 (x264) sobre VP8
 try:
     import asyncio, fractions
     import numpy as np
@@ -230,8 +231,70 @@ try:
             print(f"  [✓] Encoder VP8 multihilo ({_mp.cpu_count()} núcleos).")
     except Exception:
         pass
+
+    # ── H.264 en vez de VP8 ──────────────────────────────────────────────────
+    # x264 con preset ultrafast + tune zerolatency codifica 1080p de escritorio
+    # en ~3 ms/frame; libvpx-VP8 en tiempo real necesita ~9 ms con los mismos
+    # hilos (medido). aiortc, sin embargo: (a) deja que el navegador imponga el
+    # orden de códecs —y Chrome pone VP8 primero—, y (b) crea el x264 SIN
+    # preset, es decir con «medium», que es de codificación offline.
+    # Aquí se corrigen las dos cosas, pero solo si libx264 existe de verdad en
+    # el libavcodec del equipo: si no, se sigue con VP8 (nunca vídeo negro).
+    try:
+        import aiortc.codecs as _codecs
+        from aiortc.codecs.h264 import H264Encoder as _H264Base, MAX_FRAME_RATE as _H264_FPS
+        av.CodecContext.create('libx264', 'w')   # lanza si no está compilado
+
+        class _H264EncoderRapido(_H264Base):
+            """H264Encoder de aiortc con preset de tiempo real y multihilo."""
+
+            def _encode_frame(self, frame, force_keyframe):
+                # Misma condición de invalidación que la clase base: si se
+                # adelanta aquí, la base encuentra el códec ya creado (con
+                # NUESTRAS opciones) y no lo rehace con las suyas.
+                if self.codec is not None and (
+                        frame.width != self.codec.width
+                        or frame.height != self.codec.height
+                        or abs(self.target_bitrate - self.codec.bit_rate)
+                        / self.codec.bit_rate > 0.1):
+                    self.buffer_data = b""
+                    self.buffer_pts = None
+                    self.codec = None
+                if self.codec is None:
+                    c = av.CodecContext.create('libx264', 'w')
+                    c.width, c.height = frame.width, frame.height
+                    c.bit_rate = self.target_bitrate
+                    c.pix_fmt = 'yuv420p'
+                    c.framerate = fractions.Fraction(_H264_FPS, 1)
+                    c.time_base = fractions.Fraction(1, _H264_FPS)
+                    c.thread_count = max(1, min(8, os.cpu_count() or 1))
+                    # Sin 'level': x264 elige el que corresponda a la
+                    # resolución (el 3.1 fijo de aiortc se queda corto a 1080p).
+                    c.options = {'preset': 'ultrafast', 'tune': 'zerolatency'}
+                    c.profile = 'Baseline'
+                    self.codec = c
+                return super()._encode_frame(frame, force_keyframe)
+
+        _codecs.H264Encoder = _H264EncoderRapido
+        WEBRTC_H264 = True
+        print("  [✓] Encoder H.264 (x264 ultrafast) preferido sobre VP8.")
+    except Exception as _e:
+        print(f"  [*] H.264 no disponible ({_e}); se usará VP8.")
 except ImportError:
     print("  [!] aiortc no instalado — usando fallback JPEG.")
+
+# ── Descodificador de la pantalla del profesor (vídeo comprimido) ────────────
+# El panel del profesor codifica su pantalla UNA vez con WebCodecs (H.264/VP8)
+# y el servidor reparte los trozos. Aquí se descodifican con PyAV (el mismo
+# libavcodec que ya usa aiortc), que es C y va sobrado: un fotograma 1600p
+# cuesta ~3 ms frente a los ~150-250 KB de JPEG por fotograma que llegaban
+# antes por la red para CADA alumno.
+try:
+    import av as _av
+    _AV_OK = True
+except Exception:
+    _av = None
+    _AV_OK = False
 
 # ── Control remoto (Pynput + Xdotool en X11, ydotool en Wayland) ──────────────
 _mouse_ctrl = None
@@ -572,6 +635,83 @@ _pending_ice   = []     # ICE candidates recibidos antes del offer
 
 def _b64(jpeg: bytes) -> str:
     return 'data:image/jpeg;base64,' + base64.b64encode(jpeg).decode()
+
+
+# ── Pantalla del profesor recibida como vídeo ────────────────────────────────
+_cola_stream  = queue.Queue(maxsize=12)   # trozos codificados por descodificar
+_stream_perdido = False                   # se descartó algo: esperar al próximo key
+_prof_destino = [0, 0]                    # tamaño útil de la ventana del alumno
+
+
+def _poner_profesor(item):
+    """Encola un fotograma para la ventana del profesor, descartando el viejo."""
+    try:
+        _cola_profesor.put_nowait(item)
+    except queue.Full:
+        try:
+            _cola_profesor.get_nowait()
+            _cola_profesor.put_nowait(item)
+        except Exception:
+            pass
+
+
+def _stream_put(item):
+    global _stream_perdido
+    try:
+        _cola_stream.put_nowait(item)
+    except queue.Full:
+        # Perder un trozo rompe la cadena de fotogramas diferenciales: se marca
+        # y el descodificador espera al siguiente fotograma clave (≤2 s) en vez
+        # de pintar basura.
+        _stream_perdido = True
+
+
+def _bucle_stream_profesor():
+    """Descodifica el vídeo de la pantalla del profesor y lo pasa a la ventana."""
+    global _stream_perdido
+    dec = None
+    codec = 'h264'
+    while True:
+        item = _cola_stream.get()
+        try:
+            tipo = item[0]
+            if tipo == 'start':
+                codec = item[1]
+                dec = None
+                _stream_perdido = False
+                continue
+            if tipo == 'stop':
+                dec = None
+                _poner_profesor({'activa': False})
+                continue
+
+            _, datos, es_clave = item
+            if es_clave:
+                _stream_perdido = False
+            elif dec is None or _stream_perdido:
+                continue          # sin clave todavía: no hay nada que pintar
+            if dec is None:
+                dec = _av.CodecContext.create(codec, 'r')
+                dec.thread_count = max(1, min(4, os.cpu_count() or 1))
+            for frame in dec.decode(_av.Packet(datos)):
+                ancho, alto = _prof_destino
+                if ancho and alto and frame.width > ancho:
+                    # swscale escala y convierte en una pasada; hacerlo aquí
+                    # evita que PIL redimensione después en el hilo de Tk.
+                    escala = min(ancho / frame.width, alto / frame.height)
+                    frame = frame.reformat(
+                        max(2, int(frame.width * escala)),
+                        max(2, int(frame.height * escala)), 'rgb24')
+                _poner_profesor({'activa': True, 'pil': frame.to_image()})
+        except Exception as e:
+            print(f"  [!] Vídeo del profesor: {e}")
+            dec = None
+            _stream_perdido = True
+
+
+if _AV_OK:
+    threading.Thread(target=_bucle_stream_profesor, daemon=True,
+                     name='vigia-stream').start()
 
 if WEBRTC_OK:
     class ScreenStreamTrack(VideoStreamTrack):
@@ -1140,7 +1280,12 @@ def on_do_input(data):
 @sio.event
 def connect():
     print(f"[✓] Conectado al servidor.")
-    sio.emit('register', {'name': f"{platform_utils.get_username()} - {socket.gethostname()}"})
+    # 'caps' anuncia lo que sabe hacer este alumno; el panel solo emite su
+    # pantalla como vídeo si TODOS los destinatarios saben descodificarlo.
+    sio.emit('register', {
+        'name': f"{platform_utils.get_username()} - {socket.gethostname()}",
+        'caps': {'vstream': _AV_OK},
+    })
 
 @sio.on('viewer_start')
 def on_viewer_start(data):
@@ -1200,11 +1345,31 @@ def on_config_update(data):
 
 @sio.on('teacher_screen')
 def on_teacher_screen(data):
-    try:
-        _cola_profesor.put_nowait(data)
-    except queue.Full:
-        try: _cola_profesor.get_nowait(); _cola_profesor.put_nowait(data)
-        except: pass
+    _poner_profesor(data)
+
+@sio.on('teacher_stream_start')
+def on_teacher_stream_start(data):
+    if not _AV_OK:
+        return
+    codec = 'vp8' if str(data.get('codec', 'h264')).lower() == 'vp8' else 'h264'
+    print(f"[*] Pantalla del profesor por vídeo {codec.upper()} "
+          f"{data.get('w')}x{data.get('h')}")
+    _stream_put(('start', codec))
+
+@sio.on('teacher_stream_chunk')
+def on_teacher_stream_chunk(data):
+    if not _AV_OK:
+        return
+    datos = data.get('d')
+    if isinstance(datos, (bytes, bytearray, memoryview)):
+        _stream_put(('chunk', bytes(datos), bool(data.get('k'))))
+
+@sio.on('teacher_stream_stop')
+def on_teacher_stream_stop(_data=None):
+    if _AV_OK:
+        _stream_put(('stop',))
+    else:
+        _poner_profesor({'activa': False})
 
 @sio.on('exec_command')
 def on_exec_command(data):
@@ -1244,6 +1409,30 @@ if WEBRTC_OK:
     def on_webrtc_offer(data):
         _wrtc(_procesar_offer(data))
 
+    def _preferir_h264(pc):
+        """Pone H.264 delante de VP8 en la negociación de códecs.
+
+        aiortc respeta el orden que propone el navegador (Chrome pone VP8
+        primero) salvo que el transceiver declare preferencias. VP8 queda al
+        final de la lista, así que si el navegador no ofreciera H.264 —una
+        compilación de Chromium sin códecs propietarios— la negociación sigue
+        funcionando con VP8. Debe llamarse ANTES de setRemoteDescription.
+        """
+        if not WEBRTC_H264:
+            return
+        try:
+            from aiortc import RTCRtpSender
+            caps = RTCRtpSender.getCapabilities('video').codecs
+            h264 = [c for c in caps if c.mimeType.lower() == 'video/h264']
+            resto = [c for c in caps if c.mimeType.lower() != 'video/h264']
+            if not h264:
+                return
+            for t in pc.getTransceivers():
+                if t.kind == 'video':
+                    t.setCodecPreferences(h264 + resto)
+        except Exception as e:
+            print(f"  [!] No se pudo preferir H.264: {e}")
+
     async def _procesar_offer(data):
         global _webrtc_pc, _webrtc_track, _webrtc_prof, _webrtc_activo, _pending_ice
         if _webrtc_pc:
@@ -1260,6 +1449,7 @@ if WEBRTC_OK:
         _webrtc_pc = pc
         _webrtc_track = ScreenStreamTrack()
         pc.addTrack(_webrtc_track)
+        _preferir_h264(pc)
 
         @pc.on("datachannel")
         def on_dc(channel):
@@ -1360,11 +1550,19 @@ class _VentanaProfesor:
         self._label.pack(expand=True, fill='both')
         self._foto = None
         self._img_raw = None   # PIL Image original sin redimensionar
+        # Tamaño de partida para el descodificador hasta que llegue <Configure>
+        # (la ventana se abre maximizada).
+        _prof_destino[0] = self.top.winfo_screenwidth()
+        _prof_destino[1] = self.top.winfo_screenheight()
         self._after_id = None  # ID del after de redibujado pendiente
         self.top.protocol("WM_DELETE_WINDOW", self.destruir)
         self.top.bind('<Configure>', self._on_resize)
 
     def _on_resize(self, event):
+        # Publicar el tamaño útil para que el descodificador de vídeo escale
+        # con swscale (una pasada SIMD) en vez de dejárselo a PIL aquí.
+        _prof_destino[0] = max(self.top.winfo_width(), 1)
+        _prof_destino[1] = max(self.top.winfo_height(), 1)
         if self._img_raw is None: return
         if self._after_id: self.top.after_cancel(self._after_id)
         self._after_id = self.top.after(120, self._render)
@@ -1388,6 +1586,11 @@ class _VentanaProfesor:
             self._foto = ImageTk.PhotoImage(img)
             self._label.config(image=self._foto, text='')
         except: pass
+
+    def actualizar_pil(self, img):
+        """Fotograma ya descodificado (vía vídeo comprimido): solo pintarlo."""
+        self._img_raw = img
+        self._render()
 
     def actualizar(self, b64):
         try:
@@ -1748,8 +1951,13 @@ def ejecutar_interfaz():
                 d = _cola_profesor.get_nowait()
                 if d.get('activa'):
                     if not v_prof: v_prof = _VentanaProfesor(root)
-                    v_prof.actualizar(d.get('image'))
-                elif v_prof: v_prof.destruir(); v_prof = None
+                    if d.get('pil') is not None:
+                        v_prof.actualizar_pil(d['pil'])
+                    else:
+                        v_prof.actualizar(d.get('image'))
+                elif v_prof:
+                    v_prof.destruir(); v_prof = None
+                    _prof_destino[0] = _prof_destino[1] = 0
             while not _cola_bloqueo.empty():
                 if _cola_bloqueo.get_nowait():
                     if not v_bloq: v_bloq = _VentanaBloqueo(root)

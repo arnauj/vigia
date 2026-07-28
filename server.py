@@ -111,6 +111,14 @@ _teacher_capture = {'running': False, 'sid': None, 'sids': None}
 # Los ajusta el panel desde «Rendimiento» (update_config).
 _share_cfg = {'width': 1600, 'quality': 70, 'sleep': 0.1}
 
+# Pantalla del profesor como VÍDEO COMPRIMIDO (H.264/VP8) en vez de JPEG suelto.
+# El panel codifica UNA vez con WebCodecs y el servidor reparte los trozos tal
+# cual: la misma topología que el JPEG (un encode, N envíos) pero con
+# compresión entre fotogramas, que es ~10× menos tráfico. Estado del emisor
+# para que un alumno que se conecte a media clase reciba la configuración.
+_teacher_stream = {'active': False, 'sid': None, 'sids': None,
+                   'codec': 'h264', 'w': 0, 'h': 0}
+
 
 def get_local_ip():
     """Detecta la IP local de la máquina."""
@@ -208,6 +216,13 @@ def on_disconnect():
         # socketio.emit sin 'to' ya difunde a todos; broadcast=True provoca
         # TypeError con python-socketio/flask-socketio modernos (apt).
         socketio.emit('teacher_screen', {'activa': False})
+    # Si se cierra el panel que estaba emitiendo vídeo, cerrar la ventana en
+    # los alumnos: si no, se quedan con el último fotograma congelado.
+    if _teacher_stream['active'] and request.sid == _teacher_stream.get('sid'):
+        _teacher_stream['active'] = False
+        _emitir_a_alumnos('teacher_stream_stop', {})
+        _teacher_stream['sid'] = None
+        _teacher_stream['sids'] = None
     if request.sid in students:
         name = students[request.sid]['name']
         del students[request.sid]
@@ -223,13 +238,27 @@ def on_register(data):
     client_ip = _get_client_ip()
     name = data.get('name', 'Alumno')
     now = datetime.now().strftime('%H:%M:%S')
+    caps = data.get('caps') or {}
     students[request.sid] = {
         'name': name, 'ip': client_ip, 'screenshot': None,
         'last_seen': now, 'connected_at': now, 'locked': False,
+        # 'vstream': el alumno sabe descodificar el vídeo del profesor (PyAV).
+        # El panel solo usa esa vía si TODOS los destinatarios pueden.
+        'vstream': bool(caps.get('vstream')),
     }
     print(f"[+] Registrado: {name}  ({client_ip})")
     emit('registered', {'status': 'ok', 'sid': request.sid})
-    socketio.emit('student_connected', {'sid': request.sid, 'name': name, 'ip': client_ip, 'connected_at': now}, to='professors')
+    socketio.emit('student_connected', {
+        'sid': request.sid, 'name': name, 'ip': client_ip,
+        'connected_at': now, 'vstream': students[request.sid]['vstream'],
+    }, to='professors')
+    # Alumno que llega con la clase ya empezada: se le manda la configuración
+    # del vídeo; el siguiente fotograma clave (≤2 s) le compone la imagen.
+    if _teacher_stream['active'] and not _teacher_stream['sids']:
+        emit('teacher_stream_start', {
+            'codec': _teacher_stream['codec'],
+            'w': _teacher_stream['w'], 'h': _teacher_stream['h'],
+        })
 
 
 @socketio.on('screenshot')
@@ -249,6 +278,7 @@ def on_request_students(_data=None):
             'sid': sid, 'name': data['name'], 'ip': data['ip'],
             'last_seen': data['last_seen'], 'connected_at': data['connected_at'],
             'image': data['screenshot'], 'locked': data.get('locked', False),
+            'vstream': data.get('vstream', False),
         })
     emit('full_student_list', payload)
 
@@ -670,6 +700,56 @@ def on_stop_teacher_capture():
     _teacher_capture['running'] = False
     socketio.emit('teacher_screen', {'activa': False})
     print('[📺] Compartir pantalla del profesor: detenido')
+
+
+def _emitir_a_alumnos(evento, payload):
+    """Manda un evento a los alumnos destinatarios del stream del profesor."""
+    sids = _teacher_stream.get('sids')
+    if sids:
+        for sid in sids:
+            if sid in students:
+                socketio.emit(evento, payload, to=sid)
+    else:
+        socketio.emit(evento, payload, skip_sid=_teacher_stream.get('sid'))
+
+
+@socketio.on('teacher_stream_start')
+def on_teacher_stream_start(data):
+    """El panel empieza a emitir su pantalla como vídeo comprimido."""
+    _teacher_stream.update(
+        active=True,
+        sid=request.sid,
+        sids=data.get('sids') or None,
+        codec='vp8' if str(data.get('codec', 'h264')).lower() == 'vp8' else 'h264',
+        w=int(data.get('w', 0) or 0),
+        h=int(data.get('h', 0) or 0),
+    )
+    _emitir_a_alumnos('teacher_stream_start', {
+        'codec': _teacher_stream['codec'],
+        'w': _teacher_stream['w'], 'h': _teacher_stream['h'],
+    })
+    destinos = len(_teacher_stream['sids']) if _teacher_stream['sids'] else len(students)
+    print(f"[*] Pantalla del profesor por vídeo {_teacher_stream['codec'].upper()} "
+          f"{_teacher_stream['w']}x{_teacher_stream['h']} → {destinos} alumno(s)")
+
+
+@socketio.on('teacher_stream_chunk')
+def on_teacher_stream_chunk(data):
+    """Reparte un trozo codificado. Los bytes no se tocan ni se copian."""
+    if not _teacher_stream['active'] or request.sid != _teacher_stream['sid']:
+        return
+    _emitir_a_alumnos('teacher_stream_chunk', data)
+
+
+@socketio.on('teacher_stream_stop')
+def on_teacher_stream_stop(_data=None):
+    if not _teacher_stream['active']:
+        return
+    _teacher_stream['active'] = False
+    _emitir_a_alumnos('teacher_stream_stop', {})
+    _teacher_stream['sid'] = None
+    _teacher_stream['sids'] = None
+    print("[*] Fin de la pantalla del profesor (vídeo)")
 
 
 @socketio.on('teacher_screenshot')
