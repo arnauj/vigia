@@ -63,7 +63,7 @@ VIGIA es una herramienta para profesores que permite **ver y controlar en tiempo
 
 - **Modo solo ver** — amplía la pantalla de un alumno concreto a pantalla completa en el panel del profesor, con calidad alta.
 - **Modo control remoto** — el profesor toma el control total del ratón y el teclado del equipo del alumno directamente desde su propio escritorio.
-- **WebRTC P2P** — cuando `python3-aiortc` está instalado en el cliente, el stream de vídeo viaja directamente por UDP (H.264/VP9) con latencia menor a 150 ms en LAN. Los eventos de ratón van por un DataChannel sin orden (máxima velocidad) y los de teclado por un canal fiable y en orden.
+- **WebRTC P2P** — cuando `python3-aiortc` está instalado en el cliente, el stream de vídeo viaja directamente por UDP (H.264, con VP8 de respaldo) con latencia menor a 150 ms en LAN. Los eventos de ratón van por un DataChannel sin orden (máxima velocidad) y los de teclado por un canal fiable y en orden.
 - **Fallback automático a JPEG** — si WebRTC no está disponible o falla (incluso tras haberse establecido), el sistema vuelve automáticamente a transmisión JPEG vía Socket.IO sin interrumpir la sesión.
 - **Indicador de transporte** — un badge en el visor muestra en todo momento si el stream activo es **WebRTC P2P** (verde) o **JPEG** (gris).
 - **Terminal remota** — el profesor puede abrir una terminal en el equipo del alumno y ejecutar comandos de forma remota, con directorio de trabajo persistente entre comandos.
@@ -73,7 +73,7 @@ VIGIA es una herramienta para profesores que permite **ver y controlar en tiempo
 - **Bloqueo de pantalla** — bloquea teclado y ratón del alumno con un overlay a pantalla completa. El alumno no puede interactuar con su equipo mientras dura el bloqueo. El desbloqueo lo activa el profesor.
 - **Mensajes emergentes** — envía mensajes de texto enriquecido a un alumno concreto o a toda la clase. Los mensajes aparecen en una ventana flotante en el equipo del alumno.
 - **Adjuntos en mensajes** — los mensajes pueden incluir archivos adjuntos (límite 10 MB total). Los adjuntos se guardan automáticamente en `~/Descargas` del alumno y se pueden abrir con un solo clic.
-- **Pantalla del profesor en alumnos** — comparte la pantalla del profesor en todos los equipos del aula simultáneamente, útil para explicaciones o demostraciones.
+- **Pantalla del profesor en alumnos** — comparte la pantalla del profesor en todos los equipos del aula simultáneamente, útil para explicaciones o demostraciones. Se envía como vídeo comprimido (H.264/VP8): el panel codifica una sola vez y el servidor reparte los mismos datos, así que la red del aula soporta 30 equipos sin despeinarse. Si el navegador o algún alumno no lo admiten, se usa automáticamente el envío por imágenes JPEG de siempre.
 - **Envío a uno o a todos** — cualquier acción (mensaje, bloqueo, pantalla del profesor) puede dirigirse a un alumno específico o lanzarse a todos a la vez.
 
 ### Infraestructura y automatización
@@ -154,7 +154,7 @@ bash instalar_cliente.sh
 bash instalar_cliente.sh 192.168.X.X
 
 # Manual
-sudo apt install python3-pip python3-tk xdotool python3-aiortc python3-numpy
+sudo apt install python3-pip python3-tk xdotool python3-aiortc python3-av python3-numpy
 pip3 install --break-system-packages "python-socketio[client]" websocket-client mss Pillow
 python3 client.py 192.168.X.X
 ```
@@ -230,7 +230,7 @@ python3 client.py 192.168.X.X
 |---|---|---|
 | Servidor | `flask flask-socketio eventlet` | — |
 | Cliente | `python-socketio[client] websocket-client mss Pillow` | `python3-tk xdotool` |
-| Cliente (WebRTC, opcional) | — | `python3-aiortc python3-numpy` |
+| Cliente (WebRTC + pantalla del profesor) | — | `python3-aiortc python3-av python3-numpy` |
 | Ventana nativa fallback | — | `python3-gi gir1.2-webkit2-4.1 libwebkit2gtk-4.1-0` |
 
 ---
@@ -263,7 +263,7 @@ Todos los equipos deben estar en la **misma red local**. Si la WiFi tiene AP iso
 - Verifica que la IP del servidor es correcta y el puerto 5000 está accesible.
 
 **El visor siempre muestra JPEG en lugar de WebRTC P2P**
-- Instala aiortc en el equipo del alumno: `sudo apt install python3-aiortc python3-numpy`
+- Instala aiortc en el equipo del alumno: `sudo apt install python3-aiortc python3-av python3-numpy`
 - Comprueba que la red no tiene AP isolation.
 
 **El alumno no consigue conectar**

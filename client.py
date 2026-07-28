@@ -175,6 +175,7 @@ else:
 
 # ── WebRTC con aiortc (opcional, instalado via apt en instalar_cliente.sh) ───
 WEBRTC_OK = False
+WEBRTC_H264 = False   # True si se pudo preferir H.264 (x264) sobre VP8
 try:
     import asyncio, fractions
     import numpy as np
@@ -183,21 +184,117 @@ try:
     import av
     WEBRTC_OK = True
     print("  [✓] aiortc disponible — WebRTC habilitado.")
-    # aiortc capa el encoder VP8 a 1.5 Mbps (MAX_BITRATE): a 1080p la imagen
-    # sale borrosa y el control de tasa hunde los fps. Se elevan los topes al
-    # rango que usa RustDesk en LAN; el REMB del navegador sigue autorregulando
-    # el bitrate real según el ancho de banda disponible.
-    for _codec_mod in ('vp8', 'h264'):
+    # aiortc capa el encoder a 1.5 Mbps (MAX_BITRATE): a 1080p la imagen sale
+    # borrosa y el control de tasa hunde los fps. Se elevan los topes al rango
+    # que usa RustDesk en LAN; el REMB del navegador sigue autorregulando el
+    # bitrate real según el ancho de banda disponible.
+    # OJO: en aiortc ≥1.x el encoder VP8 vive en `aiortc.codecs.vpx`
+    # (`aiortc.codecs.vp8` NO existe y el parche se perdía en silencio: el vídeo
+    # seguía capado a 1.5 Mbps). Se prueban ambos nombres.
+    import importlib
+    _patched = []
+    for _codec_mod in ('vpx', 'vp8', 'h264'):
         try:
-            import importlib
             _cm = importlib.import_module(f'aiortc.codecs.{_codec_mod}')
-            _cm.DEFAULT_BITRATE = 3_000_000
-            _cm.MIN_BITRATE     = 500_000
-            _cm.MAX_BITRATE     = 8_000_000
         except Exception:
-            pass
+            continue
+        if not hasattr(_cm, 'MAX_BITRATE'):
+            continue
+        _cm.DEFAULT_BITRATE = 3_000_000
+        _cm.MIN_BITRATE     = 500_000
+        _cm.MAX_BITRATE     = 8_000_000
+        _patched.append(_codec_mod)
+    if _patched:
+        print(f"  [✓] Bitrate WebRTC elevado a 8 Mbps ({', '.join(_patched)}).")
+    else:
+        print("  [!] No se pudo elevar el tope de bitrate de aiortc "
+              "(la imagen puede verse borrosa a 1080p).")
+
+    # libvpx en tiempo real es de un solo hilo salvo que se le diga lo
+    # contrario: aiortc reparte hilos con `number_of_threads()`, que en un PC de
+    # aula de 4 núcleos deja el encoder VP8 de 1080p con SOLO 2 hilos (~15 fps).
+    # Se sustituye por un reparto que usa todos los núcleos disponibles (libvpx
+    # admite hasta 8 y no rinde más allá), sin tocar el resto del encoder.
+    try:
+        _vpx = importlib.import_module('aiortc.codecs.vpx')
+
+        def _vigia_threads(pixels, cpus):
+            if pixels > 1280 * 720:
+                return max(1, min(8, cpus))
+            if pixels > 640 * 480:
+                return max(1, min(4, cpus))
+            return max(1, min(2, cpus))
+
+        if hasattr(_vpx, 'number_of_threads'):
+            _vpx.number_of_threads = _vigia_threads
+            import multiprocessing as _mp
+            print(f"  [✓] Encoder VP8 multihilo ({_mp.cpu_count()} núcleos).")
+    except Exception:
+        pass
+
+    # ── H.264 en vez de VP8 ──────────────────────────────────────────────────
+    # x264 con preset ultrafast + tune zerolatency codifica 1080p de escritorio
+    # en ~3 ms/frame; libvpx-VP8 en tiempo real necesita ~9 ms con los mismos
+    # hilos (medido). aiortc, sin embargo: (a) deja que el navegador imponga el
+    # orden de códecs —y Chrome pone VP8 primero—, y (b) crea el x264 SIN
+    # preset, es decir con «medium», que es de codificación offline.
+    # Aquí se corrigen las dos cosas, pero solo si libx264 existe de verdad en
+    # el libavcodec del equipo: si no, se sigue con VP8 (nunca vídeo negro).
+    try:
+        import aiortc.codecs as _codecs
+        from aiortc.codecs.h264 import H264Encoder as _H264Base, MAX_FRAME_RATE as _H264_FPS
+        av.CodecContext.create('libx264', 'w')   # lanza si no está compilado
+
+        class _H264EncoderRapido(_H264Base):
+            """H264Encoder de aiortc con preset de tiempo real y multihilo."""
+
+            def _encode_frame(self, frame, force_keyframe):
+                # Misma condición de invalidación que la clase base: si se
+                # adelanta aquí, la base encuentra el códec ya creado (con
+                # NUESTRAS opciones) y no lo rehace con las suyas.
+                if self.codec is not None and (
+                        frame.width != self.codec.width
+                        or frame.height != self.codec.height
+                        or abs(self.target_bitrate - self.codec.bit_rate)
+                        / self.codec.bit_rate > 0.1):
+                    self.buffer_data = b""
+                    self.buffer_pts = None
+                    self.codec = None
+                if self.codec is None:
+                    c = av.CodecContext.create('libx264', 'w')
+                    c.width, c.height = frame.width, frame.height
+                    c.bit_rate = self.target_bitrate
+                    c.pix_fmt = 'yuv420p'
+                    c.framerate = fractions.Fraction(_H264_FPS, 1)
+                    c.time_base = fractions.Fraction(1, _H264_FPS)
+                    c.thread_count = max(1, min(8, os.cpu_count() or 1))
+                    # Sin 'level': x264 elige el que corresponda a la
+                    # resolución (el 3.1 fijo de aiortc se queda corto a 1080p).
+                    c.options = {'preset': 'ultrafast', 'tune': 'zerolatency'}
+                    c.profile = 'Baseline'
+                    self.codec = c
+                return super()._encode_frame(frame, force_keyframe)
+
+        _codecs.H264Encoder = _H264EncoderRapido
+        WEBRTC_H264 = True
+        print("  [✓] Encoder H.264 (x264 ultrafast) preferido sobre VP8.")
+    except Exception as _e:
+        print(f"  [*] H.264 no disponible ({_e}); se usará VP8.")
 except ImportError:
     print("  [!] aiortc no instalado — usando fallback JPEG.")
+
+# ── Descodificador de la pantalla del profesor (vídeo comprimido) ────────────
+# El panel del profesor codifica su pantalla UNA vez con WebCodecs (H.264/VP8)
+# y el servidor reparte los trozos. Aquí se descodifican con PyAV (el mismo
+# libavcodec que ya usa aiortc), que es C y va sobrado: un fotograma 1600p
+# cuesta ~3 ms frente a los ~150-250 KB de JPEG por fotograma que llegaban
+# antes por la red para CADA alumno.
+try:
+    import av as _av
+    _AV_OK = True
+except Exception:
+    _av = None
+    _AV_OK = False
 
 # ── Control remoto (Pynput + Xdotool en X11, ydotool en Wayland) ──────────────
 _mouse_ctrl = None
@@ -205,17 +302,22 @@ _kbd_ctrl   = None
 _PBtn       = None
 _XDO_CMD    = shutil.which('xdotool') if platform_utils.IS_LINUX else None
 _YDO_CMD    = None   # ydotool (Wayland) — se detecta en _init_input
+_YDO_TYPE_ARGS = []  # flags extra para `ydotool type` (p.ej. --key-delay 0)
 _ydo_env    = None   # entorno con YDOTOOL_SOCKET resuelto
 _xdo_env    = None   # entorno precalculado para xdotool (evita copiar os.environ en cada evento)
 _mon_left   = 0      # offset X del monitor capturado en el espacio virtual X11
 _mon_top    = 0      # offset Y del monitor capturado en el espacio virtual X11
 _mon_width  = 1920   # ancho del monitor capturado (para normalizar coords abs)
 _mon_height = 1080   # alto  del monitor capturado (para normalizar coords abs)
+_mon_valido = False  # True cuando la geometría viene de una captura real
 
 # Inyección de input absoluto en Wayland vía demonio uinput root (vigia_input).
 # Resuelve el bug del ratón pegado en la esquina (ydotool no tiene eje absoluto).
 _VIGIA_INPUT = None
 _VI_ABS_MAX  = 32767
+_VI_TECLADO  = False   # True si el demonio acepta teclas (evita ydotool por tecla)
+_VI_KB_PROBE = 0.0     # último saludo al demonio buscando soporte de teclado
+_ES_WAYLAND  = False   # se resuelve en _init_input()
 
 # ── Terminal remoto: directorio de trabajo persistente ────────────────────────
 _term_cwd = os.path.expanduser('~')   # cwd actual del terminal del profesor
@@ -303,6 +405,23 @@ def _ydo_sync(*args):
     except Exception as e:
         print(f"  [!] ydotool {args}: {e}")
 
+def _detectar_ydo_type_args():
+    """Añade `--key-delay 0` a `ydotool type` si esa versión lo admite.
+
+    Por defecto ydotool espera ~12-20 ms ENTRE cada tecla: escribir «hola» por
+    control remoto costaba casi 100 ms de más. Se prueba con una cadena vacía
+    (no escribe nada) y solo se usa el flag si el comando termina bien.
+    """
+    global _YDO_TYPE_ARGS
+    try:
+        r = subprocess.run([_YDO_CMD, 'type', '--key-delay', '0', '--', ''],
+                           env=_ydo_env, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=3)
+        if r.returncode == 0:
+            _YDO_TYPE_ARGS = ['--key-delay', '0']
+    except Exception:
+        pass
+
 def _ydo_resolver_socket():
     """Devuelve un entorno con YDOTOOL_SOCKET apuntando al socket de ydotoold."""
     env = dict(os.environ)
@@ -320,6 +439,8 @@ def _ydo_resolver_socket():
 
 def _init_input():
     global _mouse_ctrl, _kbd_ctrl, _PBtn, _XDO_CMD, _xdo_env, _YDO_CMD, _ydo_env
+    global _ES_WAYLAND
+    _ES_WAYLAND = platform_utils.IS_LINUX and screen_capture.is_wayland()
     # 1. pynput
     try:
         from pynput.mouse import Controller as MouseController, Button
@@ -350,6 +471,7 @@ def _init_input():
         _YDO_CMD = shutil.which('ydotool')
         if _YDO_CMD:
             _ydo_env = _ydo_resolver_socket()
+            _detectar_ydo_type_args()
             print(f"  [✓] Sesión Wayland: control remoto vía ydotool ({_YDO_CMD}).")
         else:
             print("  [!] Sesión Wayland sin ydotool: el control remoto solo "
@@ -360,7 +482,7 @@ def _init_input():
     #    Es el ÚNICO que posiciona el ratón correctamente en Wayland; ydotool no
     #    tiene eje absoluto y deja el cursor pegado en la esquina. El puntero y el
     #    bloqueo (EVIOCGRAB) van por aquí; el teclado sigue por ydotool.
-    global _VIGIA_INPUT
+    global _VIGIA_INPUT, _VI_TECLADO
     if platform_utils.IS_LINUX:
         try:
             import vigia_input
@@ -369,7 +491,13 @@ def _init_input():
             global _VI_ABS_MAX
             _VI_ABS_MAX = vigia_input.ABS_MAX
             if vi.available():
-                print("  [✓] Control de ratón vía vigia_input (uinput absoluto).")
+                # Si el demonio anuncia 'kb', el teclado también va por uinput:
+                # una escritura en el socket (~0,05 ms) en lugar de un proceso
+                # ydotool por pulsación (~20-30 ms de fork+exec). Solo en
+                # Wayland: en X11 xdotool ya inyecta bien y con --clearmodifiers.
+                _VI_TECLADO = _ES_WAYLAND and 'kb' in vi.features()
+                print("  [✓] Control de ratón vía vigia_input (uinput absoluto)"
+                      + (" + teclado." if _VI_TECLADO else "."))
             else:
                 print("  [!] vigia_input aún sin demonio (se reintenta al usarlo).")
         except Exception as e:
@@ -422,12 +550,15 @@ _input_q: queue.Queue = queue.Queue(maxsize=400)
 
 def _input_worker():
     """Hilo dedicado: ejecuta eventos de entrada uno a uno, en orden."""
+    pendiente = None
     while True:
-        data = _input_q.get()
+        data = pendiente if pendiente is not None else _input_q.get()
+        pendiente = None
         try:
-            # Coalescing de mousemove: si hay más moves en cola, descartar el actual
-            # y procesar solo el más reciente antes del próximo evento no-move.
-            if data.get('type') == 'mousemove':
+            tipo = data.get('type')
+            # Coalescing de mousemove: si hay más moves en cola, descartar los
+            # viejos y ejecutar solo el más reciente.
+            if tipo == 'mousemove':
                 while True:
                     try:
                         nxt = _input_q.get_nowait()
@@ -436,9 +567,25 @@ def _input_worker():
                     if nxt.get('type') == 'mousemove':
                         data = nxt          # descartar move viejo, usar el más reciente
                     else:
-                        _procesar_input(data)   # ejecutar el move más reciente
-                        data = nxt              # continuar con el siguiente evento
+                        pendiente = nxt     # se procesará en la vuelta siguiente
                         break
+            # Escritura: agrupar los caracteres consecutivos en una sola
+            # llamada. Al escribir rápido se acumulan varios eventos 'type' y
+            # cada uno costaba un proceso ydotool/xdotool completo.
+            elif tipo == 'type':
+                chars = [data.get('char', '')]
+                while sum(len(c) for c in chars) < 64:
+                    try:
+                        nxt = _input_q.get_nowait()
+                    except queue.Empty:
+                        break
+                    if nxt.get('type') == 'type':
+                        chars.append(nxt.get('char', ''))
+                    else:
+                        pendiente = nxt
+                        break
+                if len(chars) > 1:
+                    data = dict(data, char=''.join(chars))
             _procesar_input(data)
         except Exception:
             pass
@@ -459,7 +606,10 @@ def _get_pynput_key(key):
     except: return key
 
 # ── Configuración (valores por defecto, ajustables desde el dashboard) ───────
-ANCHO_IMAGEN      = 1280
+# Las miniaturas se ven en tarjetas de ~280 px (y en el modal a ~900 px): 960 px
+# sobra para ambas y recorta ~45% de los bytes que cada alumno envía cada
+# segundo — con 30 alumnos es lo que hacía ir a tirones la rejilla del panel.
+ANCHO_IMAGEN      = 960
 CALIDAD_JPEG      = 55
 INTERVALO_SEG     = 1.0
 REINTENTOS_ESPERA = 5
@@ -486,46 +636,223 @@ _pending_ice   = []     # ICE candidates recibidos antes del offer
 def _b64(jpeg: bytes) -> str:
     return 'data:image/jpeg;base64,' + base64.b64encode(jpeg).decode()
 
+
+# ── Pantalla del profesor recibida como vídeo ────────────────────────────────
+_cola_stream  = queue.Queue(maxsize=12)   # trozos codificados por descodificar
+_stream_perdido = False                   # se descartó algo: esperar al próximo key
+_prof_destino = [0, 0]                    # tamaño útil de la ventana del alumno
+
+
+def _poner_profesor(item):
+    """Encola un fotograma para la ventana del profesor, descartando el viejo."""
+    try:
+        _cola_profesor.put_nowait(item)
+    except queue.Full:
+        try:
+            _cola_profesor.get_nowait()
+            _cola_profesor.put_nowait(item)
+        except Exception:
+            pass
+
+
+def _stream_put(item):
+    global _stream_perdido
+    try:
+        _cola_stream.put_nowait(item)
+    except queue.Full:
+        # Perder un trozo rompe la cadena de fotogramas diferenciales: se marca
+        # y el descodificador espera al siguiente fotograma clave (≤2 s) en vez
+        # de pintar basura.
+        _stream_perdido = True
+
+
+def _bucle_stream_profesor():
+    """Descodifica el vídeo de la pantalla del profesor y lo pasa a la ventana."""
+    global _stream_perdido
+    dec = None
+    codec = 'h264'
+    while True:
+        item = _cola_stream.get()
+        try:
+            tipo = item[0]
+            if tipo == 'start':
+                codec = item[1]
+                dec = None
+                _stream_perdido = False
+                continue
+            if tipo == 'stop':
+                dec = None
+                _poner_profesor({'activa': False})
+                continue
+
+            _, datos, es_clave = item
+            if es_clave:
+                _stream_perdido = False
+            elif dec is None or _stream_perdido:
+                continue          # sin clave todavía: no hay nada que pintar
+            if dec is None:
+                dec = _av.CodecContext.create(codec, 'r')
+                dec.thread_count = max(1, min(4, os.cpu_count() or 1))
+            for frame in dec.decode(_av.Packet(datos)):
+                ancho, alto = _prof_destino
+                if ancho and alto and frame.width > ancho:
+                    # swscale escala y convierte en una pasada; hacerlo aquí
+                    # evita que PIL redimensione después en el hilo de Tk.
+                    escala = min(ancho / frame.width, alto / frame.height)
+                    frame = frame.reformat(
+                        max(2, int(frame.width * escala)),
+                        max(2, int(frame.height * escala)), 'rgb24')
+                _poner_profesor({'activa': True, 'pil': frame.to_image()})
+        except Exception as e:
+            print(f"  [!] Vídeo del profesor: {e}")
+            dec = None
+            _stream_perdido = True
+
+
+if _AV_OK:
+    threading.Thread(target=_bucle_stream_profesor, daemon=True,
+                     name='vigia-stream').start()
+
 if WEBRTC_OK:
     class ScreenStreamTrack(VideoStreamTrack):
         kind = "video"
         _CLOCK_RATE = 90000
         _MAX_W      = 1920   # tope de anchura codificada (1080p)
+        # Escalones de anchura para la adaptación automática. Si el equipo del
+        # alumno no da abasto (captura + codificación más lentas que el objetivo
+        # de fps), se baja un escalón: es preferible 1280p fluido a 1080p a
+        # tirones. Al recuperar holgura se vuelve a subir.
+        _ESCALONES  = (1920, 1600, 1280, 1024, 800)
+        _BAJAR_SEG  = 4.0    # espera mínima antes de bajar un escalón
+        _SUBIR_SEG  = 15.0   # subir cuesta más: evita el sube-y-baja constante
+        _MUESTRAS   = 30     # frames de rodaje antes de hacer caso a la media
+        _CONGELAR   = 60.0   # pausa de la adaptación cuando bajar no sirve
 
         @property
         def _TARGET_FPS(self):
-            return _WEBRTC_FPS
+            return max(1, _WEBRTC_FPS)
 
         def __init__(self):
             super().__init__()
             self._cap        = None   # backend de screen_capture
-            self._ts         = 0
             self._t0         = None
+            self._next       = 0.0    # instante previsto del próximo frame
+            self._last_pts   = -1
             self._last_frame = None   # último frame válido; se sirve si la captura falla
+            self._nivel      = 0      # índice en _ESCALONES
+            self._ewma       = None   # media móvil del intervalo real entre frames
+            self._ult_ajuste = 0.0
+            self._ult_recv   = None
+            self._muestras   = 0
+            self._ewma_antes = None   # ritmo previo a la última bajada
+            self._congelado  = 0.0    # instante hasta el que no se adapta
+            self._congelar   = self._CONGELAR
             # Executor propio de un hilo: la captura no compite con otras tareas
             # del pool por defecto y los frames se producen siempre en orden.
             self._pool = ThreadPoolExecutor(max_workers=1,
                                             thread_name_prefix='vigia-cap')
 
         async def recv(self):
-            if self._t0 is None:
-                self._t0 = asyncio.get_event_loop().time()
-            self._ts += int(self._CLOCK_RATE / self._TARGET_FPS)
-            drift = self._ts / self._CLOCK_RATE - (asyncio.get_event_loop().time() - self._t0)
-            if drift > 0:
-                await asyncio.sleep(drift)
-
             loop = asyncio.get_event_loop()
+            ahora = loop.time()
+            if self._t0 is None:
+                self._t0 = ahora
+                self._next = ahora
+                self._ult_ajuste = ahora
+            periodo = 1.0 / self._TARGET_FPS
+
+            espera = self._next - ahora
+            if espera > 0:
+                await asyncio.sleep(espera)
+                ahora = loop.time()
+            self._next += periodo
+            # Si vamos con retraso (equipo lento), SALTAR los instantes perdidos
+            # en vez de arrastrarlos: así no se acumula latencia.
+            if self._next < ahora:
+                self._next = ahora + periodo
+
+            self._medir(ahora, periodo)
             frame = await loop.run_in_executor(self._pool, self._capturar)
-            frame.pts       = self._ts
+
+            # PTS tomado del reloj REAL, no de un contador de frames. Con el
+            # contador, un equipo que solo alcanzaba 15 de los 30 fps objetivo
+            # marcaba los frames con el doble de duración de la que tenían: el
+            # navegador los reproducía a cámara lenta y el retardo del control
+            # remoto crecía sin parar. Con reloj real el vídeo va siempre «al
+            # día» aunque caigan fps.
+            pts = int((loop.time() - self._t0) * self._CLOCK_RATE)
+            if pts <= self._last_pts:
+                pts = self._last_pts + 1
+            self._last_pts  = pts
+            frame.pts       = pts
             frame.time_base = fractions.Fraction(1, self._CLOCK_RATE)
             return frame
 
+        def _medir(self, ahora, periodo):
+            """Vigila el ritmo real y ajusta la resolución si el equipo no llega.
+
+            El intervalo entre llamadas a recv() incluye captura, escalado y
+            codificación: es la medida directa de lo que aguanta el equipo.
+            """
+            if self._ult_recv is not None:
+                dt = ahora - self._ult_recv
+                base = periodo if self._ewma is None else self._ewma
+                # Media lenta (memoria ~12 frames): un tirón puntual del equipo
+                # no debe bastar para cambiar de resolución.
+                self._ewma = base * 0.92 + dt * 0.08
+                self._muestras += 1
+            self._ult_recv = ahora
+            # Rodaje: los primeros frames incluyen el arranque del encoder y de
+            # la captura; decidir con ellos bajaba la resolución sin motivo.
+            if self._muestras < self._MUESTRAS or ahora < self._congelado:
+                return
+            transcurrido = ahora - self._ult_ajuste
+            nivel = self._nivel
+
+            # ¿Sirvió de algo la última bajada? Si el cuello de botella no es la
+            # resolución (p. ej. captura por spectacle a 2 fps, o el propio
+            # compositor), seguir bajando solo empeora la imagen sin ganar
+            # fluidez: se vuelve al escalón anterior y se deja de tocar un rato.
+            if self._ewma_antes is not None and transcurrido >= self._BAJAR_SEG:
+                mejoro = self._ewma < self._ewma_antes * 0.9
+                self._ewma_antes = None
+                if not mejoro:
+                    self._congelado = ahora + self._congelar
+                    # Cada intento fallido espera el doble: si el límite es la
+                    # captura (o los fps pedidos superan lo que da el
+                    # compositor), no tiene sentido reintentarlo cada minuto.
+                    self._congelar = min(self._congelar * 2, 600.0)
+                    self._cambiar_nivel(nivel - 1, ahora, periodo,
+                                        'bajar no mejoró el ritmo')
+                    return
+                self._congelar = self._CONGELAR
+
+            if self._ewma > periodo * 1.6 and nivel < len(self._ESCALONES) - 1 \
+                    and transcurrido >= self._BAJAR_SEG:
+                self._ewma_antes = self._ewma
+                self._cambiar_nivel(nivel + 1, ahora, periodo,
+                                    f'{1/max(1e-6, self._ewma):.0f} fps reales')
+            elif self._ewma < periodo * 1.25 and nivel > 0 \
+                    and transcurrido >= self._SUBIR_SEG:
+                self._cambiar_nivel(nivel - 1, ahora, periodo,
+                                    f'{1/max(1e-6, self._ewma):.0f} fps reales')
+
+        def _cambiar_nivel(self, nivel, ahora, periodo, motivo):
+            nivel = max(0, min(len(self._ESCALONES) - 1, nivel))
+            if nivel == self._nivel:
+                return
+            self._nivel = nivel
+            self._ult_ajuste = ahora
+            self._ewma = periodo   # empezar de cero tras el cambio
+            self._muestras = 0
+            print(f"  [WebRTC] {motivo} → anchura {self._ESCALONES[nivel]} px")
+
         def _out_size(self, w, h):
-            """Tamaño de salida: tope _MAX_W y dimensiones pares (yuv420p)."""
-            if w > self._MAX_W:
-                h = int(h * self._MAX_W / w)
-                w = self._MAX_W
+            """Tamaño de salida: tope adaptativo y dimensiones pares (yuv420p)."""
+            tope = min(self._MAX_W, self._ESCALONES[self._nivel])
+            if w > tope:
+                h = int(h * tope / w)
+                w = tope
             return w & ~1, h & ~1
 
         def _a_frame(self, arr, fmt):
@@ -549,11 +876,12 @@ if WEBRTC_OK:
                     self._cap = screen_capture.create_capturer(verbose=False)
                 mon = self._cap.monitor()
                 # Mantener offset/tamaño sincronizados para el mapeo de coordenadas
-                global _mon_left, _mon_top, _mon_width, _mon_height
+                global _mon_left, _mon_top, _mon_width, _mon_height, _mon_valido
                 _mon_left = mon.get('left', 0)
                 _mon_top  = mon.get('top',  0)
                 _mon_width  = mon.get('width',  _mon_width)
                 _mon_height = mon.get('height', _mon_height)
+                _mon_valido = True
                 if hasattr(self._cap, 'grab_raw'):
                     # Vía rápida (PipeWire en Wayland, mss en X11): frame BGRx
                     # crudo, sin PIL. Igual que RustDesk: captura nativa → swscale.
@@ -624,16 +952,26 @@ def bucle_capturas():
             monitor = cap.monitor()
             orig_w, orig_h = monitor['width'], monitor['height']
             # Actualizar offset global del monitor para el mapeo de coordenadas
-            global _mon_left, _mon_top, _mon_width, _mon_height
+            global _mon_left, _mon_top, _mon_width, _mon_height, _mon_valido
             _mon_left = monitor.get('left', 0)
             _mon_top  = monitor.get('top',  0)
             _mon_width  = orig_w
             _mon_height = orig_h
+            _mon_valido = True
 
             if (now - _ultimo_screenshot) >= INTERVALO_SEG:
-                img = cap.grab()
+                # max_age: si WebRTC acaba de capturar un frame, se reaprovecha
+                # en lugar de pedir otro al compositor (y de pelearse con él por
+                # el appsink de PipeWire, que solo guarda el último frame).
+                img = screen_capture.grab_shared(cap, max_age=INTERVALO_SEG * 0.5)
                 if img.width > ANCHO_IMAGEN:
-                    img = img.resize((ANCHO_IMAGEN, int(img.height * ANCHO_IMAGEN / img.width)), Image.LANCZOS)
+                    # BILINEAR con reducing_gap: prefiltra por bloques y luego
+                    # interpola. Calidad casi idéntica a LANCZOS para una
+                    # miniatura y ~5× más rápido (esto corría en cada alumno
+                    # una vez por segundo, compitiendo con el vídeo en vivo).
+                    alto = max(1, int(img.height * ANCHO_IMAGEN / img.width))
+                    img = img.resize((ANCHO_IMAGEN, alto), Image.BILINEAR,
+                                     reducing_gap=2.0)
                 buf = io.BytesIO(); img.save(buf, format='JPEG', quality=CALIDAD_JPEG)
                 sio.emit('screenshot', {'image': _b64(buf.getvalue())})
                 _ultimo_screenshot = now
@@ -675,7 +1013,7 @@ def _procesar_input_ydo(tipo, data, x, y):
     if tipo == 'type':
         char = data.get('char', '')
         if char:
-            _ydo_sync('type', '--', char)
+            _ydo_sync('type', *_YDO_TYPE_ARGS, '--', char)
         return
     if tipo in ('keypress', 'keydown', 'keyup'):
         code = _YDO_KEY_MAP.get(data.get('key', '').lower())
@@ -725,6 +1063,57 @@ def _procesar_pointer_vigia(tipo, data):
     return False
 
 
+def _vi_teclado_disponible():
+    """True si el demonio uinput acepta teclas.
+
+    Reintenta el saludo cada 30 s: el demonio `vigia-input` puede arrancar
+    DESPUÉS que el cliente (carrera típica en el arranque de la sesión), y sin
+    reintento el teclado se quedaría en ydotool hasta reiniciar el cliente.
+    """
+    global _VI_TECLADO, _VI_KB_PROBE
+    if _VI_TECLADO:
+        return True
+    if not (_ES_WAYLAND and _VIGIA_INPUT is not None):
+        return False
+    ahora = time.monotonic()
+    if ahora - _VI_KB_PROBE < 30.0:
+        return False
+    _VI_KB_PROBE = ahora
+    try:
+        _VI_TECLADO = 'kb' in _VIGIA_INPUT.features()
+    except Exception:
+        _VI_TECLADO = False
+    return _VI_TECLADO
+
+
+def _procesar_teclado_vigia(tipo, data):
+    """Inyecta teclas por el demonio uinput (Wayland). True si se inyectó.
+
+    Usa los mismos códigos de kernel que ydotool, así que el comportamiento es
+    idéntico — pero sin lanzar un proceso por pulsación. Las teclas que no estén
+    en el mapa se devuelven como no tratadas para que las haga ydotool.
+    """
+    if tipo in ('keypress', 'keydown', 'keyup'):
+        code = _YDO_KEY_MAP.get(data.get('key', '').lower())
+        if code is None:
+            return False
+        if tipo == 'keypress':
+            return bool(_VIGIA_INPUT.key(code, 1) and _VIGIA_INPUT.key(code, 0))
+        return _VIGIA_INPUT.key(code, 1 if tipo == 'keydown' else 0)
+    if tipo == 'keycombo':
+        codes = [_YDO_KEY_MAP.get(p.lower())
+                 for p in data.get('combo', '').split('+') if p]
+        if not codes or None in codes:
+            return False
+        ok = True
+        for c in codes:
+            ok = _VIGIA_INPUT.key(c, 1) and ok
+        for c in reversed(codes):
+            ok = _VIGIA_INPUT.key(c, 0) and ok
+        return ok
+    return False
+
+
 def _procesar_input(data):
     """Ejecuta un evento de entrada. Llamar SOLO desde el hilo _input_worker."""
     tipo = data.get('type', '')
@@ -741,6 +1130,13 @@ def _procesar_input(data):
     if _VIGIA_INPUT is not None and tipo in (
             'mousemove', 'mousedown', 'mouseup', 'scroll'):
         if _procesar_pointer_vigia(tipo, data):
+            return
+
+    # Teclas por el mismo demonio uinput si lo soporta: ahorra un fork+exec de
+    # ydotool por pulsación (lo que hacía «pegajoso» escribir en remoto).
+    if tipo in ('keypress', 'keydown', 'keyup', 'keycombo') \
+            and _vi_teclado_disponible():
+        if _procesar_teclado_vigia(tipo, data):
             return
 
     # En Wayland, ydotool inyecta teclado (y ratón solo como fallback)
@@ -884,19 +1280,30 @@ def on_do_input(data):
 @sio.event
 def connect():
     print(f"[✓] Conectado al servidor.")
-    sio.emit('register', {'name': f"{platform_utils.get_username()} - {socket.gethostname()}"})
+    # 'caps' anuncia lo que sabe hacer este alumno; el panel solo emite su
+    # pantalla como vídeo si TODOS los destinatarios saben descodificarlo.
+    sio.emit('register', {
+        'name': f"{platform_utils.get_username()} - {socket.gethostname()}",
+        'caps': {'vstream': _AV_OK},
+    })
 
 @sio.on('viewer_start')
 def on_viewer_start(data):
     global _en_observacion; _en_observacion = True
     print(f"[*] El profesor está observando/controlando.")
-    # Enviar resolución real de pantalla para que el profesor mapee coordenadas correctamente
+    # Enviar resolución real de pantalla para que el profesor mapee coordenadas
+    # correctamente. Se usa la geometría que ya conoce el bucle de captura: abrir
+    # un capturador nuevo aquí costaba un handshake completo del portal
+    # ScreenCast (~0,5 s) justo al pulsar «ver/controlar».
     try:
-        _mon = screen_capture.get_monitor_geometry()
         global _mon_left, _mon_top
-        _mon_left = _mon.get('left', 0)
-        _mon_top  = _mon.get('top',  0)
-        sio.emit('screen_info', {'w': _mon['width'], 'h': _mon['height']})
+        if _mon_valido:
+            sio.emit('screen_info', {'w': _mon_width, 'h': _mon_height})
+        else:
+            _mon = screen_capture.get_monitor_geometry()
+            _mon_left = _mon.get('left', 0)
+            _mon_top  = _mon.get('top',  0)
+            sio.emit('screen_info', {'w': _mon['width'], 'h': _mon['height']})
     except Exception:
         pass
 
@@ -938,11 +1345,31 @@ def on_config_update(data):
 
 @sio.on('teacher_screen')
 def on_teacher_screen(data):
-    try:
-        _cola_profesor.put_nowait(data)
-    except queue.Full:
-        try: _cola_profesor.get_nowait(); _cola_profesor.put_nowait(data)
-        except: pass
+    _poner_profesor(data)
+
+@sio.on('teacher_stream_start')
+def on_teacher_stream_start(data):
+    if not _AV_OK:
+        return
+    codec = 'vp8' if str(data.get('codec', 'h264')).lower() == 'vp8' else 'h264'
+    print(f"[*] Pantalla del profesor por vídeo {codec.upper()} "
+          f"{data.get('w')}x{data.get('h')}")
+    _stream_put(('start', codec))
+
+@sio.on('teacher_stream_chunk')
+def on_teacher_stream_chunk(data):
+    if not _AV_OK:
+        return
+    datos = data.get('d')
+    if isinstance(datos, (bytes, bytearray, memoryview)):
+        _stream_put(('chunk', bytes(datos), bool(data.get('k'))))
+
+@sio.on('teacher_stream_stop')
+def on_teacher_stream_stop(_data=None):
+    if _AV_OK:
+        _stream_put(('stop',))
+    else:
+        _poner_profesor({'activa': False})
 
 @sio.on('exec_command')
 def on_exec_command(data):
@@ -982,6 +1409,30 @@ if WEBRTC_OK:
     def on_webrtc_offer(data):
         _wrtc(_procesar_offer(data))
 
+    def _preferir_h264(pc):
+        """Pone H.264 delante de VP8 en la negociación de códecs.
+
+        aiortc respeta el orden que propone el navegador (Chrome pone VP8
+        primero) salvo que el transceiver declare preferencias. VP8 queda al
+        final de la lista, así que si el navegador no ofreciera H.264 —una
+        compilación de Chromium sin códecs propietarios— la negociación sigue
+        funcionando con VP8. Debe llamarse ANTES de setRemoteDescription.
+        """
+        if not WEBRTC_H264:
+            return
+        try:
+            from aiortc import RTCRtpSender
+            caps = RTCRtpSender.getCapabilities('video').codecs
+            h264 = [c for c in caps if c.mimeType.lower() == 'video/h264']
+            resto = [c for c in caps if c.mimeType.lower() != 'video/h264']
+            if not h264:
+                return
+            for t in pc.getTransceivers():
+                if t.kind == 'video':
+                    t.setCodecPreferences(h264 + resto)
+        except Exception as e:
+            print(f"  [!] No se pudo preferir H.264: {e}")
+
     async def _procesar_offer(data):
         global _webrtc_pc, _webrtc_track, _webrtc_prof, _webrtc_activo, _pending_ice
         if _webrtc_pc:
@@ -998,6 +1449,7 @@ if WEBRTC_OK:
         _webrtc_pc = pc
         _webrtc_track = ScreenStreamTrack()
         pc.addTrack(_webrtc_track)
+        _preferir_h264(pc)
 
         @pc.on("datachannel")
         def on_dc(channel):
@@ -1098,11 +1550,19 @@ class _VentanaProfesor:
         self._label.pack(expand=True, fill='both')
         self._foto = None
         self._img_raw = None   # PIL Image original sin redimensionar
+        # Tamaño de partida para el descodificador hasta que llegue <Configure>
+        # (la ventana se abre maximizada).
+        _prof_destino[0] = self.top.winfo_screenwidth()
+        _prof_destino[1] = self.top.winfo_screenheight()
         self._after_id = None  # ID del after de redibujado pendiente
         self.top.protocol("WM_DELETE_WINDOW", self.destruir)
         self.top.bind('<Configure>', self._on_resize)
 
     def _on_resize(self, event):
+        # Publicar el tamaño útil para que el descodificador de vídeo escale
+        # con swscale (una pasada SIMD) en vez de dejárselo a PIL aquí.
+        _prof_destino[0] = max(self.top.winfo_width(), 1)
+        _prof_destino[1] = max(self.top.winfo_height(), 1)
         if self._img_raw is None: return
         if self._after_id: self.top.after_cancel(self._after_id)
         self._after_id = self.top.after(120, self._render)
@@ -1113,17 +1573,41 @@ class _VentanaProfesor:
         try:
             w = max(self.top.winfo_width(), 1)
             h = max(self.top.winfo_height(), 1)
-            img = self._img_raw.copy()
-            img.thumbnail((w, h), Image.LANCZOS)
+            img = self._img_raw
+            # Escalar solo si hace falta de verdad. Redimensionar con LANCZOS en
+            # CADA frame (10 fps) se comía un núcleo del equipo del alumno y
+            # dejaba la imagen del profesor a tirones; BILINEAR sobre una imagen
+            # que ya viene casi al tamaño de la ventana es visualmente igual.
+            escala = min(w / img.width, h / img.height)
+            if escala < 0.98:
+                destino = (max(1, int(img.width * escala)),
+                           max(1, int(img.height * escala)))
+                img = img.resize(destino, Image.BILINEAR, reducing_gap=2.0)
             self._foto = ImageTk.PhotoImage(img)
             self._label.config(image=self._foto, text='')
         except: pass
+
+    def actualizar_pil(self, img):
+        """Fotograma ya descodificado (vía vídeo comprimido): solo pintarlo."""
+        self._img_raw = img
+        self._render()
 
     def actualizar(self, b64):
         try:
             if not b64 or ',' not in b64:
                 return
-            self._img_raw = Image.open(io.BytesIO(base64.b64decode(b64.split(',', 1)[1])))
+            img = Image.open(io.BytesIO(base64.b64decode(b64.split(',', 1)[1])))
+            # draft(): el decodificador JPEG entrega la imagen ya reducida (1/2,
+            # 1/4…) directamente desde los coeficientes DCT. Descomprimir a
+            # tamaño completo para luego encoger era el grueso del coste.
+            w = max(self.top.winfo_width(), 1)
+            h = max(self.top.winfo_height(), 1)
+            try:
+                img.draft('RGB', (w, h))
+            except Exception:
+                pass
+            img.load()
+            self._img_raw = img
             self._render()
         except Exception as e:
             print(f"  [!] Error actualizando pantalla del profesor: {e}")
@@ -1467,8 +1951,13 @@ def ejecutar_interfaz():
                 d = _cola_profesor.get_nowait()
                 if d.get('activa'):
                     if not v_prof: v_prof = _VentanaProfesor(root)
-                    v_prof.actualizar(d.get('image'))
-                elif v_prof: v_prof.destruir(); v_prof = None
+                    if d.get('pil') is not None:
+                        v_prof.actualizar_pil(d['pil'])
+                    else:
+                        v_prof.actualizar(d.get('image'))
+                elif v_prof:
+                    v_prof.destruir(); v_prof = None
+                    _prof_destino[0] = _prof_destino[1] = 0
             while not _cola_bloqueo.empty():
                 if _cola_bloqueo.get_nowait():
                     if not v_bloq: v_bloq = _VentanaBloqueo(root)

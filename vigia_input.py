@@ -25,7 +25,13 @@ Protocolo: líneas JSON sobre /run/vigia-input.sock (0666). Comandos:
   {"t":"m","x":0..32767,"y":0..32767}     mover (absoluto)
   {"t":"b","btn":"left|right|middle","s":0|1}  botón (1=down,0=up)
   {"t":"s","dy":N,"dx":N}                  rueda (clicks; +arriba/-abajo)
+  {"t":"k","code":N,"s":0|1}               tecla por código de kernel (KEY_*)
   {"t":"grab","on":true|false}             bloquear/desbloquear input físico
+  {"t":"hello"}                            → responde {"ok":1,"feat":["kb"]}
+El teclado («k») evita lanzar un proceso `ydotool` por pulsación: cada tecla
+costaba ~20-30 ms de fork+exec, y escribir con el control remoto se notaba
+pegajoso. Un demonio antiguo no responde a «hello» y el cliente sigue usando
+ydotool automáticamente.
 El grab se libera AUTOMÁTICAMENTE si la conexión que lo pidió se cierra
 (seguridad: si el cliente del profesor muere, el alumno no queda bloqueado).
 """
@@ -39,6 +45,9 @@ import threading
 SOCK_PATH = '/run/vigia-input.sock'
 ABS_MAX = 32767
 _DEV_NAME = 'vigia-virtual-pointer'
+# Códigos de tecla declarados por el dispositivo virtual (igual que ydotoold):
+# KEY_ESC(1) .. KEY_MICMUTE(248) cubre todo el teclado estándar.
+_KEY_MIN, _KEY_MAX = 1, 248
 
 
 # ── Cliente (lo importa client.py) ────────────────────────────────────────────
@@ -92,8 +101,29 @@ class VigiaInput:
     def scroll(self, dy, dx=0):
         return self._send({'t': 's', 'dy': int(dy), 'dx': int(dx)})
 
+    def key(self, code, state):
+        return self._send({'t': 'k', 'code': int(code), 's': 1 if state else 0})
+
     def grab(self, on):
         return self._send({'t': 'grab', 'on': bool(on)})
+
+    def features(self, timeout=0.8):
+        """Capacidades del demonio, p.ej. {'kb'}. Vacío si es una versión
+        antigua (no responde) o no está disponible."""
+        with self._lock:
+            try:
+                s = self._ensure()
+                s.sendall(b'{"t":"hello"}\n')
+                s.settimeout(timeout)
+                try:
+                    data = s.recv(512)
+                finally:
+                    s.settimeout(2.0)
+                if not data:
+                    return set()
+                return set(json.loads(data.split(b'\n', 1)[0]).get('feat', []))
+            except (OSError, ValueError):
+                return set()
 
 
 # ── Demonio (corre como root) ─────────────────────────────────────────────────
@@ -101,7 +131,11 @@ class VigiaInput:
 def _build_uinput():
     from evdev import UInput, ecodes as e, AbsInfo
     cap = {
-        e.EV_KEY: [e.BTN_LEFT, e.BTN_RIGHT, e.BTN_MIDDLE],
+        # Botones de ratón + todo el teclado estándar: así el teclado del
+        # profesor se inyecta por este mismo dispositivo, sin lanzar un proceso
+        # ydotool por pulsación.
+        e.EV_KEY: [e.BTN_LEFT, e.BTN_RIGHT, e.BTN_MIDDLE] +
+                  list(range(_KEY_MIN, _KEY_MAX + 1)),
         e.EV_ABS: [
             (e.ABS_X, AbsInfo(value=0, min=0, max=ABS_MAX,
                               fuzz=0, flat=0, resolution=0)),
@@ -211,6 +245,11 @@ def _run_daemon():
                 if code is not None:
                     ui.write(e.EV_KEY, code, 1 if obj.get('s') else 0)
                     ui.syn()
+            elif t == 'k':
+                code = int(obj.get('code', 0))
+                if _KEY_MIN <= code <= _KEY_MAX:
+                    ui.write(e.EV_KEY, code, 1 if obj.get('s') else 0)
+                    ui.syn()
             elif t == 's':
                 dy = int(obj.get('dy', 0))
                 dx = int(obj.get('dx', 0))
@@ -251,7 +290,14 @@ def _run_daemon():
                         obj = json.loads(line)
                     except ValueError:
                         continue
-                    if obj.get('t') == 'grab':
+                    if obj.get('t') == 'hello':
+                        # Anuncio de capacidades: el cliente usa el teclado por
+                        # uinput solo si el demonio (esta versión) lo soporta.
+                        try:
+                            conn.sendall(b'{"ok":1,"feat":["kb"]}\n')
+                        except OSError:
+                            break
+                    elif obj.get('t') == 'grab':
                         try:
                             if obj.get('on'):
                                 grabber.grab()

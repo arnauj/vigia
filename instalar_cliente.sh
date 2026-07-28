@@ -46,7 +46,7 @@ echo "[*] Instalando dependencias del sistema (xdotool, tk, Pillow, pip)..."
 sudo apt-get update -qq 2>/dev/null || true
 sudo apt-get install -y python3-pip python3-tk python3-pil python3-pil.imagetk \
     xdotool xclip xsel curl wget -qq 2>/dev/null || true
-for p in python3-pynput python3-numpy python3-aiortc \
+for p in python3-pynput python3-numpy python3-aiortc python3-av \
          python3-socketio python3-websocket python3-requests \
          ydotool kde-spectacle python3-evdev \
          python3-gi python3-dbus python3-gst-1.0 gstreamer1.0-pipewire \
