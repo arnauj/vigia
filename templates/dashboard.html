@@ -1031,7 +1031,7 @@
     #settings-overlay {
       display: none;
       position: fixed; inset: 0;
-      background: rgba(0,0,0,.6); z-index: 800;
+      background: rgba(0,0,0,.6); z-index: 950;
       align-items: center; justify-content: center;
     }
     #settings-overlay.show { display: flex; }
@@ -1039,6 +1039,7 @@
       background: var(--card-bg); border: 1px solid var(--card-border);
       border-radius: 14px; width: min(480px, 94vw); padding: 22px 24px;
       box-shadow: 0 20px 50px rgba(0,0,0,.5);
+      max-height: 94vh; overflow-y: auto;
     }
     #settings-box h3 {
       margin: 0 0 18px; font-size: 1rem; font-weight: 700;
@@ -1206,75 +1207,72 @@ function escHtml(s) {
 }
 
 // ── Configuración de rendimiento ──────────────────────────────────────────
-const _PRESETS = {
-  light:    { thumb_interval: 3.0, thumb_quality: 35, live_fps: 8,  webrtc_fps: 15, live_quality: 45 },
-  balanced: { thumb_interval: 1.0, thumb_quality: 55, live_fps: 20, webrtc_fps: 30, live_quality: 70 },
-  quality:  { thumb_interval: 0.5, thumb_quality: 75, live_fps: 30, webrtc_fps: 60, live_quality: 90 },
-};
-let _cfgCurrent = { ..._PRESETS.balanced };
-let _cfgPreset  = 'balanced';
+const _PRESETS = {{ stream_presets | tojson }};
+let _cfgCurrent = {{ stream_config | tojson }};
+let _cfgDraft = { ..._cfgCurrent };
+let _cfgPreset = _detectPreset(_cfgCurrent);
 
 function _detectPreset(cfg) {
   for (const [name, p] of Object.entries(_PRESETS)) {
-    if (p.thumb_interval === cfg.thumb_interval && p.thumb_quality === cfg.thumb_quality &&
-        p.live_fps === cfg.live_fps && p.webrtc_fps === cfg.webrtc_fps && p.live_quality === cfg.live_quality)
+    if (Object.keys(p).every(key => p[key] === cfg[key]))
       return name;
   }
   return null;
 }
 
 function _syncSettingsUI() {
-  document.getElementById('cfg-thumb-interval').value = _cfgCurrent.thumb_interval;
-  document.getElementById('cfg-thumb-interval-val').textContent = _cfgCurrent.thumb_interval.toFixed(1) + ' s';
-  document.getElementById('cfg-thumb-quality').value = _cfgCurrent.thumb_quality;
-  document.getElementById('cfg-thumb-quality-val').textContent = _cfgCurrent.thumb_quality + '%';
-  document.getElementById('cfg-live-fps').value = _cfgCurrent.live_fps;
-  document.getElementById('cfg-live-fps-val').textContent = _cfgCurrent.live_fps + ' fps';
-  document.getElementById('cfg-webrtc-fps').value = _cfgCurrent.webrtc_fps;
-  document.getElementById('cfg-webrtc-fps-val').textContent = _cfgCurrent.webrtc_fps + ' fps';
-  document.getElementById('cfg-live-quality').value = _cfgCurrent.live_quality;
-  document.getElementById('cfg-live-quality-val').textContent = _cfgCurrent.live_quality + '%';
+  for (const [key, value] of Object.entries(_cfgDraft)) {
+    const id = 'cfg-' + key.replaceAll('_', '-');
+    document.getElementById(id).value = value;
+    const formatted = key === 'thumb_interval' ? value.toFixed(1) + ' s'
+      : key.endsWith('fps') ? value + ' fps'
+      : key.endsWith('width') ? value + ' px'
+      : key === 'webrtc_bitrate' ? (value / 1000000).toFixed(1) + ' Mbps' : value + '%';
+    document.getElementById(id + '-val').textContent = formatted;
+  }
   // Resaltar preset activo
   document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
-  const active = _detectPreset(_cfgCurrent);
+  const active = _detectPreset(_cfgDraft);
   if (active) document.getElementById('preset-' + active)?.classList.add('active');
 }
 
 function _applyPreset(name) {
   const p = _PRESETS[name];
   if (!p) return;
-  _cfgCurrent = { ...p };
-  _cfgPreset = name;
+  _cfgDraft = { ...p };
   _syncSettingsUI();
 }
 
 function abrirSettings() {
+  _cfgDraft = { ..._cfgCurrent };
   _syncSettingsUI();
   document.getElementById('settings-overlay').classList.add('show');
+  document.querySelector('#settings-box .preset-btn.active, #settings-box .preset-btn').focus();
   lucide.createIcons();
 }
 
 function cerrarSettings() {
   document.getElementById('settings-overlay').classList.remove('show');
+  if (_liveviewSid) document.getElementById('liveview-overlay').focus();
 }
 
 function guardarSettings() {
-  _cfgCurrent = {
+  const config = {
     thumb_interval: parseFloat(document.getElementById('cfg-thumb-interval').value),
     thumb_quality:  parseInt(document.getElementById('cfg-thumb-quality').value),
     live_fps:       parseInt(document.getElementById('cfg-live-fps').value),
     webrtc_fps:     parseInt(document.getElementById('cfg-webrtc-fps').value),
     live_quality:   parseInt(document.getElementById('cfg-live-quality').value),
+    thumb_width:    parseInt(document.getElementById('cfg-thumb-width').value),
+    live_width:     parseInt(document.getElementById('cfg-live-width').value),
+    webrtc_bitrate: parseInt(document.getElementById('cfg-webrtc-bitrate').value),
   };
-  _cfgPreset = _detectPreset(_cfgCurrent);
-  // Actualizar FPS_SHARE del dashboard
-  FPS_SHARE     = _cfgCurrent.live_fps;
-  CALIDAD_SHARE = _cfgCurrent.live_quality / 100;
   // Enviar config a todos los clientes vía servidor
-  socket.emit('update_config', _cfgCurrent);
+  socket.emit('update_config', config);
   cerrarSettings();
-  const presetName = _cfgPreset
-    ? { light: 'Ligero', balanced: 'Equilibrado', quality: 'Alta calidad' }[_cfgPreset]
+  const preset = _detectPreset(config);
+  const presetName = preset
+    ? { light: 'Ligero', balanced: 'Equilibrado', quality: 'Alta calidad' }[preset]
     : 'Personalizado';
   toast('Configuración aplicada: ' + presetName, 'connect');
 }
@@ -1287,6 +1285,9 @@ document.addEventListener('DOMContentLoaded', () => {
     ['cfg-live-fps',       'cfg-live-fps-val',       v => v + ' fps'],
     ['cfg-webrtc-fps',     'cfg-webrtc-fps-val',     v => v + ' fps'],
     ['cfg-live-quality',   'cfg-live-quality-val',    v => v + '%'],
+    ['cfg-thumb-width',    'cfg-thumb-width-val',     v => v + ' px'],
+    ['cfg-live-width',     'cfg-live-width-val',      v => v + ' px'],
+    ['cfg-webrtc-bitrate', 'cfg-webrtc-bitrate-val',  v => (v / 1000000).toFixed(1) + ' Mbps'],
   ];
   sliders.forEach(([id, valId, fmt]) => {
     document.getElementById(id)?.addEventListener('input', (e) => {
@@ -1312,6 +1313,14 @@ let _shareSids = null;  // null = todos, Set = solo seleccionados
 // ── Socket.IO ─────────────────────────────────────────────────────────────
 const socket = io({ transports: ['websocket'] });
 
+socket.on('config_update', config => {
+  _cfgCurrent = { ..._cfgCurrent, ...config };
+  _cfgPreset = _detectPreset(_cfgCurrent);
+  FPS_SHARE = _cfgCurrent.live_fps;
+  CALIDAD_SHARE = _cfgCurrent.live_quality / 100;
+  if (_liveviewSid) { _liveFps = 0; _liveFpsTs = performance.now(); }
+});
+
 socket.on('connect', () => {
   document.getElementById('server-status').textContent = 'Conectado';
   document.getElementById('server-status').style.color = 'var(--green)';
@@ -1322,6 +1331,7 @@ socket.on('connect', () => {
 });
 
 socket.on('disconnect', () => {
+  if (_liveviewSid) cerrarLiveView();
   document.getElementById('server-status').textContent = 'Sin conexión';
   document.getElementById('server-status').style.color = 'var(--red)';
 });
@@ -1334,6 +1344,7 @@ socket.on('full_student_list', (list) => {
       connected_at: s.connected_at,
       locked: s.locked || false,
       vstream: !!s.vstream,   // sabe descodificar el vídeo del profesor
+      webrtc: s.webrtc,
     };
     renderCard(s.sid);
     if (s.locked) updateLockState(s.sid, true);
@@ -1348,6 +1359,7 @@ socket.on('student_connected', (data) => {
     image: null, last_seen: '—',
     connected_at: data.connected_at,
     vstream: !!data.vstream,
+    webrtc: data.webrtc,
   };
   // Alumno que llega con la pantalla ya compartida por vídeo: el servidor le
   // manda la configuración al registrarse, pero si no sabe descodificar hay
@@ -1823,6 +1835,8 @@ let _liveOrigW = 1280, _liveOrigH = 720;
 let _lastMouseSend = 0, _liveFps = 0, _liveFpsTs = 0;
 let _pc = null, _dc_mouse = null, _dc_kbd = null, _webrtcActivo = false;
 let _pendingLiveFrame = null;   // último frame JPEG pendiente de mostrar
+let _liveviewSession = null, _liveFrameURL = null, _jpegDecoding = false;
+let _webrtcTimer = null, _videoFrameCallback = null, _remoteIce = [];
 let _overlayEnabled = false;
 let _overlayDrawMode = false;
 let _overlayTool = 'brush';
@@ -1831,8 +1845,7 @@ let _overlaySize = 6;
 let _overlayText = '';
 let _overlayLastPoint = null;
 let _overlayCtx = null;
-const _STUN = [{ urls:'stun:stun.l.google.com:19302' },
-               { urls:'stun:stun1.l.google.com:19302' }];
+const _STUN = [];  // candidatos locales: conectar en el aula sin esperar a Internet
 
 function _emitOverlay(payload) {
   if (!_liveviewSid || _liveviewMode !== 'control') return;
@@ -1971,27 +1984,70 @@ function _setOverlayDrawMode(value) {
   _syncOverlayUi();
 }
 
-// Loop sincronizado con el repintado del navegador: evita parpadeo al mostrar
-// frames JPEG. Si llegan varios frames entre dos repaints, solo se muestra el más reciente.
-(function _liveFrameLoop() {
-  if (_pendingLiveFrame && !_webrtcActivo) {
-    document.getElementById('liveview-img').src = _pendingLiveFrame;
-    _pendingLiveFrame = null;
-  }
-  requestAnimationFrame(_liveFrameLoop);
-})();
+function _ackLiveFrame(data) {
+  if (data?.seq != null && socket.connected)
+    socket.emit('live_frame_ack', { sid: data.sid, session: data.session, seq: data.seq });
+}
 
-socket.on('live_frame', (data) => {
-  if (data.sid !== _liveviewSid) return;
-  _pendingLiveFrame = data.image;   // el loop de rAF lo mostrará en el próximo repaint
-  _liveOrigW = data.orig_w || 1280;
-  _liveOrigH = data.orig_h || 720;
+function _countLiveFrame() {
   _liveFps++;
-  const now = Date.now();
+  const now = performance.now();
   if (now - _liveFpsTs >= 1000) {
-    document.getElementById('liveview-fps').textContent = `${_liveFps} fps`;
+    document.getElementById('liveview-fps').textContent =
+      `${Math.round(_liveFps * 1000 / (now - _liveFpsTs))} fps`;
     _liveFps = 0; _liveFpsTs = now;
   }
+}
+
+function _resetLiveFrames() {
+  _ackLiveFrame(_pendingLiveFrame);
+  _pendingLiveFrame = null;
+  if (_liveFrameURL) URL.revokeObjectURL(_liveFrameURL);
+  _liveFrameURL = null;
+}
+
+async function _renderLiveFrame() {
+  if (_jpegDecoding || !_pendingLiveFrame) return;
+  const data = _pendingLiveFrame;
+  _pendingLiveFrame = null;
+  _jpegDecoding = true;
+  let url = null;
+  try {
+    const src = typeof data.image === 'string' ? data.image
+      : (url = URL.createObjectURL(new Blob([data.image], { type: 'image/jpeg' })));
+    const decoded = new Image();
+    await new Promise((resolve, reject) => {
+      decoded.onload = resolve; decoded.onerror = reject; decoded.src = src;
+    });
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    if (data.sid === _liveviewSid && data.session === _liveviewSession && !_webrtcActivo) {
+      document.getElementById('liveview-img').src = src;
+      if (_liveFrameURL) URL.revokeObjectURL(_liveFrameURL);
+      _liveFrameURL = url;
+      url = null;
+      _liveOrigW = data.orig_w || _liveOrigW;
+      _liveOrigH = data.orig_h || _liveOrigH;
+      _countLiveFrame();
+    }
+  } catch (e) {
+    console.debug('[JPEG] Fotograma descartado:', e);
+  } finally {
+    if (url) URL.revokeObjectURL(url);
+    // Confirmar tras descodificar y dar paso al repintado; si la pestaña se
+    // pausa, el alumno deja de producir en vez de acumular segundos de vídeo.
+    _ackLiveFrame(data);
+    _jpegDecoding = false;
+    if (_pendingLiveFrame) _renderLiveFrame();
+  }
+}
+
+socket.on('live_frame', (data) => {
+  if (data.sid !== _liveviewSid || data.session !== _liveviewSession || _webrtcActivo) {
+    _ackLiveFrame(data); return;
+  }
+  _ackLiveFrame(_pendingLiveFrame);
+  _pendingLiveFrame = data;
+  _renderLiveFrame();
 });
 
 socket.on('student_view_ended', (data) => {
@@ -2005,10 +2061,12 @@ socket.on('screen_info', (data) => {
 });
 
 function abrirLiveView(sid, mode) {
+  if (_liveviewSid) cerrarLiveView();
+  _liveviewSession = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   _liveviewSid  = sid;
   _liveviewMode = mode;
   _liveOrigW = 1280; _liveOrigH = 720;
-  _liveFps = 0; _liveFpsTs = Date.now();
+  _liveFps = 0; _liveFpsTs = performance.now();
   _overlayEnabled = false;
   _overlayDrawMode = false;
   _overlayTool = 'brush';
@@ -2058,7 +2116,7 @@ function abrirLiveView(sid, mode) {
   document.getElementById('liveview-img').src = students[sid]?.image || '';
 
   document.getElementById('lv-clipboard-btn').style.display = mode === 'control' ? '' : 'none';
-  socket.emit('start_view', { sid, mode });
+  socket.emit('start_view', { sid, mode, session: _liveviewSession, frame_ack: true, binary_frames: true });
   const ov = document.getElementById('liveview-overlay');
   ov.classList.add('show');
   ov.focus();
@@ -2069,8 +2127,10 @@ function cerrarLiveView() {
   if (_overlayEnabled && _liveviewSid) {
     _emitOverlay({ type: 'overlay_toggle', enabled: false });
   }
-  if (_liveviewSid) socket.emit('stop_view', { sid: _liveviewSid });
+  if (_liveviewSid && socket.connected) socket.emit('stop_view', { sid: _liveviewSid, session: _liveviewSession });
   _liveviewSid = null;
+  _liveviewSession = null;
+  _resetLiveFrames();
   _overlayEnabled = false;
   _overlayDrawMode = false;
   _overlayLastPoint = null;
@@ -2087,8 +2147,8 @@ function cerrarLiveView() {
   document.getElementById('liveview-overlay').classList.remove('show');
   document.getElementById('liveview-body').classList.remove('control-mode', 'overlay-draw-mode');
   document.getElementById('liveview-img').src = '';
-  if (_pc) { _pc.close(); _pc = null; }
-  _dc_mouse = null; _dc_kbd = null; _webrtcActivo = false;
+  _cerrarPeer();
+  _webrtcActivo = false;
   const vid = document.getElementById('liveview-video');
   vid.srcObject = null; vid.style.display = 'none';
   document.getElementById('liveview-img').style.display = 'block';
@@ -2099,134 +2159,150 @@ function cerrarLiveView() {
 
 // ── WebRTC ────────────────────────────────────────────────────────────────
 
-async function _iniciarWebRTC(sid, mode) {
-  if (typeof RTCPeerConnection === 'undefined') return;
-  try {
-    if (_pc) { _pc.close(); _pc = null; _dc_mouse = null; _dc_kbd = null; }
-    _pc = new RTCPeerConnection({ iceServers: _STUN });
-
-    if (mode === 'control') {
-      // Canal de ratón: no ordenado, sin retransmisiones — prioridad alta, mínima latencia (UDP-like)
-      _dc_mouse = _pc.createDataChannel('vigia-mouse', { ordered: false, maxRetransmits: 0, priority: 'high' });
-      // Canal de teclado: ordenado y fiable, prioridad alta — los eventos de tecla llegan en orden
-      _dc_kbd   = _pc.createDataChannel('vigia-input', { ordered: true, priority: 'high' });
-      _dc_mouse.onopen  = () => console.log('[WebRTC] DataChannel ratón abierto');
-      _dc_mouse.onclose = () => console.log('[WebRTC] DataChannel ratón cerrado');
-      _dc_kbd.onopen    = () => console.log('[WebRTC] DataChannel teclado abierto');
-      _dc_kbd.onclose   = () => console.log('[WebRTC] DataChannel teclado cerrado');
-    }
-
-    _pc.ontrack = (ev) => {
-      if (ev.track.kind !== 'video') return;
-      const vid = document.getElementById('liveview-video');
-      vid.srcObject = ev.streams[0];
-      // Mínima latencia para control remoto: reducir el jitter buffer del
-      // navegador (prioriza responsividad sobre suavidad). Cut ~50-100 ms.
-      try {
-        if ('jitterBufferTarget' in ev.receiver) ev.receiver.jitterBufferTarget = 0;
-        if ('playoutDelayHint' in ev.receiver)   ev.receiver.playoutDelayHint = 0;
-      } catch (e) { /* navegador sin soporte: ignorar */ }
-      vid.onloadedmetadata = () => {
-        // La resolución real de la pantalla llega por screen_info (Socket.IO) y es la que
-        // se usa para mapear coordenadas. Solo usar dimensiones del stream como último
-        // recurso si screen_info aún no ha llegado (valores por defecto 1280×720).
-        if (_liveOrigW === 1280 && _liveOrigH === 720) {
-          const s = ev.streams[0].getVideoTracks()[0].getSettings();
-          if (s.width)  _liveOrigW = s.width;
-          if (s.height) _liveOrigH = s.height;
-        }
-      };
-      // NO activar WebRTC ni ocultar el JPEG hasta que el vídeo esté reproduciendo de verdad.
-      // ontrack dispara al procesar el SDP, ANTES de que ICE conecte y lleguen frames.
-      // Si activamos aquí, el vídeo muestra negro y el JPEG fallback queda bloqueado.
-      const _activarVideo = () => {
-        if (_liveviewSid !== sid || _webrtcActivo) return;
-        vid.style.display = 'block';
-        document.getElementById('liveview-img').style.display = 'none';
-        _webrtcActivo = true;  // P2P de vídeo establecido (view y control)
-        document.getElementById('liveview-transport').textContent = 'WebRTC P2P';
-        document.getElementById('liveview-transport').style.color = 'var(--green)';
-        // Contador de FPS real del stream WebRTC
-        _liveFps = 0; _liveFpsTs = Date.now();
-        if ('requestVideoFrameCallback' in vid) {
-          const _rvfc = () => {
-            if (!_webrtcActivo) return;
-            _liveFps++;
-            if (Date.now() - _liveFpsTs >= 1000) {
-              document.getElementById('liveview-fps').textContent = `${_liveFps} fps`;
-              _liveFps = 0; _liveFpsTs = Date.now();
-            }
-            vid.requestVideoFrameCallback(_rvfc);
-          };
-          vid.requestVideoFrameCallback(_rvfc);
-        }
-      };
-      // onplaying se dispara cuando el vídeo empieza a reproducir frames reales.
-      vid.onplaying = () => { vid.onplaying = null; _activarVideo(); };
-      vid.play().catch(() => {});
-    };
-
-    _pc.onicecandidate = (ev) => {
-      if (ev.candidate)
-        socket.emit('webrtc_ice', { sid, candidate: {
-          candidate:     ev.candidate.candidate,
-          sdpMid:        ev.candidate.sdpMid,
-          sdpMLineIndex: ev.candidate.sdpMLineIndex
-        }});
-    };
-
-    _pc.oniceconnectionstatechange = () => {
-      const state = _pc?.iceConnectionState;
-      if (['failed','disconnected','closed'].includes(state)) {
-        _webrtcActivo = false;  // permitir que _fallbackJPEG actúe aunque el vídeo estuviera activo
-        _fallbackJPEG('ICE ' + state);
-      }
-    };
-
-    const offer = await _pc.createOffer({ offerToReceiveVideo:true, offerToReceiveAudio:false });
-    await _pc.setLocalDescription(offer);
-    socket.emit('webrtc_offer', { sid, sdp: { sdp:_pc.localDescription.sdp, type:_pc.localDescription.type } });
-
-    // Fallback si en 8s no hay vídeo WebRTC (onplaying no ha disparado aún)
-    setTimeout(() => { if (!_webrtcActivo && _liveviewSid === sid) _fallbackJPEG('timeout'); }, 8000);
-  } catch(e) {
-    _fallbackJPEG(e.message);
+function _cerrarPeer() {
+  clearTimeout(_webrtcTimer);
+  _webrtcTimer = null;
+  const vid = document.getElementById('liveview-video');
+  if (_videoFrameCallback != null && vid.cancelVideoFrameCallback)
+    vid.cancelVideoFrameCallback(_videoFrameCallback);
+  _videoFrameCallback = null;
+  vid.onplaying = null;
+  vid.onloadedmetadata = null;
+  const pc = _pc;
+  _pc = null;
+  _dc_mouse = null; _dc_kbd = null;
+  _remoteIce = [];
+  if (pc) {
+    clearInterval(pc._watchdog);
+    clearTimeout(pc._disconnectTimer);
+    pc.oniceconnectionstatechange = null;
+    pc.onconnectionstatechange = null;
+    pc.onicecandidate = null;
+    pc.ontrack = null;
+    pc.close();
   }
 }
 
-socket.on('webrtc_answer', async (data) => {
-  if (data.sid !== _liveviewSid || !_pc) return;
-  try { await _pc.setRemoteDescription(new RTCSessionDescription(data.sdp)); }
-  catch(e) { _fallbackJPEG(e.message); }
+async function _iniciarWebRTC(sid, mode) {
+  if (typeof RTCPeerConnection === 'undefined' || students[sid]?.webrtc === false) return;
+  _cerrarPeer();
+  const session = _liveviewSession;
+  const pc = new RTCPeerConnection({ iceServers: _STUN, bundlePolicy: 'max-bundle' });
+  _pc = pc;
+  const current = () => _pc === pc && _liveviewSid === sid && _liveviewSession === session;
+  try {
+    if (mode === 'control') {
+      _dc_mouse = pc.createDataChannel('vigia-mouse', { ordered: false, maxRetransmits: 0 });
+      // Clicks, rueda, dibujo y teclado: fiables y ordenados para no dejar
+      // botones pulsados ni perder trazos. Solo el movimiento puede perderse.
+      _dc_kbd = pc.createDataChannel('vigia-input', { ordered: true });
+    }
+    pc.addTransceiver('video', { direction: 'recvonly' });
+    pc.ontrack = ev => {
+      if (!current() || ev.track.kind !== 'video') return;
+      const vid = document.getElementById('liveview-video');
+      vid.srcObject = ev.streams[0] || new MediaStream([ev.track]);
+      try {
+        if ('jitterBufferTarget' in ev.receiver) ev.receiver.jitterBufferTarget = mode === 'control' ? 0 : 30;
+        if ('playoutDelayHint' in ev.receiver) ev.receiver.playoutDelayHint = mode === 'control' ? 0 : 0.03;
+      } catch (e) { /* API opcional del navegador */ }
+      const activarVideo = () => {
+        if (!current() || _webrtcActivo) return;
+        _webrtcActivo = true;
+        clearTimeout(_webrtcTimer);
+        _resetLiveFrames();
+        vid.style.display = 'block';
+        document.getElementById('liveview-img').style.display = 'none';
+        document.getElementById('liveview-transport').textContent = 'WebRTC P2P';
+        document.getElementById('liveview-transport').style.color = 'var(--green)';
+        socket.emit('view_transport', { sid, session, transport: 'webrtc' });
+        _liveFps = 0; _liveFpsTs = performance.now();
+        if ('requestVideoFrameCallback' in vid) {
+          const frame = () => {
+            if (!current() || !_webrtcActivo) return;
+            _countLiveFrame();
+            _videoFrameCallback = vid.requestVideoFrameCallback(frame);
+          };
+          _videoFrameCallback = vid.requestVideoFrameCallback(frame);
+        }
+        let previousTime = vid.currentTime, lastProgress = performance.now();
+        pc._watchdog = setInterval(() => {
+          if (!current() || document.hidden) { lastProgress = performance.now(); return; }
+          if (vid.currentTime !== previousTime) {
+            previousTime = vid.currentTime; lastProgress = performance.now();
+          } else if (performance.now() - lastProgress > 5000) {
+            _fallbackJPEG('vídeo detenido');
+          }
+        }, 1000);
+      };
+      vid.onplaying = activarVideo;
+      vid.play().catch(() => {});
+    };
+    pc.onicecandidate = ev => {
+      if (current() && ev.candidate)
+        socket.emit('webrtc_ice', { sid, session, candidate: ev.candidate.toJSON() });
+    };
+    pc.oniceconnectionstatechange = () => {
+      if (!current()) return;
+      const state = pc.iceConnectionState;
+      clearTimeout(pc._disconnectTimer);
+      if (state === 'failed' || state === 'closed') _fallbackJPEG('ICE ' + state);
+      else if (state === 'disconnected') {
+        pc._disconnectTimer = setTimeout(() => {
+          if (current() && pc.iceConnectionState === 'disconnected') _fallbackJPEG('ICE desconectado');
+        }, 1500);
+      }
+    };
+    pc.onconnectionstatechange = () => {
+      if (current() && pc.connectionState === 'failed') _fallbackJPEG('conexión fallida');
+    };
+    const offer = await pc.createOffer();
+    if (!current()) return;
+    await pc.setLocalDescription(offer);
+    if (!current()) return;
+    socket.emit('webrtc_offer', { sid, session, sdp: { sdp: pc.localDescription.sdp, type: pc.localDescription.type } });
+    _webrtcTimer = setTimeout(() => {
+      if (current() && !_webrtcActivo) _fallbackJPEG('timeout');
+    }, 8000);
+  } catch (e) {
+    if (current()) _fallbackJPEG(e.message);
+  }
+}
+
+socket.on('webrtc_answer', async data => {
+  const pc = _pc;
+  if (data.sid !== _liveviewSid || data.session !== _liveviewSession || !pc) return;
+  try {
+    await pc.setRemoteDescription(data.sdp);
+    if (_pc !== pc) return;
+    const pending = _remoteIce;
+    _remoteIce = [];
+    for (const candidate of pending) await pc.addIceCandidate(candidate);
+  } catch (e) {
+    if (_pc === pc) _fallbackJPEG(e.message);
+  }
 });
 
-socket.on('webrtc_ice', async (data) => {
-  if (data.sid !== _liveviewSid || !_pc) return;
-  try { if (data.candidate?.candidate) await _pc.addIceCandidate(new RTCIceCandidate(data.candidate)); }
-  catch(e) { /* ignorar candidatos tardíos */ }
+socket.on('webrtc_ice', async data => {
+  const pc = _pc;
+  if (data.sid !== _liveviewSid || data.session !== _liveviewSession || !pc || !data.candidate?.candidate) return;
+  if (!pc.remoteDescription) { _remoteIce.push(data.candidate); return; }
+  try { await pc.addIceCandidate(data.candidate); }
+  catch (e) { /* candidato tardío */ }
 });
 
 function _fallbackJPEG(razon) {
-  if (_webrtcActivo) return;
-  const overlayWasEnabled = _overlayEnabled;
+  if (!_liveviewSid) return;
   console.log('[WebRTC] Fallback JPEG:', razon);
+  _cerrarPeer();
+  _webrtcActivo = false;
+  _liveFps = 0; _liveFpsTs = performance.now();
   const vid = document.getElementById('liveview-video');
   vid.style.display = 'none'; vid.srcObject = null;
   document.getElementById('liveview-img').style.display = 'block';
   document.getElementById('liveview-transport').textContent = 'JPEG';
   document.getElementById('liveview-transport').style.color = 'var(--muted)';
-  if (_pc) { _pc.close(); _pc = null; _dc_mouse = null; _dc_kbd = null; }
-  // Resetear el estado WebRTC del cliente: si su ICE llegó a "connected"
-  // pero el dashboard no recibió video, el cliente dejó de enviar JPEG.
-  // stop_view → viewer_stop en cliente (_webrtc_activo=False, cierra PC)
-  // start_view → viewer_start en cliente (_en_observacion=True, reanuda JPEG)
-  if (_liveviewSid) {
-    socket.emit('stop_view',  { sid: _liveviewSid });
-    socket.emit('start_view', { sid: _liveviewSid, mode: _liveviewMode });
-    if (overlayWasEnabled && _liveviewMode === 'control') {
-      setTimeout(() => _emitOverlay({ type: 'overlay_toggle', enabled: true }), 250);
-    }
-  }
+  socket.emit('view_transport', { sid: _liveviewSid, session: _liveviewSession, transport: 'jpeg' });
 }
 
 // ── Portapapeles remoto ────────────────────────────────────────────────────
@@ -2259,19 +2335,17 @@ function cerrarPortapapeles() {
 
 function _enviarInput(payload) {
   const tipo = payload.type;
-  const esMouse = tipo === 'mousemove' || tipo === 'mousedown' || tipo === 'mouseup' || tipo === 'scroll' || tipo === 'overlay_draw';
-  if (_webrtcActivo) {
-    if (esMouse && _dc_mouse?.readyState === 'open') {
-      _dc_mouse.send(JSON.stringify(payload)); return;
-    }
-    if (!esMouse && _dc_kbd?.readyState === 'open') {
-      _dc_kbd.send(JSON.stringify(payload)); return;
-    }
-    // fallback: cualquier canal abierto
-    if (_dc_kbd?.readyState === 'open')   { _dc_kbd.send(JSON.stringify(payload));   return; }
-    if (_dc_mouse?.readyState === 'open') { _dc_mouse.send(JSON.stringify(payload)); return; }
+  const esMovimiento = tipo === 'mousemove';
+  const channel = esMovimiento && _dc_mouse?.readyState === 'open' ? _dc_mouse : _dc_kbd;
+  if (channel?.readyState === 'open') {
+    // No encolar posiciones viejas detrás de un canal congestionado.
+    if (esMovimiento && channel.bufferedAmount > 2048) return;
+    try { channel.send(JSON.stringify(payload)); return; }
+    catch (e) { /* canal recién cerrado: continuar por Socket.IO */ }
   }
-  socket.emit('remote_input', payload);
+  if (!socket.connected) return;
+  if (esMovimiento) socket.volatile.emit('remote_input', payload);
+  else socket.emit('remote_input', payload);
 }
 
 // Traducción de teclas del navegador a nombres de pyautogui
@@ -2583,8 +2657,8 @@ _shareVideo.autoplay = true; _shareVideo.muted = true; _shareVideo.playsInline =
 // se disparen correctamente en todos los navegadores/plataformas.
 _shareVideo.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none';
 document.addEventListener('DOMContentLoaded', () => document.body.appendChild(_shareVideo));
-let FPS_SHARE     = 10;
-let CALIDAD_SHARE = 0.70;
+let FPS_SHARE     = _cfgCurrent.live_fps;
+let CALIDAD_SHARE = _cfgCurrent.live_quality / 100;
 // 1600 px basta para texto nítido a pantalla completa y recorta ~30% de píxeles
 // (y de bytes) frente a 1920 en cada frame enviado a TODOS los alumnos.
 const ANCHO_SHARE   = 1600;
@@ -3225,6 +3299,7 @@ function _actualizarPrompt(cwd) {
       <span id="liveview-transport" style="font-size:0.75rem;color:var(--muted);margin-left:8px;">JPEG</span>
     </div>
     <span id="liveview-fps">…</span>
+    <button onclick="abrirSettings()" class="d-flex align-items-center gap-2" title="Ajustar calidad y fluidez sin cerrar la sesión"><i data-lucide="settings" size="12"></i> Configuración</button>
     <button id="lv-overlay-toggle" class="d-flex align-items-center gap-2" style="display:none" title="Activar/desactivar pizarra en el cliente"><i data-lucide="presentation" size="12"></i> Pizarra: OFF</button>
     <button id="lv-draw-toggle" class="d-flex align-items-center gap-2" style="display:none" title="Alternar entre control remoto y dibujar sobre la pizarra"><i data-lucide="pencil" size="12"></i> Dibujar: OFF</button>
     <button id="lv-clipboard-btn" onclick="pedirPortapapeles()" class="d-flex align-items-center gap-2" style="display:none"
@@ -3329,20 +3404,27 @@ function _actualizarPrompt(cwd) {
     <div class="settings-presets">
       <button class="preset-btn" id="preset-light" onclick="_applyPreset('light')">
         <span class="preset-name">Ligero</span>
-        <span class="preset-desc">Bajo consumo de red y CPU</span>
+        <span class="preset-desc">960 px · 15 fps · hasta 1 Mbps</span>
       </button>
       <button class="preset-btn active" id="preset-balanced" onclick="_applyPreset('balanced')">
         <span class="preset-name">Equilibrado</span>
-        <span class="preset-desc">Configuración por defecto</span>
+        <span class="preset-desc">1600 px · 30 fps · hasta 3 Mbps</span>
       </button>
       <button class="preset-btn" id="preset-quality" onclick="_applyPreset('quality')">
         <span class="preset-name">Alta calidad</span>
-        <span class="preset-desc">Máxima fluidez</span>
+        <span class="preset-desc">1920 px · 60 fps · hasta 8 Mbps</span>
       </button>
     </div>
 
     <div class="settings-section">
       <h4>Miniaturas (pantalla de inicio)</h4>
+      <div class="settings-row">
+        <label>Anchura máxima</label>
+        <div class="val-group">
+          <input type="range" id="cfg-thumb-width" min="320" max="1280" step="80" value="720" />
+          <span class="val-display" id="cfg-thumb-width-val">720 px</span>
+        </div>
+      </div>
       <div class="settings-row">
         <label>Intervalo de actualización</label>
         <div class="val-group">
@@ -3362,10 +3444,24 @@ function _actualizarPrompt(cwd) {
     <div class="settings-section">
       <h4>Vista en directo / Control remoto</h4>
       <div class="settings-row">
+        <label>Anchura máxima</label>
+        <div class="val-group">
+          <input type="range" id="cfg-live-width" min="640" max="1920" step="160" value="1600" />
+          <span class="val-display" id="cfg-live-width-val">1600 px</span>
+        </div>
+      </div>
+      <div class="settings-row">
+        <label>Ancho de banda WebRTC</label>
+        <div class="val-group">
+          <input type="range" id="cfg-webrtc-bitrate" min="500000" max="8000000" step="500000" value="3000000" />
+          <span class="val-display" id="cfg-webrtc-bitrate-val">3.0 Mbps</span>
+        </div>
+      </div>
+      <div class="settings-row">
         <label>FPS (fallback JPEG)</label>
         <div class="val-group">
-          <input type="range" id="cfg-live-fps" min="5" max="30" step="1" value="20" />
-          <span class="val-display" id="cfg-live-fps-val">20 fps</span>
+          <input type="range" id="cfg-live-fps" min="5" max="30" step="1" value="25" />
+          <span class="val-display" id="cfg-live-fps-val">25 fps</span>
         </div>
       </div>
       <div class="settings-row">

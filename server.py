@@ -16,6 +16,7 @@ import subprocess
 import webbrowser
 import platform_utils
 import screen_capture
+from streaming import PRESETS, normalize_config
 
 # ---------------------------------------------------------------------------
 # Windows: ejecutar SIEMPRE sin ventana de consola visible.
@@ -94,9 +95,24 @@ socketio = SocketIO(
     cors_allowed_origins="*",
     max_http_buffer_size=20 * 1024 * 1024,  # 20 MB para soportar frames de alta resolución
     async_mode=async_mode,
+    async_handlers=False,  # conservar el orden start/offer/stop y de la entrada
     ping_timeout=30,
     ping_interval=10,
 )
+
+# Un evento binario ocupa varios paquetes Socket.IO. Evitar que los hilos de
+# captura intercalen su cabecera y sus bytes con otros eventos del mismo panel.
+_socket_emit = socketio.server.emit
+_emit_lock = threading.RLock()
+
+
+def _serialized_emit(*args, **kwargs):
+    with _emit_lock:
+        return _socket_emit(*args, **kwargs)
+
+
+socketio.server.emit = _serialized_emit
+_performance_config = dict(PRESETS['balanced'])
 
 # Almacén de alumnos: {sid: {name, ip, screenshot, last_seen, connected_at}}
 students = {}
@@ -140,7 +156,9 @@ def dashboard():
     # Chrome, Firefox y Chromium se identifican con su nombre en el UA.
     # WebKit2GTK (el launcher) usa AppleWebKit pero sin esos tokens.
     is_launcher = not any(b in ua for b in ('Chrome/', 'Chromium/', 'Firefox/'))
-    resp = make_response(render_template('dashboard.html', is_launcher=is_launcher))
+    resp = make_response(render_template('dashboard.html', is_launcher=is_launcher,
+                                        stream_presets=PRESETS,
+                                        stream_config=_performance_config))
     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     resp.headers['Pragma'] = 'no-cache'
     return resp
@@ -206,11 +224,16 @@ def on_connect():
 def on_register_teacher():
     """Dashboard joins the 'professors' room so broadcasts target only teachers."""
     join_room('professors')
+    emit('config_update', _performance_config)
     print(f"[👁] Dashboard registrado en sala 'professors': {request.sid}")
 
 
 @socketio.on('disconnect')
 def on_disconnect():
+    for student_sid, viewer in list(viewers.items()):
+        if viewer['prof_sid'] == request.sid:
+            viewers.pop(student_sid, None)
+            socketio.emit('viewer_stop', {'session': viewer.get('session')}, to=student_sid)
     if request.sid == _teacher_capture.get('sid'):
         _teacher_capture['running'] = False
         # socketio.emit sin 'to' ya difunde a todos; broadcast=True provoca
@@ -245,12 +268,15 @@ def on_register(data):
         # 'vstream': el alumno sabe descodificar el vídeo del profesor (PyAV).
         # El panel solo usa esa vía si TODOS los destinatarios pueden.
         'vstream': bool(caps.get('vstream')),
+        'webrtc': caps.get('webrtc'),  # None: cliente anterior, intentar negociar
     }
     print(f"[+] Registrado: {name}  ({client_ip})")
     emit('registered', {'status': 'ok', 'sid': request.sid})
+    emit('config_update', _performance_config)
     socketio.emit('student_connected', {
         'sid': request.sid, 'name': name, 'ip': client_ip,
         'connected_at': now, 'vstream': students[request.sid]['vstream'],
+        'webrtc': students[request.sid]['webrtc'],
     }, to='professors')
     # Alumno que llega con la clase ya empezada: se le manda la configuración
     # del vídeo; el siguiente fotograma clave (≤2 s) le compone la imagen.
@@ -279,6 +305,7 @@ def on_request_students(_data=None):
             'last_seen': data['last_seen'], 'connected_at': data['connected_at'],
             'image': data['screenshot'], 'locked': data.get('locked', False),
             'vstream': data.get('vstream', False),
+            'webrtc': data.get('webrtc'),
         })
     emit('full_student_list', payload)
 
@@ -340,19 +367,16 @@ def on_lock_student(data):
 
 @socketio.on('update_config')
 def on_update_config(data):
-    """Retransmite la configuración de rendimiento a todos los clientes."""
-    cfg = {
-        'thumb_interval': float(data.get('thumb_interval', 1.0)),
-        'thumb_quality':  int(data.get('thumb_quality', 55)),
-        'live_fps':       int(data.get('live_fps', 20)),
-        'webrtc_fps':     int(data.get('webrtc_fps', 30)),
-        'live_quality':   int(data.get('live_quality', 70)),
-    }
-    socketio.emit('config_update', cfg, include_self=False)
+    """Conserva el perfil y sincroniza alumnos y paneles, incluidos los nuevos."""
+    global _performance_config
+    cfg = normalize_config(data, _performance_config)
+    _performance_config = cfg
+    socketio.emit('config_update', cfg)
     # La captura del profesor (fallback sin getDisplayMedia) sigue los mismos
     # ajustes de calidad/fps que el resto del vídeo en vivo.
     _share_cfg['quality'] = max(20, min(95, cfg['live_quality']))
     _share_cfg['sleep']   = 1.0 / max(1, cfg['live_fps'])
+    _share_cfg['width']   = cfg['live_width']
     print(f"[*] Configuración actualizada: intervalo={cfg['thumb_interval']}s, "
           f"JPEG live={cfg['live_fps']}fps, WebRTC={cfg['webrtc_fps']}fps")
 
@@ -821,8 +845,16 @@ def on_start_view(data):
     student_sid = data.get('sid')
     mode = data.get('mode', 'view')
     if student_sid in students:
-        viewers[student_sid] = {'prof_sid': request.sid, 'mode': mode}
-        socketio.emit('viewer_start', {'mode': mode}, to=student_sid)
+        previous = viewers.get(student_sid)
+        if previous and previous['prof_sid'] != request.sid:
+            socketio.emit('student_view_ended', {'sid': student_sid}, to=previous['prof_sid'])
+        session = data.get('session')
+        viewers[student_sid] = {'prof_sid': request.sid, 'mode': mode, 'session': session}
+        socketio.emit('viewer_start', {
+            'mode': mode, 'session': session, 'config': _performance_config,
+            'frame_ack': bool(data.get('frame_ack')),
+            'binary_frames': bool(data.get('binary_frames')),
+        }, to=student_sid)
         print(f"[👁] Modo {mode} iniciado en: {students[student_sid]['name']}")
 
 
@@ -830,8 +862,10 @@ def on_start_view(data):
 def on_stop_view(data):
     student_sid = data.get('sid')
     if student_sid in viewers and viewers[student_sid]['prof_sid'] == request.sid:
-        viewers.pop(student_sid)
-        socketio.emit('viewer_stop', {}, to=student_sid)
+        if 'session' in data and data['session'] != viewers[student_sid].get('session'):
+            return
+        viewer = viewers.pop(student_sid)
+        socketio.emit('viewer_stop', {'session': viewer.get('session')}, to=student_sid)
         print(f"[👁] Modo observación finalizado.")
 
 
@@ -839,13 +873,35 @@ def on_stop_view(data):
 def on_remote_frame(data):
     # Retransmitir frame de alumno al profesor que lo observa
     v_data = viewers.get(request.sid)
-    if v_data:
+    if v_data and (data.get('session') is None or data['session'] == v_data.get('session')):
         socketio.emit('live_frame', {
             'sid':    request.sid,
             'image':  data.get('image'),
             'orig_w': data.get('orig_w', 1280),
             'orig_h': data.get('orig_h', 720),
+            'seq': data.get('seq'),
+            'session': v_data.get('session'),
         }, to=v_data['prof_sid'])
+
+
+@socketio.on('live_frame_ack')
+def on_live_frame_ack(data):
+    student_sid = data.get('sid')
+    viewer = viewers.get(student_sid)
+    if viewer and viewer['prof_sid'] == request.sid and data.get('session') == viewer.get('session'):
+        socketio.emit('remote_frame_ack', {
+            'seq': data.get('seq'), 'session': viewer.get('session'),
+        }, to=student_sid)
+
+
+@socketio.on('view_transport')
+def on_view_transport(data):
+    student_sid = data.get('sid')
+    viewer = viewers.get(student_sid)
+    if viewer and viewer['prof_sid'] == request.sid and data.get('session') == viewer.get('session'):
+        socketio.emit('viewer_transport', {
+            'transport': data.get('transport'), 'session': viewer.get('session'),
+        }, to=student_sid)
 
 
 @socketio.on('screen_info')
@@ -888,37 +944,43 @@ def on_clipboard_data(data):
 @socketio.on('webrtc_offer')
 def on_webrtc_offer(data):
     student_sid = data.get('sid')
-    if student_sid not in students:
+    viewer = viewers.get(student_sid)
+    if not viewer or viewer['prof_sid'] != request.sid or data.get('session') != viewer.get('session'):
         return
     socketio.emit('webrtc_offer', {
         'sdp': data.get('sdp'),
         'prof_sid': request.sid,
+        'session': viewer.get('session'),
     }, to=student_sid)
 
 @socketio.on('webrtc_answer')
 def on_webrtc_answer(data):
     prof_sid = data.get('prof_sid')
     v_data = viewers.get(request.sid)
-    if not v_data or v_data['prof_sid'] != prof_sid:
+    if not v_data or v_data['prof_sid'] != prof_sid or data.get('session') != v_data.get('session'):
         return
     socketio.emit('webrtc_answer', {
         'sid': request.sid,
         'sdp': data.get('sdp'),
+        'session': v_data.get('session'),
     }, to=prof_sid)
 
 @socketio.on('webrtc_ice')
 def on_webrtc_ice(data):
     if 'sid' in data:  # Dashboard → Cliente
         student_sid = data['sid']
-        if student_sid in students:
-            socketio.emit('webrtc_ice', {'candidate': data.get('candidate')}, to=student_sid)
+        viewer = viewers.get(student_sid)
+        if viewer and viewer['prof_sid'] == request.sid and data.get('session') == viewer.get('session'):
+            socketio.emit('webrtc_ice', {'candidate': data.get('candidate'),
+                                       'session': viewer.get('session')}, to=student_sid)
     elif 'prof_sid' in data:  # Cliente → Dashboard
         prof_sid = data['prof_sid']
         v_data = viewers.get(request.sid)
-        if v_data and v_data['prof_sid'] == prof_sid:
+        if v_data and v_data['prof_sid'] == prof_sid and data.get('session') == v_data.get('session'):
             socketio.emit('webrtc_ice', {
                 'sid': request.sid,
                 'candidate': data.get('candidate'),
+                'session': v_data.get('session'),
             }, to=prof_sid)
 
 

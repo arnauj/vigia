@@ -37,6 +37,7 @@ mkdir -p \
 # ── Copiar archivos de la aplicación ─────────────────────────
 cp "$SCRIPT_DIR/client.py"            "$VIGIA_DST/"
 cp "$SCRIPT_DIR/server.py"            "$VIGIA_DST/"
+cp "$SCRIPT_DIR/streaming.py"         "$VIGIA_DST/"
 cp "$SCRIPT_DIR/instalar.py"          "$VIGIA_DST/"
 cp "$SCRIPT_DIR/instalar.sh"          "$VIGIA_DST/"
 cp "$SCRIPT_DIR/instalar_servidor.sh" "$VIGIA_DST/"

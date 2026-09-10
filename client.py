@@ -73,6 +73,9 @@ import ctypes
 import ctypes.util
 import platform_utils
 import screen_capture
+from streaming import PRESETS, normalize_config, fit_size, FrameWindow, profile_encoder
+
+_stream_cfg = dict(PRESETS['balanced'])
 
 # ── Importaciones ────────────────────────────────────────────────────────────
 
@@ -180,7 +183,7 @@ try:
     import asyncio, fractions
     import numpy as np
     from concurrent.futures import ThreadPoolExecutor
-    from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
+    from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack, RTCConfiguration
     import av
     WEBRTC_OK = True
     print("  [✓] aiortc disponible — WebRTC habilitado.")
@@ -205,7 +208,7 @@ try:
         _cm.MAX_BITRATE     = 8_000_000
         _patched.append(_codec_mod)
     if _patched:
-        print(f"  [✓] Bitrate WebRTC elevado a 8 Mbps ({', '.join(_patched)}).")
+        print(f"  [✓] Bitrate WebRTC adaptable por perfil ({', '.join(_patched)}).")
     else:
         print("  [!] No se pudo elevar el tope de bitrate de aiortc "
               "(la imagen puede verse borrosa a 1080p).")
@@ -232,6 +235,10 @@ try:
     except Exception:
         pass
 
+    import aiortc.codecs as _codecs
+    _codecs.Vp8Encoder = profile_encoder(
+        _codecs.Vp8Encoder, lambda: _stream_cfg['webrtc_bitrate'])
+
     # ── H.264 en vez de VP8 ──────────────────────────────────────────────────
     # x264 con preset ultrafast + tune zerolatency codifica 1080p de escritorio
     # en ~3 ms/frame; libvpx-VP8 en tiempo real necesita ~9 ms con los mismos
@@ -242,7 +249,7 @@ try:
     # el libavcodec del equipo: si no, se sigue con VP8 (nunca vídeo negro).
     try:
         import aiortc.codecs as _codecs
-        from aiortc.codecs.h264 import H264Encoder as _H264Base, MAX_FRAME_RATE as _H264_FPS
+        from aiortc.codecs.h264 import H264Encoder as _H264Base
         av.CodecContext.create('libx264', 'w')   # lanza si no está compilado
 
         class _H264EncoderRapido(_H264Base):
@@ -255,6 +262,7 @@ try:
                 if self.codec is not None and (
                         frame.width != self.codec.width
                         or frame.height != self.codec.height
+                        or self.codec.framerate != _stream_cfg['webrtc_fps']
                         or abs(self.target_bitrate - self.codec.bit_rate)
                         / self.codec.bit_rate > 0.1):
                     self.buffer_data = b""
@@ -265,8 +273,10 @@ try:
                     c.width, c.height = frame.width, frame.height
                     c.bit_rate = self.target_bitrate
                     c.pix_fmt = 'yuv420p'
-                    c.framerate = fractions.Fraction(_H264_FPS, 1)
-                    c.time_base = fractions.Fraction(1, _H264_FPS)
+                    c.framerate = fractions.Fraction(_stream_cfg['webrtc_fps'], 1)
+                    # Conservar el reloj real también dentro de x264: una
+                    # base de 1/fps redondea dos frames cercanos al mismo PTS.
+                    c.time_base = fractions.Fraction(1, 90000)
                     c.thread_count = max(1, min(8, os.cpu_count() or 1))
                     # Sin 'level': x264 elige el que corresponda a la
                     # resolución (el 3.1 fijo de aiortc se queda corto a 1080p).
@@ -275,7 +285,8 @@ try:
                     self.codec = c
                 return super()._encode_frame(frame, force_keyframe)
 
-        _codecs.H264Encoder = _H264EncoderRapido
+        _codecs.H264Encoder = profile_encoder(
+            _H264EncoderRapido, lambda: _stream_cfg['webrtc_bitrate'])
         WEBRTC_H264 = True
         print("  [✓] Encoder H.264 (x264 ultrafast) preferido sobre VP8.")
     except Exception as _e:
@@ -609,16 +620,31 @@ def _get_pynput_key(key):
 # Las miniaturas se ven en tarjetas de ~280 px (y en el modal a ~900 px): 960 px
 # sobra para ambas y recorta ~45% de los bytes que cada alumno envía cada
 # segundo — con 30 alumnos es lo que hacía ir a tirones la rejilla del panel.
-ANCHO_IMAGEN      = 960
-CALIDAD_JPEG      = 55
-INTERVALO_SEG     = 1.0
+ANCHO_IMAGEN      = _stream_cfg['thumb_width']
+CALIDAD_JPEG      = _stream_cfg['thumb_quality']
+INTERVALO_SEG     = _stream_cfg['thumb_interval']
 REINTENTOS_ESPERA = 5
-_LIVE_FPS_SLEEP   = 0.05     # ~20 fps JPEG fallback
-_LIVE_QUALITY     = 70       # calidad JPEG en modo observación
-_WEBRTC_FPS       = 30       # FPS objetivo WebRTC
+_LIVE_FPS_SLEEP   = 1.0 / _stream_cfg['live_fps']
+_LIVE_QUALITY     = _stream_cfg['live_quality']
+_WEBRTC_FPS       = _stream_cfg['webrtc_fps']
 
 # ── Estado ───────────────────────────────────────────────────────────────────
 sio = sio_module.Client(reconnection=True, reconnection_attempts=0)
+_socket_emit = sio.emit
+_emit_lock = threading.RLock()
+
+
+def _serialized_emit(*args, **kwargs):
+    # Los JPEG binarios llevan cabecera + bytes: no intercalarlos con los
+    # mensajes de otros hilos (python-socketio.Client.emit no es thread-safe).
+    with _emit_lock:
+        return _socket_emit(*args, **kwargs)
+
+
+sio.emit = _serialized_emit
+_capture_wake = threading.Event()
+_frame_window = FrameWindow()
+_view_options = {}
 _cola_profesor      = queue.Queue(maxsize=2)
 _cola_bloqueo       = queue.Queue(maxsize=10)
 _cola_mensajes      = queue.Queue(maxsize=20)
@@ -740,6 +766,7 @@ if WEBRTC_OK:
             self._last_pts   = -1
             self._last_frame = None   # último frame válido; se sirve si la captura falla
             self._nivel      = 0      # índice en _ESCALONES
+            self._profile    = None
             self._ewma       = None   # media móvil del intervalo real entre frames
             self._ult_ajuste = 0.0
             self._ult_recv   = None
@@ -752,9 +779,25 @@ if WEBRTC_OK:
             self._pool = ThreadPoolExecutor(max_workers=1,
                                             thread_name_prefix='vigia-cap')
 
+        def _sync_profile(self, ahora):
+            profile = (_stream_cfg['live_width'], _WEBRTC_FPS)
+            if profile != self._profile:
+                self._profile = profile
+                self._ESCALONES = tuple(w for w in (1920, 1600, 1280, 1024, 960, 800, 640)
+                                        if w < profile[0])
+                self._ESCALONES = (profile[0],) + self._ESCALONES
+                self._nivel = 0
+                self._ewma = self._ult_recv = self._ewma_antes = None
+                self._muestras = 0
+                self._congelado = 0.0
+                self._congelar = self._CONGELAR
+                self._ult_ajuste = ahora
+                self._next = ahora
+
         async def recv(self):
             loop = asyncio.get_event_loop()
             ahora = loop.time()
+            self._sync_profile(ahora)
             if self._t0 is None:
                 self._t0 = ahora
                 self._next = ahora
@@ -850,10 +893,14 @@ if WEBRTC_OK:
         def _out_size(self, w, h):
             """Tamaño de salida: tope adaptativo y dimensiones pares (yuv420p)."""
             tope = min(self._MAX_W, self._ESCALONES[self._nivel])
-            if w > tope:
-                h = int(h * tope / w)
-                w = tope
-            return w & ~1, h & ~1
+            return fit_size(w, h, min(tope, _stream_cfg['live_width']), even=True)
+
+        def thumbnail(self):
+            frame = self._last_frame
+            if frame is None:
+                return None
+            w, h = fit_size(frame.width, frame.height, ANCHO_IMAGEN)
+            return frame.reformat(w, h, 'rgb24').to_image()
 
         def _a_frame(self, arr, fmt):
             """ndarray → av.VideoFrame yuv420p ya escalado.
@@ -911,12 +958,19 @@ if WEBRTC_OK:
                 return self._a_frame(np.zeros((720, 1280, 3), dtype=np.uint8),
                                      'rgb24')
 
-        def stop(self):
-            super().stop()
+        def _close_capture(self):
             if self._cap:
                 try: self._cap.close()
                 except Exception: pass
                 self._cap = None
+
+        def stop(self):
+            if self.readyState == 'ended':
+                return
+            super().stop()
+            # mss crea recursos ligados a su hilo; cerrar después de la
+            # captura pendiente, en ese mismo hilo, evita fugas y carreras.
+            self._pool.submit(self._close_capture)
             self._pool.shutdown(wait=False)
 
 def _asyncio_runner():
@@ -928,10 +982,12 @@ def _asyncio_runner():
 def _wrtc(coro):
     """Encola una coroutine en el loop asyncio desde threads síncronos."""
     if _webrtc_loop and _webrtc_loop.is_running():
-        asyncio.run_coroutine_threadsafe(coro, _webrtc_loop)
+        return asyncio.run_coroutine_threadsafe(coro, _webrtc_loop)
+    coro.close()
 
 def bucle_capturas():
     _ultimo_screenshot = 0.0
+    _proximo_live = 0.0
     _aviso_captura = 0.0
     cap = None
     while True:
@@ -948,6 +1004,18 @@ def bucle_capturas():
                 time.sleep(5); continue
 
         now = time.monotonic()
+        options = _view_options
+        jpeg = _en_observacion and not _webrtc_activo
+        sequence = None
+        send_live = jpeg and now >= _proximo_live
+        if send_live and options.get('frame_ack'):
+            sequence = _frame_window.reserve()
+            send_live = sequence is not None
+        send_thumb = now - _ultimo_screenshot >= INTERVALO_SEG
+        # Si el panel no consume el directo, no añadir miniaturas detrás de
+        # los dos JPEG pendientes. El resto de alumnos conserva su cadencia.
+        if jpeg and not send_live:
+            send_thumb = False
         try:
             monitor = cap.monitor()
             orig_w, orig_h = monitor['width'], monitor['height']
@@ -959,11 +1027,34 @@ def bucle_capturas():
             _mon_height = orig_h
             _mon_valido = True
 
-            if (now - _ultimo_screenshot) >= INTERVALO_SEG:
-                # max_age: si WebRTC acaba de capturar un frame, se reaprovecha
-                # en lugar de pedir otro al compositor (y de pelearse con él por
-                # el appsink de PipeWire, que solo guarda el último frame).
-                img = screen_capture.grab_shared(cap, max_age=INTERVALO_SEG * 0.5)
+            img = None
+            if send_live:
+                # Una sola captura para directo y miniatura; reservar ANTES
+                # de capturar evita trabajar para una red que no da abasto.
+                img = cap.grab()
+                size = fit_size(img.width, img.height, _stream_cfg['live_width'])
+                live = img.resize(size, Image.BILINEAR) if img.size != size else img
+                buf = io.BytesIO()
+                live.save(buf, format='JPEG', quality=_LIVE_QUALITY)
+                payload = {
+                    'image': buf.getvalue() if options.get('binary_frames') else _b64(buf.getvalue()),
+                    'orig_w': orig_w, 'orig_h': orig_h,
+                    'seq': sequence, 'session': options.get('session'),
+                }
+                if options is _view_options and _en_observacion and not _webrtc_activo:
+                    sio.emit('remote_frame', payload)
+                elif sequence is not None:
+                    _frame_window.acknowledge(sequence)
+                # Descontar captura + codificación del periodo, sin recuperar
+                # frames atrasados mediante ráfagas que añadan latencia.
+                _proximo_live = max(now + _LIVE_FPS_SLEEP, time.monotonic())
+
+            if send_thumb:
+                track = _webrtc_track
+                if img is None and _webrtc_activo and track is not None:
+                    img = track.thumbnail()
+                if img is None:
+                    img = screen_capture.grab_shared(cap, max_age=INTERVALO_SEG * 0.5)
                 if img.width > ANCHO_IMAGEN:
                     # BILINEAR con reducing_gap: prefiltra por bloques y luego
                     # interpola. Calidad casi idéntica a LANCZOS para una
@@ -976,17 +1067,14 @@ def bucle_capturas():
                 sio.emit('screenshot', {'image': _b64(buf.getvalue())})
                 _ultimo_screenshot = now
 
-            if _en_observacion and not _webrtc_activo:
-                img = cap.grab()
-                ancho_r = min(orig_w, 1280)
-                if img.width > ancho_r:
-                    img = img.resize((ancho_r, int(img.height * ancho_r / img.width)), Image.BILINEAR)
-                buf = io.BytesIO(); img.save(buf, format='JPEG', quality=_LIVE_QUALITY)
-                sio.emit('remote_frame', {'image': _b64(buf.getvalue()), 'orig_w': orig_w, 'orig_h': orig_h})
-                time.sleep(_LIVE_FPS_SLEEP)
-            else:
-                time.sleep(0.2)
-        except:
+            delay = (_proximo_live - time.monotonic()) if jpeg else INTERVALO_SEG
+            if jpeg and not send_live and now >= _proximo_live:
+                delay = 0.2  # ventana llena: despertar cuando llegue un ACK
+            _capture_wake.wait(max(0.005, min(0.2, delay)))
+            _capture_wake.clear()
+        except Exception:
+            if sequence is not None:
+                _frame_window.acknowledge(sequence)
             try: cap.close()
             except: pass
             cap = None; time.sleep(1)
@@ -1284,12 +1372,26 @@ def connect():
     # pantalla como vídeo si TODOS los destinatarios saben descodificarlo.
     sio.emit('register', {
         'name': f"{platform_utils.get_username()} - {socket.gethostname()}",
-        'caps': {'vstream': _AV_OK},
+        'caps': {'vstream': _AV_OK, 'webrtc': WEBRTC_OK},
     })
+
+
+@sio.event
+def disconnect(*_args):
+    on_viewer_stop({})
 
 @sio.on('viewer_start')
 def on_viewer_start(data):
-    global _en_observacion; _en_observacion = True
+    global _en_observacion, _view_options, _webrtc_activo
+    if WEBRTC_OK and _webrtc_pc is not None:
+        _wrtc(_cerrar_webrtc(_webrtc_pc))
+    _view_options = dict(data)
+    _frame_window.reset()
+    _webrtc_activo = False
+    _en_observacion = True
+    if data.get('config'):
+        on_config_update(data['config'])
+    _capture_wake.set()
     print(f"[*] El profesor está observando/controlando.")
     # Enviar resolución real de pantalla para que el profesor mapee coordenadas
     # correctamente. Se usa la geometría que ya conoce el bucle de captura: abrir
@@ -1309,14 +1411,44 @@ def on_viewer_start(data):
 
 @sio.on('viewer_stop')
 def on_viewer_stop(_data):
-    global _en_observacion; _en_observacion = False
+    global _en_observacion, _view_options, _webrtc_activo
+    if 'session' in _data and _data['session'] != _view_options.get('session'):
+        return
+    _en_observacion = False
+    _webrtc_activo = False
+    _view_options = {}
+    _frame_window.reset()
+    _capture_wake.set()
     print(f"[*] Fin de observación.")
     try:
         _cola_overlay.put_nowait({'type': 'overlay_toggle', 'enabled': False})
     except Exception:
         pass
     if WEBRTC_OK:
-        _wrtc(_cerrar_webrtc())
+        _wrtc(_cerrar_webrtc(_webrtc_pc))
+
+
+@sio.on('remote_frame_ack')
+def on_remote_frame_ack(data):
+    if data.get('session') == _view_options.get('session') and isinstance(data.get('seq'), int):
+        _frame_window.acknowledge(data['seq'])
+        _capture_wake.set()
+
+
+@sio.on('viewer_transport')
+def on_viewer_transport(data):
+    global _webrtc_activo
+    if not _en_observacion or data.get('session') != _view_options.get('session'):
+        return
+    if data.get('transport') == 'webrtc':
+        # Confirmación del primer frame reproducido: nunca apagar JPEG solo
+        # porque ICE conectó si el navegador aún no puede mostrar vídeo.
+        _webrtc_activo = _webrtc_pc is not None
+    elif data.get('transport') == 'jpeg':
+        _webrtc_activo = False
+        if WEBRTC_OK:
+            _wrtc(_cerrar_webrtc(_webrtc_pc))
+    _capture_wake.set()
 
 @sio.on('quit_app')
 def on_quit_app(_data):
@@ -1333,13 +1465,16 @@ def on_unlock_screen(_data): _cola_bloqueo.put_nowait(False)
 
 @sio.on('config_update')
 def on_config_update(data):
-    global INTERVALO_SEG, CALIDAD_JPEG, _LIVE_FPS_SLEEP, _LIVE_QUALITY, _WEBRTC_FPS
-    INTERVALO_SEG  = float(data.get('thumb_interval', INTERVALO_SEG))
-    CALIDAD_JPEG   = int(data.get('thumb_quality', CALIDAD_JPEG))
-    live_fps       = int(data.get('live_fps', 20))
-    _LIVE_FPS_SLEEP = 1.0 / max(1, live_fps)
-    _LIVE_QUALITY  = int(data.get('live_quality', _LIVE_QUALITY))
-    _WEBRTC_FPS    = int(data.get('webrtc_fps', _WEBRTC_FPS))
+    global INTERVALO_SEG, CALIDAD_JPEG, ANCHO_IMAGEN, _LIVE_FPS_SLEEP, _LIVE_QUALITY, _WEBRTC_FPS, _stream_cfg
+    _stream_cfg = normalize_config(data, _stream_cfg)
+    INTERVALO_SEG  = _stream_cfg['thumb_interval']
+    CALIDAD_JPEG   = _stream_cfg['thumb_quality']
+    ANCHO_IMAGEN   = _stream_cfg['thumb_width']
+    live_fps      = _stream_cfg['live_fps']
+    _LIVE_FPS_SLEEP = 1.0 / live_fps
+    _LIVE_QUALITY  = _stream_cfg['live_quality']
+    _WEBRTC_FPS    = _stream_cfg['webrtc_fps']
+    _capture_wake.set()
     print(f"[*] Config actualizada: intervalo={INTERVALO_SEG}s, "
           f"live={live_fps}fps, webrtc={_WEBRTC_FPS}fps")
 
@@ -1405,9 +1540,19 @@ def on_get_clipboard(_data):
 
 # ── WebRTC Socket.IO handlers ─────────────────────────────────────────────────
 if WEBRTC_OK:
+    _negotiation_lock = asyncio.Lock()
+
     @sio.on('webrtc_offer')
     def on_webrtc_offer(data):
-        _wrtc(_procesar_offer(data))
+        async def negotiate():
+            async with _negotiation_lock:
+                try:
+                    await _procesar_offer(data)
+                except Exception as e:
+                    print(f"  [WebRTC] Negociación: {e}")
+                    if data.get('session') == _view_options.get('session'):
+                        await _cerrar_webrtc(_webrtc_pc)
+        _wrtc(negotiate())
 
     def _preferir_h264(pc):
         """Pone H.264 delante de VP8 en la negociación de códecs.
@@ -1435,19 +1580,23 @@ if WEBRTC_OK:
 
     async def _procesar_offer(data):
         global _webrtc_pc, _webrtc_track, _webrtc_prof, _webrtc_activo, _pending_ice
-        if _webrtc_pc:
-            await _webrtc_pc.close()
-        if _webrtc_track:
-            try: _webrtc_track.stop()
-            except Exception: pass
-        _webrtc_pc = None; _webrtc_track = None; _webrtc_activo = False
+        session = data.get('session')
+        if not _en_observacion or session != _view_options.get('session'):
+            return
+        await _cerrar_webrtc(_webrtc_pc)
+        if not _en_observacion or session != _view_options.get('session'):
+            return
 
         prof_sid = data.get('prof_sid')
         _webrtc_prof = prof_sid
 
-        pc = RTCPeerConnection()
+        # El aula es una LAN: los candidatos locales evitan esperar al STUN
+        # público cuando Internet está filtrado o no está disponible.
+        pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
         _webrtc_pc = pc
         _webrtc_track = ScreenStreamTrack()
+        pc._vigia_track = _webrtc_track
+        pc._vigia_session = session
         pc.addTrack(_webrtc_track)
         _preferir_h264(pc)
 
@@ -1456,59 +1605,52 @@ if WEBRTC_OK:
             # Acepta ambos canales: vigia-mouse (ratón, UDP-like) y vigia-input (teclado, fiable)
             @channel.on("message")
             def on_msg(msg):
+                if pc is not _webrtc_pc or _view_options.get('mode') != 'control':
+                    return
                 try: on_do_input(json.loads(msg))
                 except Exception: pass
-
-        @pc.on("icecandidate")
-        def on_ice(cand):
-            if cand:
-                sio.emit('webrtc_ice', {
-                    'prof_sid': prof_sid,
-                    'candidate': {
-                        'candidate':     cand.candidate,
-                        'sdpMid':        cand.sdpMid,
-                        'sdpMLineIndex': cand.sdpMLineIndex,
-                    }
-                })
 
         @pc.on("iceconnectionstatechange")
         async def on_ice_state():
             global _webrtc_activo
+            if pc is not _webrtc_pc:
+                return
             state = pc.iceConnectionState
-            if state == "connected":
+            if state in ('connected', 'completed') and not _view_options.get('frame_ack'):
+                # Compatibilidad con paneles antiguos que no confirman vídeo.
                 _webrtc_activo = True
-                # Aumentar bitrate del encoder VP8 para mejor calidad de imagen
-                try:
-                    for sender in pc.getSenders():
-                        if sender.track and sender.track.kind == 'video':
-                            params = sender.getParameters()
-                            if params.encodings:
-                                params.encodings[0].maxBitrate = 4_000_000  # 4 Mbps
-                                await sender.setParameters(params)
-                except Exception:
-                    pass  # API no disponible en esta versión de aiortc → bitrate por defecto
             elif state in ("failed", "closed", "disconnected"):
                 _webrtc_activo = False
+                _capture_wake.set()
 
         await pc.setRemoteDescription(RTCSessionDescription(**data['sdp']))
+        pending, _pending_ice = _pending_ice, []
+        for candidate in pending:
+            if candidate.get('session') == session:
+                await _add_ice(pc, candidate['candidate'])
         answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
+        if pc is not _webrtc_pc or not _en_observacion or session != _view_options.get('session'):
+            await _cerrar_webrtc(pc)
+            return
         sio.emit('webrtc_answer', {
             'prof_sid': prof_sid,
+            'session': session,
             'sdp': {'sdp': pc.localDescription.sdp, 'type': pc.localDescription.type}
         })
-        for c in _pending_ice:
-            await _add_ice(c)
-        _pending_ice.clear()
 
     @sio.on('webrtc_ice')
     def on_webrtc_ice(data):
         c = data.get('candidate')
-        if not c: return
-        if _webrtc_pc: _wrtc(_add_ice(c))
-        else: _pending_ice.append(c)
+        if not c or data.get('session') != _view_options.get('session'):
+            return
+        pc = _webrtc_pc
+        if pc and pc._vigia_session == data.get('session') and pc.remoteDescription:
+            _wrtc(_add_ice(pc, c))
+        elif len(_pending_ice) < 64:
+            _pending_ice.append(data)
 
-    async def _add_ice(c):
+    async def _add_ice(pc, c):
         from aioice.candidate import Candidate as AioiceCand
         try:
             raw = c.get('candidate', '').replace('candidate:', '', 1)
@@ -1521,18 +1663,22 @@ if WEBRTC_OK:
                 protocol=ac.transport.lower(), type=ac.type,
                 sdpMid=c.get('sdpMid'), sdpMLineIndex=c.get('sdpMLineIndex'),
             )
-            if _webrtc_pc: await _webrtc_pc.addIceCandidate(rtc_c)
+            if pc is _webrtc_pc: await pc.addIceCandidate(rtc_c)
         except Exception:
             pass  # Candidatos inválidos/tardíos: ignorar silenciosamente
 
-    async def _cerrar_webrtc():
+    async def _cerrar_webrtc(pc):
         global _webrtc_pc, _webrtc_track, _webrtc_activo, _webrtc_prof
-        if _webrtc_pc: await _webrtc_pc.close()
-        if _webrtc_track:
-            try: _webrtc_track.stop()
-            except Exception: pass
-        _webrtc_pc = None; _webrtc_track = None
-        _webrtc_activo = False; _webrtc_prof = None
+        if pc is None:
+            return
+        if pc is _webrtc_pc:
+            _webrtc_pc = None; _webrtc_track = None
+            _webrtc_activo = False; _webrtc_prof = None
+            _capture_wake.set()
+        track = getattr(pc, '_vigia_track', None)
+        if track:
+            track.stop()
+        await pc.close()
 
 # ── Overlay pizarra (cliente) ───────────────────────────────────────────────
 # Click-through ahora delegado a platform_utils.set_clickthrough()
