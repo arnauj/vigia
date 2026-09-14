@@ -46,7 +46,22 @@ if sys.platform == 'win32':
                 _f.write(f'CreateObject("WScript.Shell").Run "{_cmd}", 0, False\n')
             os.startfile(_vbs)
             sys.exit(0)
-    # Paso 4: redirigir stdout/stderr a log
+    # Paso 4: instancia unica por sesion. El cliente arranca solo al encender
+    # el equipo (clave Run de HKLM que crea el instalador); si ademas alguien
+    # lo lanza a mano desde el menu de inicio no debe haber dos procesos
+    # capturando y registrandose en el servidor. Solo al ejecutar el cliente:
+    # importarlo (tests) no debe abortar porque haya un cliente en marcha.
+    if __name__ == '__main__':
+        try:
+            _CreateMutexW = _ct.windll.kernel32.CreateMutexW
+            _CreateMutexW.restype = _ct.c_void_p
+            _CreateMutexW.argtypes = [_ct.c_void_p, _ct.c_bool, _ct.c_wchar_p]
+            _mutex = _CreateMutexW(None, False, 'Local\\VIGIA_Cliente')
+            if _ct.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+                sys.exit(0)  # SystemExit no lo captura el except de abajo
+        except Exception:
+            pass
+    # Paso 5: redirigir stdout/stderr a log
     _log_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'vigia')
     os.makedirs(_log_dir, exist_ok=True)
     _log_file = open(os.path.join(_log_dir, 'client.log'), 'a', encoding='utf-8', errors='replace')
@@ -2161,22 +2176,28 @@ def ejecutar_interfaz():
 
 if __name__ == '__main__':
     platform_utils.set_dpi_aware()
-    ip = None
-    if len(sys.argv) > 1:
-        ip = sys.argv[1]
-    else:
-        _conf_path = platform_utils.get_config_path()
-        if os.path.exists(_conf_path):
+    ip = sys.argv[1].strip() if len(sys.argv) > 1 else None
+
+    # Sin IP por argumento: leer la config del instalador. Se prueban todas las
+    # rutas candidatas (por usuario y la de maquina en %ProgramData%) para que
+    # el arranque automatico funcione con cualquier cuenta del equipo.
+    if not ip:
+        for _conf_path in platform_utils.get_config_paths():
             try:
                 with open(_conf_path, 'r') as f:
                     ip = f.read().strip()
-            except: pass
-    
+                if ip:
+                    break
+            except Exception:
+                continue
+
+    # Ultimo recurso: preguntar por consola. Como .exe sin consola no hay stdin,
+    # asi que cualquier fallo cae al loopback en vez de reventar el arranque.
     if not ip:
         try:
             ip = input("IP Servidor: ").strip()
-        except EOFError:
-            ip = "127.0.0.1" # Fallback if no input possible
+        except Exception:
+            ip = ""
 
     if not ip: ip = "127.0.0.1"
     if WEBRTC_OK:

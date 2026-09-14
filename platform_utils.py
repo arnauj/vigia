@@ -121,12 +121,34 @@ def _get_downloads_dir_win32():
 
 
 # ── Ruta de configuración ────────────────────────────────────────────────────
-def get_config_path():
-    """Devuelve la ruta del archivo de configuración del cliente."""
+def get_config_paths():
+    r"""Rutas candidatas del archivo de configuración del cliente, por prioridad.
+
+    En Windows el instalador escribe la IP del servidor en dos sitios:
+      1. %APPDATA%\vigia\client.conf     -> solo el usuario que instaló
+      2. %ProgramData%\vigia\client.conf -> TODOS los usuarios del equipo
+    La segunda es la que permite que el cliente arranque solo con cualquier
+    cuenta que inicie sesión (autoarranque al encender el equipo).
+    """
     if IS_WINDOWS:
         appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
-        return os.path.join(appdata, 'vigia', 'client.conf')
-    return '/etc/vigia/client.conf'
+        common = os.environ.get('ProgramData', 'C:' + os.sep + 'ProgramData')
+        return [os.path.join(appdata, 'vigia', 'client.conf'),
+                os.path.join(common, 'vigia', 'client.conf')]
+    return ['/etc/vigia/client.conf']
+
+
+def get_config_path():
+    """Devuelve la ruta del archivo de configuración del cliente.
+
+    Prefiere la configuración por usuario y cae a la de máquina si aquella
+    no existe. Si no existe ninguna, devuelve la de máxima prioridad.
+    """
+    rutas = get_config_paths()
+    for ruta in rutas:
+        if os.path.exists(ruta):
+            return ruta
+    return rutas[0]
 
 
 # ── Ruta temporal ────────────────────────────────────────────────────────────
