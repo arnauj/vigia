@@ -105,6 +105,39 @@ lspci -nnk | grep -A3 -E 'VGA|3D|Display'
 El requisito de OpenGL se comprueba en el
 [código de captura de KWin](https://github.com/KDE/kwin/blob/Plasma/6.6/src/plugins/screencast/screencastmanager.cpp).
 
+Si `printenv KWIN_COMPOSE` devuelve **`Q`**, la sesión está forzando QPainter,
+aunque el controlador NVIDIA esté instalado. En una sesión de Plasma iniciada
+por `plasma-kwin_wayland.service`, se puede impedir que KWin herede esa variable
+sin cambiar el resto del entorno. Ejecuta **en el equipo afectado, como el
+usuario del profesor y sin sudo**:
+
+```bash
+mkdir -p ~/.config/systemd/user/plasma-kwin_wayland.service.d
+cat > ~/.config/systemd/user/plasma-kwin_wayland.service.d/90-vigia-opengl.conf <<'EOF'
+[Service]
+UnsetEnvironment=KWIN_COMPOSE
+EOF
+kwriteconfig6 --file kwinrc --group Compositing --key Backend OpenGL
+systemctl --user unset-environment KWIN_COMPOSE
+systemctl --user daemon-reload
+```
+
+Guarda el trabajo y reinicia el equipo desde el menú de KDE. El compositor de
+la sesión actual conserva su entorno; cerrar VIGIA o hacer `unset` en una
+terminal no basta. Después comprueba:
+
+```bash
+qdbus6 org.kde.KWin /KWin org.kde.KWin.supportInformation | grep 'Compositing Type'
+```
+
+El resultado esperado es **`Compositing Type: OpenGL`**. Si sigue mostrando
+QPainter, hay que revisar los errores EGL/OpenGL del nuevo arranque. La
+configuración anterior no fuerza el arranque de un OpenGL que no funcione:
+restaura su selección preferida y permite el respaldo de KWin si falla.
+Para retirar esta excepción basta eliminar
+`~/.config/systemd/user/plasma-kwin_wayland.service.d/90-vigia-opengl.conf`
+y ejecutar `systemctl --user daemon-reload`.
+
 ### Infraestructura y automatización
 
 - **Sin base de datos** — todo el estado es en memoria. Sin ficheros de configuración ni tablas que mantener.
