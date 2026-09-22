@@ -76,11 +76,19 @@ VIGIA es una herramienta para profesores que permite **ver y controlar en tiempo
 - **Pantalla del profesor en alumnos** — comparte la pantalla del profesor en todos los equipos del aula simultáneamente, útil para explicaciones o demostraciones. Se envía como vídeo comprimido (H.264/VP8): el panel codifica una sola vez y el servidor reparte los mismos datos, así que la red del aula soporta 30 equipos sin despeinarse. Si el navegador o algún alumno no lo admiten, se usa automáticamente el envío por imágenes JPEG de siempre.
 - **Envío a uno o a todos** — cualquier acción (mensaje, bloqueo, pantalla del profesor) puede dirigirse a un alumno específico o lanzarse a todos a la vez.
 
+En el panel local de **KDE/Wayland**, **Compartir mi pantalla** abre el selector
+de VIGIA: pulsa la miniatura de **Pantalla completa** para iniciar el envío. Esta
+captura usa Spectacle y evita el diálogo Chrome/KDE cuyo botón **Compartir** puede
+quedar deshabilitado. Envía imágenes JPEG (la fluidez depende de Spectacle).
+**Pestaña o ventana del navegador…** permite abrir el selector del navegador si
+necesitas compartir solo ese contenido. En X11, Windows y paneles abiertos desde
+otro equipo se mantiene la selección del navegador.
+
 ### Infraestructura y automatización
 
 - **Sin base de datos** — todo el estado es en memoria. Sin ficheros de configuración ni tablas que mantener.
-- **Autostart del servidor** — el servicio arranca automáticamente con la sesión del profesor (systemd en Linux, tarea programada en Windows).
-- **Autostart del cliente** — el cliente del alumno arranca con la sesión gráfica (XDG autostart en Linux, carpeta Startup en Windows). No requiere intervención manual.
+- **Autostart del servidor** — el servicio arranca automáticamente al encender el equipo (systemd en Linux, clave Run de HKLM en Windows).
+- **Autostart del cliente** — el cliente del alumno arranca al encender el equipo (XDG autostart en Linux, clave Run de HKLM en Windows, para TODAS las cuentas del equipo). No requiere intervención manual.
 - **Ventana nativa** — el lanzador (`vigia-launcher.py`) abre el panel en modo aplicación nativa. Orden de preferencia: Chrome/Chromium `--app` → GTK + WebKit2GTK → navegador del sistema.
 - **Detección de Flask activo** — si el servidor ya está corriendo como servicio, el lanzador lo reutiliza sin arrancar un proceso duplicado ni matarlo al cerrar la ventana.
 - **Perfil Chrome aislado** — el modo `--app` usa un perfil temporal para no interferir con el Chrome personal del profesor.
@@ -103,8 +111,9 @@ VIGIA es una herramienta para profesores que permite **ver y controlar en tiempo
 
 Descarga el instalador correspondiente desde los botones de arriba y ejecútalo. El asistente instala todo automáticamente.
 
-- **Servidor:** instala el servicio, crea acceso directo en el escritorio y tarea programada de auto-arranque.
-- **Cliente:** pide la IP del servidor durante la instalación, configura auto-arranque y se conecta inmediatamente.
+- **Servidor:** instala el servicio, crea acceso directo en el escritorio y deja el auto-arranque configurado. Arranca al terminar la instalación, sin preguntar.
+- **Cliente:** pide la IP del servidor durante la instalación, configura el auto-arranque para cualquier cuenta del equipo y se conecta inmediatamente.
+  Para despliegue desatendido en aula: `vigia-client-setup.exe /VERYSILENT /SERVERIP=192.168.1.2`
 
 ### Linux (Debian / Ubuntu / Kubuntu)
 

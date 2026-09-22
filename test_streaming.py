@@ -5,8 +5,31 @@ Las pruebas del servidor requieren flask-socketio.
 """
 
 import unittest
+from unittest.mock import Mock, patch
 
 from streaming import PRESETS, FrameWindow, fit_size, normalize_config, profile_encoder
+
+
+class TestTeacherCaptureBackend(unittest.TestCase):
+    def test_compatible_capture_does_not_open_wayland_portal(self):
+        import screen_capture
+        with patch.object(screen_capture, 'session_type', return_value='wayland'), \
+             patch.object(screen_capture, '_cli_tool_order', return_value=['spectacle']), \
+             patch.object(screen_capture, '_acquire_pipewire') as portal, \
+             patch.object(screen_capture, 'CliBackend') as direct:
+            capture = screen_capture.create_capturer(verbose=False, allow_portal=False)
+        self.assertIs(capture, direct.return_value)
+        direct.assert_called_once_with('spectacle')
+        portal.assert_not_called()
+
+    def test_student_capture_still_prefers_pipewire(self):
+        import screen_capture
+        with patch.object(screen_capture, 'session_type', return_value='wayland'), \
+             patch.object(screen_capture, '_acquire_pipewire') as portal, \
+             patch.object(screen_capture, 'CliBackend') as direct:
+            capture = screen_capture.create_capturer(verbose=False)
+        self.assertIs(capture, portal.return_value)
+        direct.assert_not_called()
 
 
 class TestProfiles(unittest.TestCase):
@@ -93,6 +116,7 @@ class TestServerStreaming(unittest.TestCase):
     def setUp(self):
         self.server.students.clear()
         self.server.viewers.clear()
+        self.server._teacher_capture['running'] = False
         self.server._performance_config = dict(PRESETS['balanced'])
         self.peers = []
         self.teacher = self.peer()
@@ -169,6 +193,106 @@ class TestServerStreaming(unittest.TestCase):
         self.student.get_received()
         self.teacher.emit('remote_input', {'sid': self.sid, 'type': 'mousedown'})
         self.assertEqual(self.events(self.student, 'do_input'), [])
+
+    def test_direct_share_default_only_for_local_kde_wayland(self):
+        for address, desktop, wayland, expected in [
+            ('127.0.0.1', 'KDE', True, 'true'),
+            ('::1', 'plasma', True, 'true'),
+            ('192.0.2.25', 'KDE', True, 'false'),
+            ('127.0.0.1', 'KDE', False, 'false'),
+            ('127.0.0.1', 'GNOME', True, 'false'),
+        ]:
+            with self.subTest(address=address, desktop=desktop, wayland=wayland), \
+                 patch.dict('os.environ', {'XDG_CURRENT_DESKTOP': desktop}), \
+                 patch.object(self.server.screen_capture, 'is_wayland', return_value=wayland):
+                response = self.server.app.test_client().get('/', environ_base={'REMOTE_ADDR': address})
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(f'const PREFER_SERVER_CAPTURE = {expected}', response.text)
+
+    def test_screen_list_does_not_open_portal_or_share_with_students(self):
+        from PIL import Image
+        capture = Mock(name='capture')
+        capture.name = 'spectacle'
+        capture.grab.return_value = Image.new('RGB', (640, 360), 'red')
+        with patch.object(self.server.screen_capture, 'create_capturer', return_value=capture) as create:
+            self.teacher.emit('get_screens')
+        create.assert_called_once_with(verbose=False, allow_portal=False)
+        screens = self.events(self.teacher, 'screens_list')[0]['screens']
+        self.assertEqual(len(screens), 1)
+        self.assertTrue(screens[0]['thumb'].startswith('data:image/jpeg;base64,'))
+        self.assertEqual(self.events(self.student, 'teacher_screen'), [])
+        capture.close.assert_called_once()
+
+    def test_direct_capture_delivers_only_to_selected_students(self):
+        from PIL import Image
+        other = self.peer()
+        other.emit('register', {'name': 'No seleccionado'})
+        other.get_received()
+        capture = Mock()
+        capture.grab.return_value = Image.new('RGB', (640, 360), 'red')
+        with patch.object(self.server.socketio, 'start_background_task') as start:
+            self.teacher.emit('start_teacher_capture', {'sids': [self.sid]})
+        state = self.server._teacher_capture
+        with patch.object(self.server.screen_capture, 'create_capturer', return_value=capture) as create, \
+             patch.object(self.server.socketio, 'sleep', side_effect=lambda _: state.update(running=False)):
+            start.call_args.args[0](*start.call_args.args[1:])
+        create.assert_called_once_with(allow_portal=False)
+        frames = self.events(self.student, 'teacher_screen')
+        self.assertEqual(len(frames), 1)
+        self.assertTrue(frames[0]['activa'])
+        self.assertEqual(self.events(other, 'teacher_screen'), [])
+        preview = self.events(self.teacher, 'teacher_screen_preview')[0]
+        self.assertEqual(frames[0]['image'], preview['image'])
+        capture.close.assert_called_once()
+
+    def test_stop_discards_in_flight_capture_before_restart(self):
+        from PIL import Image
+        with patch.object(self.server.socketio, 'start_background_task'):
+            self.teacher.emit('start_teacher_capture')
+            old = self.server._teacher_capture
+            capture = Mock()
+
+            def stop_and_restart():
+                self.teacher.emit('stop_teacher_capture')
+                self.teacher.emit('start_teacher_capture')
+                return Image.new('RGB', (640, 360), 'red')
+
+            capture.grab.side_effect = stop_and_restart
+            with patch.object(self.server.screen_capture, 'create_capturer', return_value=capture):
+                self.server._teacher_capture_loop(old)
+        self.assertFalse(old['running'])
+        self.assertIsNot(old, self.server._teacher_capture)
+        self.assertTrue(self.server._teacher_capture['running'])
+        self.assertEqual(self.events(self.student, 'teacher_screen'), [{'activa': False}])
+        self.assertEqual(self.events(self.teacher, 'teacher_screen_preview'), [])
+        capture.close.assert_called_once()
+
+    def test_failed_capture_reports_error_and_releases_resources(self):
+        with patch.object(self.server.socketio, 'start_background_task'):
+            self.teacher.emit('start_teacher_capture')
+        capture = Mock()
+        capture.grab.side_effect = RuntimeError('No hay imagen')
+        with patch.object(self.server.screen_capture, 'create_capturer', return_value=capture):
+            self.server._teacher_capture_loop(self.server._teacher_capture)
+        self.assertFalse(self.server._teacher_capture['running'])
+        self.assertIn('No hay imagen', self.events(self.teacher, 'teacher_screen_preview')[0]['error'])
+        self.assertEqual(self.events(self.student, 'teacher_screen'), [])
+        capture.close.assert_called_once()
+
+    def test_old_capture_failure_does_not_stop_new_share(self):
+        with patch.object(self.server.socketio, 'start_background_task'):
+            self.teacher.emit('start_teacher_capture')
+            old = self.server._teacher_capture
+
+            def fail_after_restart(**kwargs):
+                self.teacher.emit('start_teacher_capture')
+                raise RuntimeError('La captura anterior falló')
+
+            with patch.object(self.server.screen_capture, 'create_capturer', side_effect=fail_after_restart):
+                self.server._teacher_capture_loop(old)
+        self.assertFalse(old['running'])
+        self.assertTrue(self.server._teacher_capture['running'])
+        self.assertEqual(self.events(self.teacher, 'teacher_screen_preview'), [])
 
 
 if __name__ == '__main__':

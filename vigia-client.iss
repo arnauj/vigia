@@ -2,6 +2,14 @@
 ; VIGIA Client - Inno Setup Installer Script
 ; Genera vigia-client-setup.exe
 ; Requisito: ejecutar build_windows.bat antes para generar dist\windows\
+;
+; AUTOARRANQUE: tras instalar, el cliente queda configurado para arrancar solo
+; al encender el equipo, con CUALQUIER cuenta que inicie sesion, sin que el
+; usuario tenga que hacer nada. Se usa la clave Run de HKLM (maquina completa,
+; no solo el usuario que instalo) apuntando al wrapper .vbs -> cero consola.
+;
+; Instalacion desatendida (despliegue en aula):
+;   vigia-client-setup.exe /VERYSILENT /SERVERIP=192.168.1.2
 ; ============================================================================
 
 [Setup]
@@ -30,61 +38,97 @@ Source: "vigia-cliente-silent.vbs"; DestDir: "{app}"; Flags: ignoreversion
 Name: "{group}\VIGIA Client"; Filename: "wscript.exe"; Parameters: """{app}\vigia-cliente-silent.vbs"" {code:GetServerIP}"; WorkingDir: "{app}"; IconFilename: "{app}\img\logo2.ico"
 Name: "{group}\Desinstalar VIGIA Client"; Filename: "{uninstallexe}"
 
+[Registry]
+; AUTOARRANQUE para TODOS los usuarios del equipo. La clave Run de HKLM se
+; ejecuta en la sesion interactiva de quien inicie sesion, que es justo lo que
+; necesita el cliente (captura de pantalla + ventanas Tk).
+Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "VIGIA Client"; ValueData: "{code:GetRunCommand}"; Flags: uninsdeletevalue
+
+[Run]
+; Arrancar ya, sin preguntar. runasoriginaluser = en la sesion del usuario real,
+; no en el contexto elevado del instalador.
+Filename: "wscript.exe"; Parameters: """{app}\vigia-cliente-silent.vbs"" {code:GetServerIP}"; WorkingDir: "{app}"; Flags: nowait runasoriginaluser
+
 [UninstallRun]
 Filename: "taskkill"; Parameters: "/F /IM vigia-cliente.exe"; Flags: runhidden
 
 [UninstallDelete]
+; Acceso directo de arranque de versiones anteriores
 Type: files; Name: "{userstartup}\VIGIA Client.lnk"
+Type: filesandordirs; Name: "{commonappdata}\vigia"
 
 [Code]
 var
   ServerIPPage: TInputQueryWizardPage;
-  ResultCode: Integer;
+
+{ IP pasada por linea de comandos (/SERVERIP=x.x.x.x) para despliegue desatendido }
+function ParamServerIP(): String;
+begin
+  Result := Trim(ExpandConstant('{param:SERVERIP|}'));
+end;
 
 procedure InitializeWizard();
 begin
   ServerIPPage := CreateInputQueryPage(wpSelectDir,
     'Configuracion del Servidor',
     'Introduce la IP del servidor VIGIA',
-    'El cliente se conectara a este servidor para enviar la pantalla del alumno.');
+    'El cliente se conectara a este servidor para enviar la pantalla del alumno.' + #13#10 +
+    'Tras instalar, VIGIA arrancara solo cada vez que se encienda el equipo.');
   ServerIPPage.Add('IP del Servidor:', False);
-  ServerIPPage.Values[0] := '192.168.1.2';
+  if ParamServerIP() <> '' then
+    ServerIPPage.Values[0] := ParamServerIP()
+  else
+    ServerIPPage.Values[0] := '192.168.1.2';
+end;
+
+{ Con /SERVERIP=... no hace falta preguntar nada }
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := (PageID = ServerIPPage.ID) and (ParamServerIP() <> '');
 end;
 
 function GetServerIP(Param: String): String;
 begin
-  Result := ServerIPPage.Values[0];
+  Result := Trim(ServerIPPage.Values[0]);
+  if Result = '' then
+    Result := ParamServerIP();
+end;
+
+{ Valor de la clave Run: wscript + .vbs + IP = arranque invisible al encender }
+function GetRunCommand(Param: String): String;
+begin
+  Result := 'wscript.exe "' + ExpandConstant('{app}') + '\vigia-cliente-silent.vbs" ' + GetServerIP('');
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  ConfigDir: String;
-  ConfigFile: String;
+  UserConfigDir: String;
+  CommonConfigDir: String;
 begin
   if CurStep = ssPostInstall then
   begin
-    // Guardar la IP en %APPDATA%\vigia\client.conf
-    ConfigDir := ExpandConstant('{userappdata}\vigia');
-    ForceDirectories(ConfigDir);
-    ConfigFile := ConfigDir + '\client.conf';
-    SaveStringToFile(ConfigFile, ServerIPPage.Values[0], False);
+    { Config de MAQUINA: la lee cualquier cuenta que inicie sesion. Es la que
+      permite que el autoarranque funcione tambien para alumnos distintos del
+      administrador que instalo. }
+    CommonConfigDir := ExpandConstant('{commonappdata}\vigia');
+    ForceDirectories(CommonConfigDir);
+    SaveStringToFile(CommonConfigDir + '\client.conf', GetServerIP(''), False);
 
-    // Crear acceso directo en carpeta de inicio → usa wscript + .vbs = CERO consola
-    CreateShellLink(
-      ExpandConstant('{userstartup}\VIGIA Client.lnk'),
-      'VIGIA Client',
-      'wscript.exe',
-      ExpandConstant('"{app}\vigia-cliente-silent.vbs" ') + ServerIPPage.Values[0],
-      ExpandConstant('{app}'),
-      '', 0, SW_SHOWNORMAL);
+    { Config por usuario: compatibilidad con instalaciones anteriores }
+    UserConfigDir := ExpandConstant('{userappdata}\vigia');
+    ForceDirectories(UserConfigDir);
+    SaveStringToFile(UserConfigDir + '\client.conf', GetServerIP(''), False);
 
-    // Iniciar ahora (sin consola, via .vbs)
-    if MsgBox('Iniciar VIGIA Client ahora?', mbConfirmation, MB_YESNO) = IDYES then
-    begin
-      Exec('wscript.exe',
-           ExpandConstant('"{app}\vigia-cliente-silent.vbs" ') + ServerIPPage.Values[0],
-           ExpandConstant('{app}'),
-           SW_SHOWNORMAL, ewNoWait, ResultCode);
-    end;
+    { Limpiar el acceso directo de arranque por usuario de versiones anteriores:
+      ahora el autoarranque lo gestiona la clave Run de HKLM y tener los dos
+      lanzaria el cliente dos veces. }
+    DeleteFile(ExpandConstant('{userstartup}\VIGIA Client.lnk'));
   end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+    RegDeleteValue(HKEY_LOCAL_MACHINE,
+      'Software\Microsoft\Windows\CurrentVersion\Run', 'VIGIA Client');
 end;

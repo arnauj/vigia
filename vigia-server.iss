@@ -2,6 +2,15 @@
 ; VIGIA Server - Inno Setup Installer Script
 ; Genera vigia-server-setup.exe
 ; Requisito: ejecutar build_windows.bat antes para generar dist\windows\
+;
+; AUTOARRANQUE: tras instalar, el servidor queda configurado para arrancar solo
+; al encender el equipo, sin que el profesor tenga que hacer nada. Se usa la
+; clave Run de HKLM apuntando al wrapper .vbs -> cero consola. Sustituye a la
+; tarea programada de versiones anteriores, que solo se creaba para la cuenta
+; que ejecuto el instalador (si era una cuenta de administrador distinta de la
+; del profesor, el servidor no arrancaba nunca).
+;
+; Instalacion desatendida:  vigia-server-setup.exe /VERYSILENT
 ; ============================================================================
 
 [Setup]
@@ -35,11 +44,24 @@ Name: "{group}\Desinstalar VIGIA Server"; Filename: "{uninstallexe}"
 ; Escritorio: launcher
 Name: "{commondesktop}\VIGIA Server"; Filename: "{app}\launcher\vigia-launcher.exe"; WorkingDir: "{app}\launcher"; IconFilename: "{app}\server\img\logo2.ico"
 
+[Registry]
+; AUTOARRANQUE al encender el equipo, para cualquier cuenta que inicie sesion.
+; --no-browser: solo levanta Flask; el dashboard lo abre el profesor con el
+; icono del escritorio (el launcher detecta el puerto 5000 y lo reutiliza).
+Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "VIGIA Server"; ValueData: "wscript.exe ""{app}\vigia-servidor-silent.vbs"" --no-browser"; Flags: uninsdeletevalue
+
 [Run]
 ; Abrir puerto 5000 en el firewall de Windows
 Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""VIGIA Server"" dir=in action=allow protocol=TCP localport=5000"; Flags: runhidden
-; Crear tarea programada: usa wscript + .vbs para CERO consola al inicio de sesion
-Filename: "schtasks"; Parameters: "/Create /SC ONLOGON /TN ""VIGIA Server"" /TR ""wscript.exe \""{app}\vigia-servidor-silent.vbs\"" --no-browser"" /RL HIGHEST /F"; Flags: runhidden
+; Eliminar la tarea programada de versiones anteriores: ahora el autoarranque lo
+; gestiona la clave Run de HKLM y tener ambas levantaria dos servidores
+; peleandose por el puerto 5000.
+Filename: "schtasks"; Parameters: "/Delete /TN ""VIGIA Server"" /F"; Flags: runhidden
+; Arrancar ya, sin preguntar. Instalacion normal: el launcher levanta Flask y
+; abre el dashboard. Instalacion silenciosa: solo el servidor en segundo plano.
+; Son excluyentes a proposito, para no levantar dos Flask sobre el puerto 5000.
+Filename: "{app}\launcher\vigia-launcher.exe"; WorkingDir: "{app}\launcher"; Flags: nowait runasoriginaluser skipifsilent
+Filename: "wscript.exe"; Parameters: """{app}\vigia-servidor-silent.vbs"" --no-browser"; WorkingDir: "{app}"; Flags: nowait runasoriginaluser; Check: EsInstalacionSilenciosa
 
 [UninstallRun]
 Filename: "taskkill"; Parameters: "/F /IM vigia-servidor.exe"; Flags: runhidden
@@ -48,17 +70,16 @@ Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""VIGIA Se
 Filename: "schtasks"; Parameters: "/Delete /TN ""VIGIA Server"" /F"; Flags: runhidden
 
 [Code]
-var
-  ResultCode: Integer;
-
-procedure CurStepChanged(CurStep: TSetupStep);
+{ En instalacion silenciosa no hay dashboard que abrir: se arranca solo el
+  servidor en segundo plano, igual que hara al encender el equipo. }
+function EsInstalacionSilenciosa(): Boolean;
 begin
-  if CurStep = ssPostInstall then
-  begin
-    if MsgBox('Iniciar VIGIA Server ahora?', mbConfirmation, MB_YESNO) = IDYES then
-    begin
-      { Lanzar el launcher: arranca servidor + abre dashboard, sin consola }
-      Exec(ExpandConstant('{app}\launcher\vigia-launcher.exe'), '', ExpandConstant('{app}\launcher'), SW_SHOWNORMAL, ewNoWait, ResultCode);
-    end;
-  end;
+  Result := WizardSilent;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+    RegDeleteValue(HKEY_LOCAL_MACHINE,
+      'Software\Microsoft\Windows\CurrentVersion\Run', 'VIGIA Server');
 end;

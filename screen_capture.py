@@ -328,9 +328,12 @@ def _cli_tool_order():
     return ['grim', 'spectacle', 'gnome-screenshot']
 
 
-def create_capturer(verbose=True):
+def create_capturer(verbose=True, *, allow_portal=True):
     """Devuelve el primer backend de captura funcional.
 
+    allow_portal=False usa las herramientas directas del escritorio, sin abrir
+    el selector ScreenCast. Lo usa la captura compatible del profesor: listar
+    sus pantallas no debe pedir permisos ni crear una sesión PipeWire.
     Lanza CaptureError con un mensaje orientativo si ninguno funciona.
     """
     sess = session_type()
@@ -338,7 +341,7 @@ def create_capturer(verbose=True):
 
     # En Wayland, intentar PRIMERO PipeWire (portal ScreenCast): captura fluida
     # a 30-60 fps. Si el portal no está, falla o se deniega, se cae a spectacle.
-    if sess == 'wayland':
+    if sess == 'wayland' and allow_portal:
         try:
             backend = _acquire_pipewire()
             if verbose:

@@ -156,7 +156,14 @@ def dashboard():
     # Chrome, Firefox y Chromium se identifican con su nombre en el UA.
     # WebKit2GTK (el launcher) usa AppleWebKit pero sin esos tokens.
     is_launcher = not any(b in ua for b in ('Chrome/', 'Chromium/', 'Firefox/'))
+    # En KDE/Wayland el selector Chrome → portal puede quedarse con Compartir
+    # deshabilitado. El panel local ofrece primero la captura directa de KDE.
+    desktop = os.environ.get('XDG_CURRENT_DESKTOP', '').lower()
+    prefer_server_capture = (request.remote_addr in ('127.0.0.1', '::1')
+                             and screen_capture.is_wayland()
+                             and any(d in desktop for d in ('kde', 'plasma')))
     resp = make_response(render_template('dashboard.html', is_launcher=is_launcher,
+                                        prefer_server_capture=prefer_server_capture,
                                         stream_presets=PRESETS,
                                         stream_config=_performance_config))
     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
@@ -391,48 +398,59 @@ def _get_window_region(wid):
     return platform_utils.get_window_region(wid)
 
 
-def _teacher_capture_loop():
+def _teacher_capture_loop(capture):
     """Captura la pantalla del profesor y emite los frames por Socket.IO.
     Usa screen_capture (mss en X11, spectacle/grim en Wayland)."""
+    if not capture['running']:
+        return
     try:
         from PIL import Image
     except ImportError:
+        capture['running'] = False
         socketio.emit('teacher_screen_preview',
                       {'error': 'Instala Pillow en el servidor: sudo apt install python3-pil'},
-                      to=_teacher_capture['sid'])
+                      to=capture['sid'])
         return
 
     capturer = None
     sct = None
-    if _teacher_capture.get('type') == 'window':
+    if capture.get('type') == 'window':
         # Captura de ventana: solo X11 (mss + xdotool)
         try:
             import mss
             sct = mss.mss()
         except Exception as e:
+            if not capture['running']:
+                return
+            capture['running'] = False
             socketio.emit('teacher_screen_preview',
                           {'error': f'Captura de ventana no disponible (requiere X11): {e}'},
-                          to=_teacher_capture['sid'])
+                          to=capture['sid'])
             return
     else:
         try:
-            capturer = screen_capture.create_capturer()
+            capturer = screen_capture.create_capturer(allow_portal=False)
             if hasattr(capturer, 'set_monitor'):
-                capturer.set_monitor(_teacher_capture.get('monitor', 1))
+                capturer.set_monitor(capture.get('monitor', 1))
         except Exception as e:
+            if capturer is not None:
+                capturer.close()
+            if not capture['running']:
+                return
+            capture['running'] = False
             socketio.emit('teacher_screen_preview',
                           {'error': f'Captura de pantalla no disponible: {e}'},
-                          to=_teacher_capture['sid'])
+                          to=capture['sid'])
             return
 
     ultimo_hash = None
     ultimo_envio = 0.0
     ultima_preview = 0.0
     try:
-        while _teacher_capture['running']:
+        while capture['running']:
             try:
                 if sct is not None:
-                    region = _get_window_region(_teacher_capture['wid'])
+                    region = _get_window_region(capture['wid'])
                     if region is None:
                         socketio.sleep(0.5)
                         continue
@@ -440,6 +458,10 @@ def _teacher_capture_loop():
                     img = Image.frombytes('RGB', (cap.width, cap.height), cap.rgb)
                 else:
                     img = capturer.grab()
+                # Spectacle puede tardar en volver. No enviar ese fotograma si
+                # el profesor paró o inició otra sesión mientras se capturaba.
+                if not capture['running']:
+                    break
                 max_w = _share_cfg['width']
                 if img.width > max_w:
                     ratio = max_w / img.width
@@ -464,7 +486,7 @@ def _teacher_capture_loop():
                 ultimo_envio = ahora
 
                 data_uri = 'data:image/jpeg;base64,' + base64.b64encode(jpeg).decode()
-                _sids = _teacher_capture.get('sids')
+                _sids = capture.get('sids')
                 if _sids:
                     for _sid in _sids:
                         socketio.emit('teacher_screen', {'activa': True, 'image': data_uri}, to=_sid)
@@ -475,11 +497,17 @@ def _teacher_capture_loop():
                 if (ahora - ultima_preview) >= 0.5:
                     ultima_preview = ahora
                     socketio.emit('teacher_screen_preview', {'image': data_uri},
-                                  to=_teacher_capture['sid'])
+                                  to=capture['sid'])
             except Exception as e:
                 print(f'[!] Error capturando pantalla del profesor: {e}')
+                if capture['running']:
+                    socketio.emit('teacher_screen_preview',
+                                  {'error': f'Captura de pantalla interrumpida: {e}'},
+                                  to=capture['sid'])
+                break
             socketio.sleep(_share_cfg['sleep'])  # cede el event loop (eventlet/threading)
     finally:
+        capture['running'] = False
         for c in (capturer, sct):
             try:
                 if c is not None:
@@ -660,7 +688,9 @@ def _thumb_from_image(img, max_w=192):
 def on_get_screens():
     try:
         screens = []
-        capturer = screen_capture.create_capturer(verbose=False)
+        # Este selector es la alternativa al portal del navegador. No abrir
+        # otro portal al generar miniaturas ni al comenzar la transmisión.
+        capturer = screen_capture.create_capturer(verbose=False, allow_portal=False)
         try:
             if capturer.name == 'mss':
                 sct = capturer._sct
@@ -704,18 +734,19 @@ def on_get_screens():
 
 @socketio.on('start_teacher_capture')
 def on_start_teacher_capture(data=None):
+    global _teacher_capture
     _teacher_capture['running'] = False  # detener captura previa si la hubiera
-    time.sleep(0.1)
     data = data or {}
-    _teacher_capture['sid'] = request.sid
-    _teacher_capture['type'] = data.get('type', 'monitor')
-    _teacher_capture['monitor'] = data.get('monitor', 1)
-    _teacher_capture['wid'] = data.get('wid')
-    _teacher_capture['sids'] = data.get('sids') or None  # lista de sids destino (None = todos)
-    _teacher_capture['running'] = True
+    # Cada tarea conserva su propio estado: una captura lenta de una sesión
+    # anterior no debe reactivarse al compartir de nuevo.
+    _teacher_capture = {
+        'sid': request.sid, 'type': data.get('type', 'monitor'),
+        'monitor': data.get('monitor', 1), 'wid': data.get('wid'),
+        'sids': data.get('sids') or None, 'running': True,
+    }
     # start_background_task crea un green thread de eventlet (no un hilo OS),
     # garantizando que socketio.emit(broadcast=True) llegue a todos los clientes.
-    socketio.start_background_task(_teacher_capture_loop)
+    socketio.start_background_task(_teacher_capture_loop, _teacher_capture)
     print('[📺] Compartir pantalla del profesor: iniciado')
 
 

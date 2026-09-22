@@ -2641,8 +2641,12 @@ document.addEventListener('DOMContentLoaded', function () {
 // ── Compartir pantalla del profesor ───────────────────────────────────────
 // IS_LAUNCHER lo inyecta Flask.
 const IS_LAUNCHER = {{ 'true' if is_launcher else 'false' }};
+const PREFER_SERVER_CAPTURE = {{ prefer_server_capture | tojson }} &&
+  ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
 
 let _sharing     = false;
+let _sharePicking = false;
+let _screenListRequested = false;
 let _shareStream = null;
 let _shareRunning = false;
 let _shareTimeout = null;
@@ -2671,8 +2675,19 @@ function _canGetDisplayMedia() {
 
 function toggleCompartir() {
   if (_sharing) { detenerCompartir(); return; }
+  if (_sharePicking) return;
+  if (PREFER_SERVER_CAPTURE || !_canGetDisplayMedia()) {
+    abrirScreenModal();
+  } else {
+    compartirDesdeNavegador();
+  }
+}
 
+function compartirDesdeNavegador() {
+  if (_sharing || _sharePicking) return;
+  cerrarScreenModal();
   if (_canGetDisplayMedia()) {
+    _sharePicking = true;
     // Chrome / Firefox / Edge: diálogo nativo del navegador (WebRTC getDisplayMedia)
     console.log('[VIGIA] getDisplayMedia disponible, solicitando pantalla...');
     navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
@@ -2709,23 +2724,36 @@ function toggleCompartir() {
         }
       })
       .catch(err => {
-        if (err.name === 'NotAllowedError') return;
+        if (err.name === 'NotAllowedError' || err.name === 'AbortError') return;
         // Si getDisplayMedia falla, intentar captura del servidor como fallback
         console.warn('[VIGIA] getDisplayMedia falló, usando captura del servidor:', err.message);
-        socket.emit('get_screens');
-      });
+        abrirScreenModal();
+      })
+      .finally(() => { _sharePicking = false; });
   } else {
     // getDisplayMedia no disponible (WebKit2GTK o contexto no seguro): captura del servidor
     console.log('[VIGIA] getDisplayMedia no disponible, usando captura del servidor');
-    socket.emit('get_screens');
+    abrirScreenModal();
   }
 }
 
 // ── Selector de pantalla/ventana (launcher) ──
+function abrirScreenModal() {
+  if (_screenListRequested) return;
+  _screenListRequested = true;
+  document.getElementById('screen-list').textContent = 'Cargando pantallas…';
+  document.getElementById('screen-browser').hidden = !_canGetDisplayMedia();
+  document.getElementById('screen-overlay').classList.add('show');
+  socket.emit('get_screens');
+}
+
 socket.on('screens_list', data => {
-  if (data.error) { alert(data.error); return; }
+  // Una respuesta tardía no debe volver a abrir un selector cancelado.
+  if (!_screenListRequested) return;
+  _screenListRequested = false;
   const list = document.getElementById('screen-list');
   list.innerHTML = '';
+  if (data.error) { list.textContent = data.error; return; }
   const monitors = data.screens.filter(s => s.type === 'monitor');
   const windows  = data.screens.filter(s => s.type === 'window');
 
@@ -2773,6 +2801,7 @@ socket.on('screens_list', data => {
 });
 
 function cerrarScreenModal() {
+  _screenListRequested = false;
   document.getElementById('screen-overlay').classList.remove('show');
 }
 
@@ -2784,6 +2813,7 @@ function _iniciarCapturaServidor(params) {
 }
 
 socket.on('teacher_screen_preview', data => {
+  if (!_sharing || _shareStream) return;
   if (data.error) { alert('No se pudo compartir la pantalla:\n' + data.error); detenerCompartir(); return; }
   const prev = document.getElementById('share-preview');
   prev.src = data.image;
@@ -3343,6 +3373,7 @@ function _actualizarPrompt(cwd) {
   <div id="screen-box">
     <h3 class="d-flex align-items-center gap-2"><i data-lucide="tv" size="12"></i> Selecciona qué compartir</h3>
     <div id="screen-list"><!-- se rellena dinámicamente --></div>
+    <button id="screen-browser" class="sel-btn primary" onclick="compartirDesdeNavegador()" hidden>Pestaña o ventana del navegador…</button>
     <button id="screen-cancel" onclick="cerrarScreenModal()">Cancelar</button>
   </div>
 </div>
