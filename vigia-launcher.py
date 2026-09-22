@@ -264,6 +264,14 @@ def main() -> None:
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
     server_py = os.path.join(SCRIPT_DIR, 'server.py')
 
+    if platform_utils.IS_LINUX:
+        # Cubre también instalaciones de Discover sin sesión gráfica activa.
+        import desktop_setup
+        try:
+            desktop_setup.configure_kde_capture()
+        except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
+            print(f'[VIGIA] No se pudo preparar la captura en KDE: {error}')
+
     # Si Flask ya está corriendo (p.ej. como servicio systemd), reutilizarlo
     # sin arrancar un segundo proceso.
     if wait_for_port(port, timeout=1.5):

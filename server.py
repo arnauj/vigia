@@ -732,9 +732,7 @@ def on_get_screens():
             capturer.close()
         emit('screens_list', {'screens': screens})
     except Exception as e:
-        emit('screens_list', {'error': f'Error al obtener pantallas: {e}\n'
-                              'En X11 instala mss (pip install mss); en Wayland '
-                              'instala spectacle (KDE), grim o gnome-screenshot.'})
+        emit('screens_list', {'error': f'Error al obtener pantallas: {e}'})
 
 
 @socketio.on('start_teacher_capture')

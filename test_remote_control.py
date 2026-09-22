@@ -13,6 +13,8 @@ import os
 import json
 import types
 import queue
+import socket
+import tempfile
 import unittest
 from unittest.mock import patch, MagicMock, call
 
@@ -250,21 +252,17 @@ class TestInputQueue(unittest.TestCase):
     """
     Pruebas del comportamiento de la cola de entrada.
 
-    on_do_input encola los eventos; el hilo _input_worker los consume
-    casi de inmediato (xdotool es mock). En lugar de inspeccionar la cola
-    después de encolar (race condition), parcheamos directamente el método
-    put/put_nowait de la cola para capturar qué se intentó encolar.
+    Intercepta put/put_nowait sin entregar eventos al worker real: podrían
+    procesarse después de retirar el mock y contaminar otra prueba.
     """
 
     def test_encola_mousemove(self):
         """on_do_input debe llamar put_nowait en la cola para mousemove."""
         encolados = []
-        orig_put_nowait = client._input_q.put_nowait
         client._last_mouse_time = 0.0  # reset throttle so the event is not dropped
 
         def _fake_put_nowait(item):
             encolados.append(item)
-            orig_put_nowait(item)  # dejar que el worker lo procese
 
         with patch.object(client._input_q, 'put_nowait', side_effect=_fake_put_nowait):
             client.on_do_input({'type': 'mousemove', 'x': 10, 'y': 20})
@@ -284,11 +282,9 @@ class TestInputQueue(unittest.TestCase):
     def test_clicks_usan_put_con_timeout(self):
         """mousedown/mouseup/keypress usan queue.put con timeout (no put_nowait)."""
         encolados = []
-        orig_put = client._input_q.put
 
         def _fake_put(item, timeout=None):
             encolados.append(item)
-            orig_put(item, timeout=timeout)
 
         with patch.object(client._input_q, 'put', side_effect=_fake_put):
             client.on_do_input({'type': 'mousedown', 'x': 5, 'y': 5, 'button': 'left'})
@@ -299,11 +295,9 @@ class TestInputQueue(unittest.TestCase):
     def test_keypress_usa_put_con_timeout(self):
         """keypress usan queue.put con timeout para no perder eventos."""
         encolados = []
-        orig_put = client._input_q.put
 
         def _fake_put(item, timeout=None):
             encolados.append(item)
-            orig_put(item, timeout=timeout)
 
         with patch.object(client._input_q, 'put', side_effect=_fake_put):
             client.on_do_input({'type': 'keypress', 'key': 'enter'})
@@ -746,17 +740,32 @@ class TestScreenCaptureSession(unittest.TestCase):
 
     def setUp(self):
         import screen_capture
+        import desktop_session
         self.sc = screen_capture
+        runtime = tempfile.TemporaryDirectory()
+        self.addCleanup(runtime.cleanup)
+        self.runtime = runtime.name
+        for mocked in (patch.object(desktop_session, 'manager_environment', return_value={}),
+                       patch.object(desktop_session, 'desktop_environments', return_value=[])):
+            mocked.start()
+            self.addCleanup(mocked.stop)
+
+    def _wayland_socket(self):
+        sock = socket.socket(socket.AF_UNIX)
+        sock.bind(os.path.join(self.runtime, 'wayland-0'))
+        self.addCleanup(sock.close)
 
     def _with_env(self, env):
-        return patch.dict(os.environ, env, clear=True)
+        return patch.dict(os.environ, {'XDG_RUNTIME_DIR': self.runtime, **env}, clear=True)
 
     def test_wayland_por_wayland_display(self):
+        self._wayland_socket()
         with self._with_env({'WAYLAND_DISPLAY': 'wayland-0'}):
             self.assertEqual(self.sc.session_type(), 'wayland')
             self.assertTrue(self.sc.is_wayland())
 
     def test_wayland_por_xdg_session_type(self):
+        self._wayland_socket()
         with self._with_env({'XDG_SESSION_TYPE': 'wayland', 'DISPLAY': ':0'}):
             self.assertEqual(self.sc.session_type(), 'wayland')
 
@@ -766,19 +775,16 @@ class TestScreenCaptureSession(unittest.TestCase):
             self.assertFalse(self.sc.is_wayland())
 
     def test_sin_entorno_grafico(self):
-        # Sin variables y sin socket wayland en el runtime dir → 'unknown'.
-        # (En esta caja de desarrollo SÍ hay socket, así que lo mockeamos para
-        #  comprobar la rama 'unknown' de forma determinista.)
-        with self._with_env({}), \
-             patch.object(self.sc, '_find_wayland_socket', return_value=None):
+        # Runtime temporal vacío: no usar la sesión de la máquina de pruebas.
+        with self._with_env({}):
             self.assertEqual(self.sc.session_type(), 'unknown')
 
     def test_wayland_por_socket_sin_wayland_display(self):
         # Caso real que rompía a los alumnos: lanzado SIN WAYLAND_DISPLAY pero
         # con DISPLAY=:0 (XWayland). El sondeo del socket debe detectar Wayland
         # y fijar WAYLAND_DISPLAY para los procesos hijos (spectacle/ydotool).
-        with self._with_env({'DISPLAY': ':0'}), \
-             patch.object(self.sc, '_find_wayland_socket', return_value='wayland-0'):
+        self._wayland_socket()
+        with self._with_env({'DISPLAY': ':0'}):
             self.assertEqual(self.sc.session_type(), 'wayland')
             self.assertEqual(os.environ.get('WAYLAND_DISPLAY'), 'wayland-0')
 

@@ -26,57 +26,11 @@ import subprocess
 import tempfile
 import threading
 import time
+from desktop_session import ensure_session_env
 
 
 class CaptureError(Exception):
     """No hay ningún backend de captura funcional."""
-
-
-def _find_wayland_socket():
-    """Nombre del socket wayland (p.ej. 'wayland-0') si existe en
-    XDG_RUNTIME_DIR, o None.
-
-    Permite detectar una sesión Wayland aunque el proceso se haya lanzado SIN
-    `WAYLAND_DISPLAY` en el entorno (caso típico de XDG autostart / systemd en
-    Kubuntu 26). Sin esta detección, `session_type()` veía solo `DISPLAY=:0`
-    (XWayland) y devolvía 'x11', con lo que se usaba `mss` — que en Wayland
-    captura el root VACÍO de XWayland: pantalla NEGRA.
-    """
-    rt = os.environ.get('XDG_RUNTIME_DIR')
-    if not rt and hasattr(os, 'getuid'):
-        rt = '/run/user/%d' % os.getuid()
-    if not rt or not os.path.isdir(rt):
-        return None
-    try:
-        socks = sorted(f for f in os.listdir(rt)
-                       if f.startswith('wayland-') and not f.endswith('.lock'))
-    except OSError:
-        return None
-    return socks[0] if socks else None
-
-
-def ensure_session_env():
-    """Garantiza WAYLAND_DISPLAY y XDG_RUNTIME_DIR en os.environ si la sesión es
-    Wayland.
-
-    Es imprescindible: las herramientas hijas (spectacle para captura, ydotool
-    para control remoto) heredan este entorno. Sin WAYLAND_DISPLAY, spectacle no
-    conecta con el compositor y ydotool/ydotoold no localizan la sesión. Llamar
-    pronto (al importar el módulo) propaga el arreglo a todo el proceso.
-    """
-    if sys.platform == 'win32':
-        return
-    if 'XDG_RUNTIME_DIR' not in os.environ and hasattr(os, 'getuid'):
-        rt = '/run/user/%d' % os.getuid()
-        if os.path.isdir(rt):
-            os.environ['XDG_RUNTIME_DIR'] = rt
-    # No suplantar una sesión X11 declarada explícitamente.
-    if os.environ.get('XDG_SESSION_TYPE', '').lower() == 'x11':
-        return
-    if 'WAYLAND_DISPLAY' not in os.environ:
-        sock = _find_wayland_socket()
-        if sock:
-            os.environ['WAYLAND_DISPLAY'] = sock
 
 
 def session_type():
@@ -227,9 +181,10 @@ class CliBackend:
                     for a in self._cmd]
             args[0] = self._path
             r = subprocess.run(args, stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL, timeout=10)
+                               stderr=subprocess.PIPE, text=True, errors='replace', timeout=10)
             if r.returncode != 0 or not os.path.isfile(self._tmp):
-                raise CaptureError(f'{self.name} devolvió {r.returncode}')
+                detail = ' '.join((r.stderr or '').split())[-600:]
+                raise CaptureError(f'{self.name} devolvió {r.returncode}: {detail}')
             img = Image.open(self._tmp).convert('RGB')
             if img.width < 2 or img.height < 2:
                 raise CaptureError(f'{self.name} produjo una imagen vacía')
@@ -337,6 +292,11 @@ def create_capturer(verbose=True, *, allow_portal=True):
     Lanza CaptureError con un mensaje orientativo si ninguno funciona.
     """
     sess = session_type()
+    if sess == 'unknown':
+        raise CaptureError(
+            'No se encuentra una sesión gráfica de este usuario. Abre VIGIA desde '
+            'el menú de aplicaciones y comprueba que se ejecuta con el mismo '
+            'usuario de tu escritorio.')
     errors = []
 
     # En Wayland, intentar PRIMERO PipeWire (portal ScreenCast): captura fluida

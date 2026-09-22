@@ -39,6 +39,8 @@ cp "$SCRIPT_DIR/server.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/vigia-launcher.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/platform_utils.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/screen_capture.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
+cp "$SCRIPT_DIR/desktop_session.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
+cp "$SCRIPT_DIR/desktop_setup.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/streaming.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/pipewire_capture.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/templates/"* "$SERVER_BUILD_DIR/opt/vigia-server/templates/"
@@ -57,6 +59,12 @@ pip3 wheel --wheel-dir "$SERVER_BUILD_DIR/opt/vigia-server/wheels/" \
 # Eliminar cualquier wheel binario (cpXXX) que se haya colado: solo py puros
 find "$SERVER_BUILD_DIR/opt/vigia-server/wheels/" -name '*.whl' \
     ! -name '*-py2.py3-none-any.whl' ! -name '*-py3-none-any.whl' -delete 2>/dev/null || true
+# mss no existe como paquete apt en todas las versiones soportadas. No generar
+# un .deb incompleto si falta su wheel portable para captura X11.
+compgen -G "$SERVER_BUILD_DIR/opt/vigia-server/wheels/mss-*-py3-none-any.whl" >/dev/null || {
+    echo '[!] Falta el wheel de mss. Instala pip y vuelve a ejecutar make build.'
+    exit 1
+}
 
 cat > "$SERVER_BUILD_DIR/DEBIAN/control" <<EOF
 Package: $SERVER_PKG_NAME
@@ -65,8 +73,8 @@ Architecture: amd64
 Maintainer: VIGIA
 Section: education
 Priority: optional
-Depends: python3, python3-venv, python3-flask, python3-flask-socketio, python3-socketio, python3-engineio, python3-pil
-Recommends: python3-simple-websocket, python3-gi, python3-dbus, python3-gst-1.0, gstreamer1.0-pipewire, gstreamer1.0-plugins-base, gir1.2-gstreamer-1.0, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, libwebkit2gtk-4.1-0, libgtk-3-0, chromium-browser | chromium | google-chrome-stable, kde-spectacle | grim | gnome-screenshot
+Depends: python3, python3-venv, python3-flask, python3-flask-socketio, python3-socketio, python3-engineio, python3-pil, kde-spectacle, qt6-wayland, libkf6config-bin | libkf5config-bin, xdg-desktop-portal, xdg-desktop-portal-kde
+Recommends: python3-simple-websocket, python3-gi, python3-dbus, python3-gst-1.0, gstreamer1.0-pipewire, gstreamer1.0-plugins-base, gir1.2-gstreamer-1.0, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, libwebkit2gtk-4.1-0, libgtk-3-0, chromium-browser | chromium | google-chrome-stable
 Description: VIGIA Server - Classroom Monitoring System (Teacher)
  VIGIA allows teachers to monitor student screens in real-time.
  This package installs the teacher's dashboard and relay server.
@@ -77,7 +85,7 @@ cat > "$SERVER_BUILD_DIR/DEBIAN/postinst" <<'EOF'
 set -e
 VIGIA_DIR=/opt/vigia-server
 
-REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
+REAL_USER="$(python3 "$VIGIA_DIR/desktop_setup.py" --installation-user || true)"
 REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
 PYTHON3="/opt/vigia-server/venv/bin/python3"
 
@@ -111,6 +119,11 @@ for spec in "flask:flask" "flask_socketio:flask-socketio" \
     mod="${spec%%:*}"; pkg="${spec#*:}"
     "$VPY" -c "import $mod" 2>/dev/null || _pip_install "$pkg"
 done
+# La captura X11 es obligatoria y su wheel viene dentro del paquete.
+"$VPY" -c 'import mss' 2>/dev/null || {
+    echo '[!] No se pudo instalar mss desde el wheel incluido en vigia-server.'
+    exit 1
+}
 if "$VPY" -c "import flask, flask_socketio, PIL" 2>/dev/null; then
     echo "[OK] Dependencias Python del servidor verificadas."
 else
@@ -165,6 +178,12 @@ EOD
       "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$REAL_UID/bus" \
       systemctl --user "$@"
   }
+  # No reiniciar el compositor: cerraría las aplicaciones de la sesión.
+  runuser -u "$REAL_USER" -- env \
+    "XDG_RUNTIME_DIR=/run/user/$REAL_UID" \
+    "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$REAL_UID/bus" \
+    "$PYTHON3" "$VIGIA_DIR/desktop_setup.py" || \
+    echo '[!] La configuración de KDE se volverá a comprobar al abrir VIGIA.'
   # enable --now no reinicia un servicio que ya está activo: conservaría el
   # código y las plantillas anteriores pese a haber reinstalado el paquete.
   if _user_systemctl daemon-reload && \
@@ -236,6 +255,7 @@ cp "$SCRIPT_DIR/client.py"          "$CLIENT_BUILD_DIR/opt/vigia-client/"
 cp "$SCRIPT_DIR/vigia_overlay.py"   "$CLIENT_BUILD_DIR/opt/vigia-client/"
 cp "$SCRIPT_DIR/platform_utils.py"  "$CLIENT_BUILD_DIR/opt/vigia-client/"
 cp "$SCRIPT_DIR/screen_capture.py"  "$CLIENT_BUILD_DIR/opt/vigia-client/"
+cp "$SCRIPT_DIR/desktop_session.py" "$CLIENT_BUILD_DIR/opt/vigia-client/"
 cp "$SCRIPT_DIR/streaming.py"       "$CLIENT_BUILD_DIR/opt/vigia-client/"
 cp "$SCRIPT_DIR/pipewire_capture.py" "$CLIENT_BUILD_DIR/opt/vigia-client/"
 cp "$SCRIPT_DIR/vigia_input.py"     "$CLIENT_BUILD_DIR/opt/vigia-client/"
