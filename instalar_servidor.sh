@@ -173,8 +173,10 @@ SERVICE_EOF
 
 # Detener versión anterior si está corriendo, luego recargar y activar
 systemctl --user stop vigia-servidor 2>/dev/null || true
+"$PYTHON3" "$SCRIPT_DIR/server_runtime.py" --stop-installed "$SCRIPT_DIR" || exit 1
 systemctl --user daemon-reload
 systemctl --user enable --now vigia-servidor
+"$PYTHON3" "$SCRIPT_DIR/server_runtime.py" --wait-current 5000 || exit 1
 
 # Permitir que el servicio arranque en el boot aunque el usuario no haya iniciado
 # sesión gráfica (los alumnos podrán conectar desde el primer momento)

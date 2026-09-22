@@ -16,6 +16,8 @@ import tempfile
 import subprocess
 import time
 import platform_utils
+from vigia_version import VERSION
+from server_runtime import wait_for_current_server
 
 # ---------------------------------------------------------------------------
 # Windows: ejecutar SIEMPRE sin ventana de consola visible.
@@ -260,6 +262,15 @@ def dashboard_url(port: int) -> str:
     return url
 
 
+def report_server_mismatch(port):
+    message = (f'El servidor del puerto {port} no corresponde a VIGIA {VERSION}. '
+               'Cierra las ventanas antiguas de VIGIA y reinstala el paquete nuevo. '
+               'Si persiste, reinicia el equipo para retirar el proceso anterior.')
+    print(f'[VIGIA] {message}', file=sys.stderr)
+    if platform_utils.IS_LINUX and shutil.which('kdialog'):
+        subprocess.run(['kdialog', '--title', 'VIGIA', '--error', message], check=False)
+
+
 def main() -> None:
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
     server_py = os.path.join(SCRIPT_DIR, 'server.py')
@@ -275,6 +286,9 @@ def main() -> None:
     # Si Flask ya está corriendo (p.ej. como servicio systemd), reutilizarlo
     # sin arrancar un segundo proceso.
     if wait_for_port(port, timeout=1.5):
+        if not wait_for_current_server(port, timeout=3):
+            report_server_mismatch(port)
+            sys.exit(1)
         print(f'[VIGIA] Servidor detectado en :{port}, reutilizando…')
         proc = None
     else:
@@ -312,8 +326,8 @@ def main() -> None:
         else:
             popen_kwargs['args'] = [sys.executable, server_py, str(port)]
         proc = subprocess.Popen(**popen_kwargs)
-        if not wait_for_port(port, 30):
-            print('[VIGIA] Flask no respondió en 30 s', file=sys.stderr)
+        if not wait_for_current_server(port, timeout=30):
+            print(f'[VIGIA] El servidor {VERSION} no respondió en 30 s', file=sys.stderr)
             proc.kill()
             sys.exit(1)
 

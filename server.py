@@ -17,6 +17,7 @@ import webbrowser
 import shutil
 import platform_utils
 import screen_capture
+from vigia_version import VERSION
 from streaming import PRESETS, normalize_config
 
 # ---------------------------------------------------------------------------
@@ -168,12 +169,20 @@ def dashboard():
                                  capture_mode != 'browser'
                                  and screen_capture.is_wayland() and kde_capture)))
     resp = make_response(render_template('dashboard.html', is_launcher=is_launcher,
+                                        vigia_version=VERSION,
                                         prefer_server_capture=prefer_server_capture,
                                         stream_presets=PRESETS,
                                         stream_config=_performance_config))
     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     resp.headers['Pragma'] = 'no-cache'
     return resp
+
+
+@app.route('/api/version')
+def api_version():
+    response = jsonify(app='vigia-server', version=VERSION)
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 
 @app.route('/img/<path:filename>')

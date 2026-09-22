@@ -18,6 +18,9 @@ class TestLauncher(unittest.TestCase):
         setup = patch.object(desktop_setup, 'configure_kde_capture', return_value=False)
         self.desktop_setup = setup.start()
         self.addCleanup(setup.stop)
+        ready = patch.object(self.launcher, 'wait_for_current_server', return_value=True)
+        self.server_ready = ready.start()
+        self.addCleanup(ready.stop)
 
     @classmethod
     def setUpClass(cls):
@@ -38,6 +41,18 @@ class TestLauncher(unittest.TestCase):
         chrome.assert_called_once_with('http://localhost:5001/?capture=server', None)
         start.assert_not_called()
         self.desktop_setup.assert_called_once_with()
+        self.server_ready.assert_called_once_with(5001, timeout=3)
+
+    def test_old_server_on_port_is_not_reused(self):
+        self.server_ready.return_value = False
+        with patch.object(self.launcher.sys, 'argv', ['vigia-launcher.py']), \
+             patch.object(self.launcher, 'wait_for_port', return_value=True), \
+             patch.object(self.launcher, 'report_server_mismatch') as report, \
+             patch.object(self.launcher, 'run_chrome_app') as chrome, \
+             self.assertRaises(SystemExit):
+            self.launcher.main()
+        report.assert_called_once_with(5000)
+        chrome.assert_not_called()
 
     def test_webview_and_browser_fallback_preserve_capture_choice(self):
         with patch.dict('os.environ', {'XDG_CURRENT_DESKTOP': 'KDE'}), \
