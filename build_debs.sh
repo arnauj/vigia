@@ -2,7 +2,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VERSION="1.2"
+VERSION="$(python3 "$SCRIPT_DIR/vigia_version.py")"
 DIST_DIR="$SCRIPT_DIR/dist"
 mkdir -p "$DIST_DIR"
 
@@ -41,6 +41,8 @@ cp "$SCRIPT_DIR/platform_utils.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/screen_capture.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/desktop_session.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/desktop_setup.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
+cp "$SCRIPT_DIR/server_runtime.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
+cp "$SCRIPT_DIR/vigia_version.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/streaming.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/pipewire_capture.py" "$SERVER_BUILD_DIR/opt/vigia-server/"
 cp "$SCRIPT_DIR/templates/"* "$SERVER_BUILD_DIR/opt/vigia-server/templates/"
@@ -90,6 +92,20 @@ REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
 PYTHON3="/opt/vigia-server/venv/bin/python3"
 
 chmod +x "$VIGIA_DIR"/*.py 2>/dev/null || true
+
+if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+  REAL_UID="$(id -u "$REAL_USER")"
+  _user_systemctl() {
+    runuser -u "$REAL_USER" -- env \
+      "XDG_RUNTIME_DIR=/run/user/$REAL_UID" \
+      "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$REAL_UID/bus" \
+      systemctl --user "$@"
+  }
+  _user_systemctl stop vigia-servidor 2>/dev/null || true
+fi
+# Un servidor lanzado desde Chrome/VIGIA no pertenece a la unidad systemd.
+# Retirar también esos procesos exactos ANTES de reemplazar su venv.
+python3 "$VIGIA_DIR/server_runtime.py" --stop-installed "$VIGIA_DIR"
 
 # ── Entorno Python ────────────────────────────────────────────
 # Se recrea SIEMPRE el venv: un venv heredado de otra versión de Python
@@ -169,15 +185,6 @@ WantedBy=default.target
 EOD
   chown "$REAL_USER:" "$SYSTEMD_DIR/vigia-servidor.service"
   loginctl enable-linger "$REAL_USER" 2>/dev/null || true
-  REAL_UID="$(id -u "$REAL_USER")"
-  _user_systemctl() {
-    # su - elimina el entorno del bus de usuario. Indicarlo explícitamente
-    # permite actualizar el servicio también al instalar con sudo apt/dpkg.
-    runuser -u "$REAL_USER" -- env \
-      "XDG_RUNTIME_DIR=/run/user/$REAL_UID" \
-      "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$REAL_UID/bus" \
-      systemctl --user "$@"
-  }
   # No reiniciar el compositor: cerraría las aplicaciones de la sesión.
   runuser -u "$REAL_USER" -- env \
     "XDG_RUNTIME_DIR=/run/user/$REAL_UID" \
@@ -189,6 +196,9 @@ EOD
   if _user_systemctl daemon-reload && \
      _user_systemctl enable vigia-servidor && \
      _user_systemctl restart vigia-servidor; then
+    # Type=simple puede anunciar inicio y fallar después por puerto ocupado.
+    # Confirmar por HTTP qué versión ha cargado el proceso que responde.
+    "$PYTHON3" "$VIGIA_DIR/server_runtime.py" --wait-current 5000
     echo "Servicio 'vigia-servidor' actualizado y reiniciado para $REAL_USER."
   else
     echo "[!] No se pudo reiniciar el servidor. En la sesión del profesor ejecuta:"

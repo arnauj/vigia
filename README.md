@@ -21,9 +21,9 @@
 
 ### Linux (Debian / Ubuntu / Kubuntu)
 
-[![Descargar Servidor Linux](https://img.shields.io/badge/⬇%20Servidor%20Linux-vigia--server__1.2__amd64.deb-E95420?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/arnauj/vigia/raw/master/dist/vigia-server_1.2_amd64.deb)
+[![Descargar Servidor Linux](https://img.shields.io/badge/⬇%20Servidor%20Linux-vigia--server__1.2.1__amd64.deb-E95420?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/arnauj/vigia/raw/master/dist/vigia-server_1.2.1_amd64.deb)
 &nbsp;&nbsp;
-[![Descargar Cliente Linux](https://img.shields.io/badge/⬇%20Cliente%20Linux-vigia--client__1.2__all.deb-E95420?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/arnauj/vigia/raw/master/dist/vigia-client_1.2_all.deb)
+[![Descargar Cliente Linux](https://img.shields.io/badge/⬇%20Cliente%20Linux-vigia--client__1.2.1__all.deb-E95420?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/arnauj/vigia/raw/master/dist/vigia-client_1.2.1_all.deb)
 
 </div>
 
@@ -32,7 +32,7 @@
 | | Servidor (profesor) | Cliente (alumno) |
 |:---:|:---:|:---:|
 | **Windows** | [vigia-server-setup.exe](https://github.com/arnauj/vigia/raw/master/dist/installers/vigia-server-setup.exe) | [vigia-client-setup.exe](https://github.com/arnauj/vigia/raw/master/dist/installers/vigia-client-setup.exe) |
-| **Linux .deb** | [vigia-server_1.2_amd64.deb](https://github.com/arnauj/vigia/raw/master/dist/vigia-server_1.2_amd64.deb) | [vigia-client_1.2_all.deb](https://github.com/arnauj/vigia/raw/master/dist/vigia-client_1.2_all.deb) |
+| **Linux .deb** | [vigia-server_1.2.1_amd64.deb](https://github.com/arnauj/vigia/raw/master/dist/vigia-server_1.2.1_amd64.deb) | [vigia-client_1.2.1_all.deb](https://github.com/arnauj/vigia/raw/master/dist/vigia-client_1.2.1_all.deb) |
 
 </div>
 
@@ -86,10 +86,19 @@ otro equipo se mantiene la selección del navegador.
 
 Si al actualizar sigue apareciendo el selector bloqueado de Chrome, **solo hace
 falta actualizar el servidor**, no los clientes. Cierra la ventana de VIGIA,
-reinstala el nuevo paquete con `sudo apt install --reinstall ./vigia-server_1.2_amd64.deb`
-y vuelve a abrir **VIGIA Servidor**. El instalador reinicia el servicio para cargar
-el código nuevo. También puedes abrir `http://localhost:5000/?capture=server`
+reinstala el nuevo paquete con `sudo apt install --reinstall ./vigia-server_1.2.1_amd64.deb`
+y vuelve a abrir **VIGIA Servidor**. El instalador detiene el servicio y también
+las instancias de `/opt/vigia-server/server.py` abiertas por un lanzador anterior,
+y comprueba que la versión nueva responde antes de anunciar que está activo. También puedes abrir `http://localhost:5000/?capture=server`
 en el equipo del profesor para elegir explícitamente la captura directa.
+
+La versión **1.2.1** tiene un nombre de paquete distinto para evitar confundirla
+con descargas antiguas de 1.2. El panel muestra la versión en el título y se puede
+comprobar el proceso activo con `curl http://localhost:5000/api/version`. Debe
+devolver `{"app":"vigia-server","version":"1.2.1"}`. El lanzador ya no reutiliza
+un puerto ocupado sin verificar la versión del servidor. Si sigue apareciendo
+el error antiguo con «sesión unknown» y el consejo de instalación duplicado,
+el proceso que responde todavía tiene el código anterior.
 
 El `.deb` instala como dependencias **Spectacle, Qt Wayland, las herramientas de
 configuración de KDE y su portal de escritorio**. Incluye el wheel portable de
@@ -195,7 +204,7 @@ Los paquetes `.deb` están en [`dist/`](dist/). Descárgalos desde los botones d
 **En el equipo del profesor (servidor):**
 
 ```bash
-sudo apt install ./vigia-server_1.2_amd64.deb
+sudo apt install ./vigia-server_1.2.1_amd64.deb
 ```
 
 Aparece **VIGIA Servidor** en el menú de inicio. El servidor arranca automáticamente al iniciar sesión.
@@ -203,7 +212,7 @@ Aparece **VIGIA Servidor** en el menú de inicio. El servidor arranca automátic
 **En los equipos de los alumnos (cliente):**
 
 ```bash
-sudo apt install ./vigia-client_1.2_all.deb
+sudo apt install ./vigia-client_1.2.1_all.deb
 ```
 
 Durante la instalación se pedirá la IP del servidor (se sugiere automáticamente). El cliente arranca solo al iniciar sesión.
@@ -393,8 +402,8 @@ vigia/
 │   ├── icon-192.png           — Icono PWA/Chrome app
 │   └── icon-512.png
 └── dist/
-    ├── vigia-server_1.2_amd64.deb
-    ├── vigia-client_1.2_all.deb
+    ├── vigia-server_1.2.1_amd64.deb
+    ├── vigia-client_1.2.1_all.deb
     └── installers/
         ├── vigia-server-setup.exe
         └── vigia-client-setup.exe

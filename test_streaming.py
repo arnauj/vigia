@@ -209,6 +209,14 @@ class TestServerStreaming(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertIn(f'const PREFER_SERVER_CAPTURE = {expected}', response.text)
 
+    def test_version_identifies_running_server_and_panel(self):
+        from vigia_version import VERSION
+        client = self.server.app.test_client()
+        response = client.get('/api/version')
+        self.assertEqual(response.json, {'app': 'vigia-server', 'version': VERSION})
+        self.assertEqual(response.headers['Cache-Control'], 'no-store')
+        self.assertIn(f'<title>VIGIA {VERSION}', client.get('/').text)
+
     def test_screen_list_does_not_open_portal_or_share_with_students(self):
         from PIL import Image
         capture = Mock(name='capture')
