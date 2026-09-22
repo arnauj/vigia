@@ -91,11 +91,29 @@ y vuelve a abrir **VIGIA Servidor**. El instalador reinicia el servicio para car
 el código nuevo. También puedes abrir `http://localhost:5000/?capture=server`
 en el equipo del profesor para elegir explícitamente la captura directa.
 
+El `.deb` instala como dependencias **Spectacle, Qt Wayland, las herramientas de
+configuración de KDE y su portal de escritorio**. Incluye el wheel portable de
+**mss** para X11; la compilación falla si falta ese wheel. Instálalo con `apt
+install` (no solo `dpkg -i`) para resolver también las dependencias del sistema.
+
+El servidor recupera `DISPLAY`, `WAYLAND_DISPLAY`, `XAUTHORITY` y el bus de la
+sesión del mismo usuario al solicitar una captura. Así puede compartir aunque
+systemd lo haya arrancado antes del inicio de sesión. Si aún no hay escritorio
+abierto, muestra un mensaje específico en lugar de intentar herramientas que
+fallan por falta de conexión gráfica.
+
 Si KDE muestra **«Tipo de composición no permitido»** al grabar, KWin no está
 usando un compositor OpenGL compatible. Cambiar los clientes de VIGIA no lo
 resuelve y las capturas directas de Spectacle también pueden fallar. Hay que
-revisar el controlador gráfico y la composición del equipo del profesor; no
-basta con reinstalar VIGIA. Para recoger los datos sin cambiar la configuración:
+revisar la composición del equipo del profesor. **El instalador detecta
+automáticamente `KWIN_COMPOSE=Q` o `Backend=QPainter`**, prepara la excepción del
+servicio de KWin y selecciona OpenGL. Reconoce también al usuario que instala
+desde Discover/PackageKit. El lanzador repite la comprobación para instalaciones
+realizadas sin sesión gráfica activa. Si se aplica la corrección, **guarda el
+trabajo y reinicia el equipo**: el instalador no cierra la sesión actual.
+
+Si QPainter se debe a un fallo del controlador y no a una configuración forzada,
+hay que revisar el arranque de OpenGL. Para recoger los datos:
 
 ```bash
 qdbus6 org.kde.KWin /KWin org.kde.KWin.supportInformation
@@ -108,8 +126,9 @@ El requisito de OpenGL se comprueba en el
 Si `printenv KWIN_COMPOSE` devuelve **`Q`**, la sesión está forzando QPainter,
 aunque el controlador NVIDIA esté instalado. En una sesión de Plasma iniciada
 por `plasma-kwin_wayland.service`, se puede impedir que KWin herede esa variable
-sin cambiar el resto del entorno. Ejecuta **en el equipo afectado, como el
-usuario del profesor y sin sudo**:
+sin cambiar el resto del entorno. El instalador automatiza los siguientes pasos;
+para aplicarlos manualmente, ejecuta **en el equipo afectado, como el usuario del
+profesor y sin sudo**:
 
 ```bash
 mkdir -p ~/.config/systemd/user/plasma-kwin_wayland.service.d
@@ -353,6 +372,8 @@ vigia/
 ├── client.py                  — Cliente del alumno (captura + Tkinter)
 ├── vigia-launcher.py          — Lanzador: Chrome --app → GTK/WebKit2GTK → navegador
 ├── platform_utils.py          — Abstracción multiplataforma (Windows/Linux)
+├── desktop_session.py         — Recuperación del entorno gráfico para captura
+├── desktop_setup.py           — Corrección condicional de QPainter en KDE
 ├── instalar.py                — Instalador gráfico (tkinter)
 ├── instalar.sh                — Lanzador del instalador gráfico
 ├── instalar_servidor.sh       — Instalación servidor Linux (deps + desktop + systemd)
@@ -386,7 +407,7 @@ vigia/
 ### Linux (.deb)
 
 ```bash
-bash build_debs.sh
+make build                    # Ejecuta ./build_debs.sh y regenera ambos .deb
 ```
 
 ### Windows (.exe)

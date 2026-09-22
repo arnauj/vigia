@@ -95,8 +95,14 @@ echo "[✓] pip: $PIP"
 # python3-pil evita compilar Pillow con pip (falla en Pythons nuevos).
 # kde-spectacle/grim permiten capturar la pantalla del profesor en Wayland.
 echo "[*] Instalando dependencias del sistema..."
-sudo apt-get install -y python3-flask python3-flask-socketio python3-pil -qq 2>/dev/null || true
-for p in python3-simple-websocket kde-spectacle; do
+sudo apt-get install -y python3-flask python3-flask-socketio python3-pil \
+  kde-spectacle xdg-desktop-portal xdg-desktop-portal-kde || exit 1
+if apt-cache show libkf6config-bin >/dev/null 2>&1; then
+  sudo apt-get install -y libkf6config-bin qt6-wayland || exit 1
+else
+  sudo apt-get install -y libkf5config-bin qtwayland5 || exit 1
+fi
+for p in python3-simple-websocket; do
   sudo apt-get install -y "$p" -qq 2>/dev/null || true
 done
 
@@ -105,6 +111,12 @@ done
 # cada nueva versión de Python; el servidor usa threading + simple-websocket.
 echo "[*] Instalando dependencias Python..."
 $PIP install --break-system-packages --user -q flask flask-socketio simple-websocket mss 2>/dev/null || true
+"$PYTHON3" -c 'import mss, PIL' || {
+  echo '[!] No se pudieron instalar las dependencias de captura.'
+  exit 1
+}
+
+"$PYTHON3" "$SCRIPT_DIR/desktop_setup.py"
 
 # ── Acceso directo en el menú inicio ─────────────────────────
 APPS_DIR="$HOME/.local/share/applications"

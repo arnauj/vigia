@@ -10,9 +10,15 @@ import unittest
 from unittest.mock import patch
 
 import screen_capture
+import desktop_setup
 
 
 class TestLauncher(unittest.TestCase):
+    def setUp(self):
+        setup = patch.object(desktop_setup, 'configure_kde_capture', return_value=False)
+        self.desktop_setup = setup.start()
+        self.addCleanup(setup.stop)
+
     @classmethod
     def setUpClass(cls):
         spec = importlib.util.spec_from_file_location(
@@ -31,6 +37,7 @@ class TestLauncher(unittest.TestCase):
             self.launcher.main()
         chrome.assert_called_once_with('http://localhost:5001/?capture=server', None)
         start.assert_not_called()
+        self.desktop_setup.assert_called_once_with()
 
     def test_webview_and_browser_fallback_preserve_capture_choice(self):
         with patch.dict('os.environ', {'XDG_CURRENT_DESKTOP': 'KDE'}), \
