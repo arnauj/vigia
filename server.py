@@ -14,6 +14,7 @@ import base64
 import threading
 import subprocess
 import webbrowser
+import shutil
 import platform_utils
 import screen_capture
 from streaming import PRESETS, normalize_config
@@ -156,12 +157,16 @@ def dashboard():
     # Chrome, Firefox y Chromium se identifican con su nombre en el UA.
     # WebKit2GTK (el launcher) usa AppleWebKit pero sin esos tokens.
     is_launcher = not any(b in ua for b in ('Chrome/', 'Chromium/', 'Firefox/'))
-    # En KDE/Wayland el selector Chrome → portal puede quedarse con Compartir
-    # deshabilitado. El panel local ofrece primero la captura directa de KDE.
+    # El lanzador conoce la sesión gráfica aunque Flask haya arrancado antes
+    # del login. Su elección explícita no depende del entorno de systemd.
+    capture_mode = request.args.get('capture')
     desktop = os.environ.get('XDG_CURRENT_DESKTOP', '').lower()
+    kde_capture = any(d in desktop for d in ('kde', 'plasma')) or (
+        not desktop and shutil.which('spectacle') is not None)
     prefer_server_capture = (request.remote_addr in ('127.0.0.1', '::1')
-                             and screen_capture.is_wayland()
-                             and any(d in desktop for d in ('kde', 'plasma')))
+                             and (capture_mode == 'server' or (
+                                 capture_mode != 'browser'
+                                 and screen_capture.is_wayland() and kde_capture)))
     resp = make_response(render_template('dashboard.html', is_launcher=is_launcher,
                                         prefer_server_capture=prefer_server_capture,
                                         stream_presets=PRESETS,

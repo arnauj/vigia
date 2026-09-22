@@ -155,10 +155,26 @@ RestartSec=5
 WantedBy=default.target
 EOD
   chown "$REAL_USER:" "$SYSTEMD_DIR/vigia-servidor.service"
-  su - "$REAL_USER" -c \
-    "systemctl --user daemon-reload && systemctl --user enable --now vigia-servidor" 2>/dev/null || true
   loginctl enable-linger "$REAL_USER" 2>/dev/null || true
-  echo "Servicio 'vigia-servidor' habilitado para $REAL_USER."
+  REAL_UID="$(id -u "$REAL_USER")"
+  _user_systemctl() {
+    # su - elimina el entorno del bus de usuario. Indicarlo explícitamente
+    # permite actualizar el servicio también al instalar con sudo apt/dpkg.
+    runuser -u "$REAL_USER" -- env \
+      "XDG_RUNTIME_DIR=/run/user/$REAL_UID" \
+      "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$REAL_UID/bus" \
+      systemctl --user "$@"
+  }
+  # enable --now no reinicia un servicio que ya está activo: conservaría el
+  # código y las plantillas anteriores pese a haber reinstalado el paquete.
+  if _user_systemctl daemon-reload && \
+     _user_systemctl enable vigia-servidor && \
+     _user_systemctl restart vigia-servidor; then
+    echo "Servicio 'vigia-servidor' actualizado y reiniciado para $REAL_USER."
+  else
+    echo "[!] No se pudo reiniciar el servidor. En la sesión del profesor ejecuta:"
+    echo "    systemctl --user restart vigia-servidor"
+  fi
 fi
 
 # ── Sudo sin contraseña (necesario para exec_command remoto) ──

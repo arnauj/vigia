@@ -51,8 +51,10 @@ def main():
     url = f'http://127.0.0.1:{port}'
     students = []
     errors = []
-    with patch.dict(os.environ, {'XDG_CURRENT_DESKTOP': 'KDE'}), \
-         patch.object(server.screen_capture, 'is_wayland', return_value=True), \
+    # El servicio puede arrancar antes del login y desconocer la sesión KDE.
+    # La URL del lanzador debe bastar para evitar el selector nativo bloqueado.
+    with patch.dict(os.environ, {'XDG_CURRENT_DESKTOP': ''}), \
+         patch.object(server.screen_capture, 'is_wayland', return_value=False), \
          patch.object(server.screen_capture, 'create_capturer', side_effect=create_capture):
         threading.Thread(target=lambda: server.socketio.run(
             server.app, host='127.0.0.1', port=port,
@@ -90,6 +92,8 @@ def main():
                     };
                 ''')
                 page.goto(url, wait_until='networkidle')
+                assert not page.evaluate('PREFER_SERVER_CAPTURE')
+                page.goto(url + '/?capture=server', wait_until='networkidle')
                 page.wait_for_function('Object.keys(students).length === 2 && socket.connected')
                 assert page.evaluate('PREFER_SERVER_CAPTURE')
                 page.click('#btn-compartir')

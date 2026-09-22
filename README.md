@@ -84,6 +84,27 @@ quedar deshabilitado. Envía imágenes JPEG (la fluidez depende de Spectacle).
 necesitas compartir solo ese contenido. En X11, Windows y paneles abiertos desde
 otro equipo se mantiene la selección del navegador.
 
+Si al actualizar sigue apareciendo el selector bloqueado de Chrome, **solo hace
+falta actualizar el servidor**, no los clientes. Cierra la ventana de VIGIA,
+reinstala el nuevo paquete con `sudo apt install --reinstall ./vigia-server_1.2_amd64.deb`
+y vuelve a abrir **VIGIA Servidor**. El instalador reinicia el servicio para cargar
+el código nuevo. También puedes abrir `http://localhost:5000/?capture=server`
+en el equipo del profesor para elegir explícitamente la captura directa.
+
+Si KDE muestra **«Tipo de composición no permitido»** al grabar, KWin no está
+usando un compositor OpenGL compatible. Cambiar los clientes de VIGIA no lo
+resuelve y las capturas directas de Spectacle también pueden fallar. Hay que
+revisar el controlador gráfico y la composición del equipo del profesor; no
+basta con reinstalar VIGIA. Para recoger los datos sin cambiar la configuración:
+
+```bash
+qdbus6 org.kde.KWin /KWin org.kde.KWin.supportInformation
+lspci -nnk | grep -A3 -E 'VGA|3D|Display'
+```
+
+El requisito de OpenGL se comprueba en el
+[código de captura de KWin](https://github.com/KDE/kwin/blob/Plasma/6.6/src/plugins/screencast/screencastmanager.cpp).
+
 ### Infraestructura y automatización
 
 - **Sin base de datos** — todo el estado es en memoria. Sin ficheros de configuración ni tablas que mantener.

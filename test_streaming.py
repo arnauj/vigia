@@ -223,6 +223,27 @@ class TestServerStreaming(unittest.TestCase):
         self.assertEqual(self.events(self.student, 'teacher_screen'), [])
         capture.close.assert_called_once()
 
+    def test_service_without_desktop_environment_uses_installed_kde_capture(self):
+        with patch.dict('os.environ', {'XDG_CURRENT_DESKTOP': ''}), \
+             patch.object(self.server.screen_capture, 'is_wayland', return_value=True), \
+             patch.object(self.server.shutil, 'which', return_value='/usr/bin/spectacle'):
+            response = self.server.app.test_client().get('/', environ_base={'REMOTE_ADDR': '127.0.0.1'})
+        self.assertIn('const PREFER_SERVER_CAPTURE = true', response.text)
+
+    def test_launcher_can_choose_capture_independently_of_service_environment(self):
+        for address, query, expected in [
+            ('127.0.0.1', 'server', 'true'),
+            ('::1', 'server', 'true'),
+            ('192.0.2.25', 'server', 'false'),
+            ('127.0.0.1', 'browser', 'false'),
+        ]:
+            with self.subTest(address=address, query=query), \
+                 patch.dict('os.environ', {'XDG_CURRENT_DESKTOP': ''}), \
+                 patch.object(self.server.screen_capture, 'is_wayland', return_value=False):
+                response = self.server.app.test_client().get(
+                    f'/?capture={query}', environ_base={'REMOTE_ADDR': address})
+                self.assertIn(f'const PREFER_SERVER_CAPTURE = {expected}', response.text)
+
     def test_direct_capture_delivers_only_to_selected_students(self):
         from PIL import Image
         other = self.peer()

@@ -246,6 +246,20 @@ def run_browser_fallback(url: str, proc) -> None:  # proc puede ser None
             pass
 
 
+def dashboard_url(port: int) -> str:
+    url = f'http://localhost:{port}/'
+    if platform_utils.IS_LINUX:
+        import screen_capture
+        desktop = os.environ.get('XDG_CURRENT_DESKTOP', '').lower()
+        kde_capture = any(d in desktop for d in ('kde', 'plasma')) or (
+            not desktop and shutil.which('spectacle') is not None)
+        if screen_capture.is_wayland() and kde_capture:
+            # Flask puede ser un servicio iniciado antes de la sesión gráfica.
+            # Elegir aquí la captura directa evita depender de su entorno.
+            url += '?capture=server'
+    return url
+
+
 def main() -> None:
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
     server_py = os.path.join(SCRIPT_DIR, 'server.py')
@@ -295,15 +309,16 @@ def main() -> None:
             proc.kill()
             sys.exit(1)
 
-    # 1) Chrome/Chromium app mode — compartir pantalla funciona perfectamente
-    base_url = f'http://localhost:{port}/'
+    # 1) Chrome/Chromium app mode, con la captura adecuada para esta sesión.
+    base_url = dashboard_url(port)
     if run_chrome_app(base_url, proc):
         return
 
     # 2) WebKit2GTK — fallback si no hay Chrome/Chromium instalado (solo Linux)
     if platform_utils.IS_LINUX:
         print('[VIGIA] Chrome/Chromium no encontrado, usando WebKit2GTK…', file=sys.stderr)
-        launcher_url = f'{base_url}?launcher=1'
+        separator = '&' if '?' in base_url else '?'
+        launcher_url = f'{base_url}{separator}launcher=1'
         try:
             run_webview(launcher_url, proc)
             return
