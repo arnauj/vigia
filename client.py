@@ -250,9 +250,105 @@ try:
     except Exception:
         pass
 
+    def _crf_para(bitrate):
+        """Calidad constante de x264 según el perfil (menos = más nítido)."""
+        if bitrate >= 6_000_000:
+            return 18        # Calidad
+        if bitrate >= 2_500_000:
+            return 23        # Equilibrado
+        return 25            # Ligero
+
+    def _tope_video(encoder):
+        """Tope de bitrate: REMB del navegador, pero nunca < ½ del perfil.
+
+        Chrome arranca el REMB bajo (~300 kbps) y solo lo sube si hay tráfico;
+        con la pantalla quieta casi no lo hay, así que se quedaba bajo y el
+        siguiente cambio salía borroso. En el aula la red sobra: el suelo evita
+        ese falso límite y el REMB sigue recortando hasta la mitad si hay
+        congestión de verdad.
+        """
+        return max(encoder.target_bitrate, _stream_cfg['webrtc_bitrate'] // 2)
+
+    class _Recreacion:
+        """Decide cuándo rehacer el códec (tamaño, fps, perfil o tope ×1.5).
+
+        aiortc lo rehacía cada vez que el REMB variaba >10 % —varias veces por
+        minuto—: cada vez, fotograma clave completo con el control de tasa
+        desde cero = imagen borrosa que se quedaba en las zonas quietas.
+        """
+        _FACTOR, _SEG = 1.5, 5.0
+
+        def __init__(self):
+            self.clave = self.tope = None
+            self.creado = 0.0
+
+        def hace_falta(self, codec, clave, tope):
+            if codec is None or clave != self.clave:
+                return True
+            cambio = max(tope, self.tope) / max(1, min(tope, self.tope))
+            return (cambio >= self._FACTOR
+                    and time.monotonic() - self.creado >= self._SEG)
+
+        def hecho(self, clave, tope):
+            self.clave, self.tope, self.creado = clave, tope, time.monotonic()
+
     import aiortc.codecs as _codecs
+    _Vp8Base = _codecs.Vp8Encoder
+    try:
+        _vpx_mod = importlib.import_module('aiortc.codecs.vpx')
+        if not hasattr(_vpx_mod, 'CodecContext'):
+            raise ImportError('VP8 de aiortc antiguo (cffi)')
+
+        class _Vp8EncoderNitido(_Vp8Base):
+            """VP8 (aiortc ≥1.10, sobre PyAV) apto para texto de pantalla.
+
+            El original: CBR estricto, se rehace con cada cambio de REMB y
+            activa el filtro de ruido (noise-sensitivity=4), que difumina el
+            texto fino. Aquí: calidad constrained (crf + tope), sin filtro de
+            ruido, modo contenido de pantalla y recreación con histéresis.
+            """
+
+            def encode(self, frame, force_keyframe=False):
+                if frame.format.name != 'yuv420p':
+                    frame = frame.reformat(format='yuv420p')
+                if not hasattr(self, '_vigia_rec'):
+                    self._vigia_rec = _Recreacion()
+                tope = _tope_video(self)
+                clave = (frame.width, frame.height, _stream_cfg['webrtc_bitrate'])
+                if self._vigia_rec.hace_falta(self.codec, clave, tope):
+                    c = av.CodecContext.create('libvpx', 'w')
+                    c.width, c.height = frame.width, frame.height
+                    c.bit_rate = tope
+                    c.pix_fmt = 'yuv420p'
+                    c.gop_size = 3000
+                    c.qmin, c.qmax = 2, 50
+                    c.options = {
+                        'crf': str(_crf_para(_stream_cfg['webrtc_bitrate']) // 2),
+                        'maxrate': str(tope), 'bufsize': str(tope * 2),
+                        'cpu-used': '-6', 'deadline': 'realtime',
+                        'lag-in-frames': '0', 'noise-sensitivity': '0',
+                        'screen-content-mode': '1', 'partitions': '0',
+                        'static-thresh': '0', 'undershoot-pct': '100',
+                        'overshoot-pct': '50',
+                    }
+                    c.thread_count = _vpx_mod.number_of_threads(
+                        frame.width * frame.height, os.cpu_count() or 1)
+                    self.codec = c
+                    self._vigia_rec.hecho(clave, tope)
+                frame.pict_type = (av.video.frame.PictureType.I if force_keyframe
+                                   else av.video.frame.PictureType.NONE)
+                data = b''.join(bytes(p) for p in self.codec.encode(frame))
+                payloads = self._packetize(data, self.picture_id)
+                ts = _vpx_mod.convert_timebase(frame.pts, frame.time_base,
+                                               _vpx_mod.VIDEO_TIME_BASE)
+                self.picture_id = (self.picture_id + 1) % (1 << 15)
+                return payloads, ts
+
+        _Vp8Base = _Vp8EncoderNitido
+    except Exception:
+        pass
     _codecs.Vp8Encoder = profile_encoder(
-        _codecs.Vp8Encoder, lambda: _stream_cfg['webrtc_bitrate'])
+        _Vp8Base, lambda: _stream_cfg['webrtc_bitrate'])
 
     # ── H.264 en vez de VP8 ──────────────────────────────────────────────────
     # x264 con preset ultrafast + tune zerolatency codifica 1080p de escritorio
@@ -268,37 +364,59 @@ try:
         av.CodecContext.create('libx264', 'w')   # lanza si no está compilado
 
         class _H264EncoderRapido(_H264Base):
-            """H264Encoder de aiortc con preset de tiempo real y multihilo."""
+            """H264Encoder de aiortc con calidad constante y multihilo.
+
+            Por qué no se usa el _encode_frame de aiortc (la imagen se ponía
+            borrosa «a ratos» en TODOS los perfiles):
+              1. Recreaba x264 cada vez que el REMB del navegador variaba más
+                 de un 10 % (varias veces por minuto). Cada recreación es un
+                 fotograma clave completo con el control de tasa desde cero:
+                 sale borroso y, como las zonas quietas se codifican como
+                 «skip», esa borrosidad se quedaba hasta que la zona cambiaba.
+              2. Tasa media (ABR): un cambio grande de pantalla (scroll, abrir
+                 una ventana) no cabía en el presupuesto de UN frame y salía
+                 borroso; la pantalla quieta ya no lo refinaba.
+            Aquí: CRF (calidad constante) con tope VBV = bitrate del perfil /
+            REMB, y el códec solo se recrea si cambian tamaño/fps o el tope
+            varía de verdad (×1.5, como mucho cada 5 s).
+            """
+            def _crear_codec(self, frame, tope):
+                c = av.CodecContext.create('libx264', 'w')
+                c.width, c.height = frame.width, frame.height
+                c.pix_fmt = 'yuv420p'
+                c.framerate = fractions.Fraction(_stream_cfg['webrtc_fps'], 1)
+                # Conservar el reloj real también dentro de x264: una
+                # base de 1/fps redondea dos frames cercanos al mismo PTS.
+                c.time_base = fractions.Fraction(1, 90000)
+                c.thread_count = max(1, min(8, os.cpu_count() or 1))
+                # Sin 'level': x264 elige el que corresponda a la
+                # resolución (el 3.1 fijo de aiortc se queda corto a 1080p).
+                # bufsize = 2 s de tope: un cambio de pantalla completo cabe
+                # en UN frame nítido (~3 Mbit: ~3 ms en gigabit, ~30 ms en
+                # 100 Mbps). Con ½ s el frame del cambio salía muy borroso y
+                # tardaba 5-10 frames en afinarse (medido).
+                c.options = {'preset': 'ultrafast', 'tune': 'zerolatency',
+                             'crf': str(_crf_para(_stream_cfg['webrtc_bitrate'])),
+                             'maxrate': str(int(tope)),
+                             'bufsize': str(int(tope * 2))}
+                c.profile = 'Baseline'
+                self.codec = c
+                self.codec_buffering = False
 
             def _encode_frame(self, frame, force_keyframe):
-                # Misma condición de invalidación que la clase base: si se
-                # adelanta aquí, la base encuentra el códec ya creado (con
-                # NUESTRAS opciones) y no lo rehace con las suyas.
-                if self.codec is not None and (
-                        frame.width != self.codec.width
-                        or frame.height != self.codec.height
-                        or self.codec.framerate != _stream_cfg['webrtc_fps']
-                        or abs(self.target_bitrate - self.codec.bit_rate)
-                        / self.codec.bit_rate > 0.1):
-                    self.buffer_data = b""
-                    self.buffer_pts = None
-                    self.codec = None
-                if self.codec is None:
-                    c = av.CodecContext.create('libx264', 'w')
-                    c.width, c.height = frame.width, frame.height
-                    c.bit_rate = self.target_bitrate
-                    c.pix_fmt = 'yuv420p'
-                    c.framerate = fractions.Fraction(_stream_cfg['webrtc_fps'], 1)
-                    # Conservar el reloj real también dentro de x264: una
-                    # base de 1/fps redondea dos frames cercanos al mismo PTS.
-                    c.time_base = fractions.Fraction(1, 90000)
-                    c.thread_count = max(1, min(8, os.cpu_count() or 1))
-                    # Sin 'level': x264 elige el que corresponda a la
-                    # resolución (el 3.1 fijo de aiortc se queda corto a 1080p).
-                    c.options = {'preset': 'ultrafast', 'tune': 'zerolatency'}
-                    c.profile = 'Baseline'
-                    self.codec = c
-                return super()._encode_frame(frame, force_keyframe)
+                if not hasattr(self, '_vigia_rec'):
+                    self._vigia_rec = _Recreacion()
+                tope = _tope_video(self)
+                clave = (frame.width, frame.height, _stream_cfg['webrtc_fps'],
+                         _stream_cfg['webrtc_bitrate'])
+                if self._vigia_rec.hace_falta(self.codec, clave, tope):
+                    self._crear_codec(frame, tope)
+                    self._vigia_rec.hecho(clave, tope)
+                frame.pict_type = (av.video.frame.PictureType.I if force_keyframe
+                                   else av.video.frame.PictureType.NONE)
+                data = b''.join(bytes(p) for p in self.codec.encode(frame))
+                if data:
+                    yield from self._split_bitstream(data)
 
         _codecs.H264Encoder = profile_encoder(
             _H264EncoderRapido, lambda: _stream_cfg['webrtc_bitrate'])
