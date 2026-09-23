@@ -201,6 +201,15 @@ client.py ───────────────────────�
       de ~9 ms/frame (VP8) a ~3 ms. Solo se activa si libx264 existe de verdad
       en el libavcodec del equipo; si no, VP8 (nunca vídeo negro). VP8 va al
       final de las preferencias, así que un Chromium sin H.264 sigue conectando.
+    - NITIDEZ (imagen «borrosa a ratos»): aiortc rehacía el códec cada vez que
+      el REMB de Chrome variaba >10 % (fotograma clave + control de tasa desde
+      cero; las zonas quietas se quedaban borrosas) y usaba tasa media/CBR.
+      Ahora H.264 va en CRF (_crf_para: 18/23/25 según perfil) y VP8 (aiortc
+      sobre PyAV) en calidad constrained sin filtro de ruido, ambos con tope
+      VBV = max(REMB, ½ perfil) y búfer de 2 s. _Recreacion solo rehace el
+      códec si cambian tamaño/fps/perfil o el tope ×1.5 (máx. cada 5 s).
+      Medido con texto 1080p: tras un cambio, +5 frames 49-53 dB (antes 29-38)
+      a 3 Mbps; solo el frame exacto del cambio sale algo más suave.
     - _procesar_offer: crea RTCPeerConnection, añade track, gestiona
       DataChannel entrante (llama a on_do_input con los mensajes JSON).
     - _webrtc_activo = True cuando ICE conecta; suprime envío JPEG.
