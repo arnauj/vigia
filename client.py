@@ -854,6 +854,7 @@ if WEBRTC_OK:
             self._ewma       = None   # media móvil del intervalo real entre frames
             self._ult_ajuste = 0.0
             self._ult_recv   = None
+            self._t_grab     = 0.0    # espera+copia de la última captura (s)
             self._muestras   = 0
             self._ewma_antes = None   # ritmo previo a la última bajada
             self._congelado  = 0.0    # instante hasta el que no se adapta
@@ -919,10 +920,15 @@ if WEBRTC_OK:
             """Vigila el ritmo real y ajusta la resolución si el equipo no llega.
 
             El intervalo entre llamadas a recv() incluye captura, escalado y
-            codificación: es la medida directa de lo que aguanta el equipo.
+            codificación. Se DESCUENTA el tiempo de la captura: PipeWire bloquea
+            hasta que la pantalla cambia (con la pantalla quieta KWin solo manda
+            el keepalive de 1 fps) y eso no es lentitud del equipo. Antes esa
+            espera se leía como «no llego», se bajaba la resolución, no mejoraba
+            y se volvía a subir: la calidad oscilaba sola. Bajar la resolución
+            solo abarata escalado + codificación, así que es lo único a medir.
             """
             if self._ult_recv is not None:
-                dt = ahora - self._ult_recv
+                dt = max(0.0, ahora - self._ult_recv - self._t_grab)
                 base = periodo if self._ewma is None else self._ewma
                 # Media lenta (memoria ~12 frames): un tirón puntual del equipo
                 # no debe bastar para cambiar de resolución.
@@ -1016,7 +1022,9 @@ if WEBRTC_OK:
                 if hasattr(self._cap, 'grab_raw'):
                     # Vía rápida (PipeWire en Wayland, mss en X11): frame BGRx
                     # crudo, sin PIL. Igual que RustDesk: captura nativa → swscale.
+                    t_grab = time.perf_counter()
                     data, w, h, stride = self._cap.grab_raw()
+                    self._t_grab = time.perf_counter() - t_grab
                     arr = np.frombuffer(data, dtype=np.uint8)
                     if stride == w * 4:
                         arr = arr.reshape(h, w, 4)
@@ -1026,7 +1034,9 @@ if WEBRTC_OK:
                     frame = self._a_frame(arr, 'bgra')
                 else:
                     # Backends CLI (spectacle/grim): siguen entregando PIL
+                    t_grab = time.perf_counter()
                     img = self._cap.grab()
+                    self._t_grab = time.perf_counter() - t_grab
                     frame = self._a_frame(np.asarray(img), 'rgb24')
                 self._last_frame = frame
                 return frame

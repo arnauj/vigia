@@ -136,6 +136,8 @@ templates/dashboard.html ──────────────────�
     - 'vigia-mouse' (ordered:false, maxRetransmits:0) → ratón (UDP-like)
     - 'vigia-input' (ordered:true) → teclado (fiable, en orden)
   _enviarInput() enruta ratón a vigia-mouse y teclado a vigia-input;
+  _moverRaton(): máx. 1 movimiento/10 ms SIN perder el último (envío
+  diferido) y, parado 80 ms, reenvía la posición final por el canal fiable;
   usa Socket.IO como fallback si los canales no están abiertos.
   _webrtcActivo se activa cuando llega el track de vídeo (ontrack),
   tanto en modo ver como en modo control.
@@ -178,7 +180,10 @@ client.py ───────────────────────�
       retardo del control remoto crecía sin parar.
     - Resolución ADAPTATIVA (_ESCALONES 1920→1600→1280→1024→800). Se mide el
       intervalo real entre llamadas a recv() (captura+escala+codificación) y
-      se baja un escalón si no se llega al objetivo. Si bajar NO mejora el
+      se baja un escalón si no se llega al objetivo. Del intervalo se DESCUENTA
+      el tiempo de captura (_t_grab): PipeWire bloquea hasta que la pantalla
+      cambia (pantalla quieta = keepalive de 1 fps) y medirlo hacía oscilar
+      la resolución sin motivo; bajar solo abarata escalado + codificación. Si bajar NO mejora el
       ritmo (cuello de botella en la captura, p. ej. spectacle), se vuelve al
       escalón anterior y se congela la adaptación (60 s, duplicándose).
     - Topes de bitrate de aiortc elevados de 1.5 a 8 Mbps al importar. OJO: el
