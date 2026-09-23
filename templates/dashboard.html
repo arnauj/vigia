@@ -2338,9 +2338,40 @@ function cerrarPortapapeles() {
   if (_liveviewSid) document.getElementById('liveview-overlay').focus();
 }
 
-function _enviarInput(payload) {
+// Movimiento del ratón: como mucho 1 envío cada 10 ms, pero SIN perder el
+// último. Antes el evento que caía dentro de la ventana se descartaba y, al
+// parar el ratón, el cursor del alumno se quedaba unos píxeles por detrás.
+// Además, como el canal de movimiento no retransmite, al quedarse quieto se
+// reenvía la posición final UNA vez por el canal fiable.
+let _mouseTrailTimer = null, _mouseIdleTimer = null, _mousePending = null;
+function _moverRaton(x, y) {
+  _mousePending = { x, y };
+  const espera = 10 - (performance.now() - _lastMouseSend);
+  if (espera <= 0) _flushRaton();
+  else if (!_mouseTrailTimer) _mouseTrailTimer = setTimeout(_flushRaton, espera);
+}
+function _flushRaton() {
+  clearTimeout(_mouseTrailTimer); _mouseTrailTimer = null;
+  const p = _mousePending; _mousePending = null;
+  if (!p || !_liveviewSid || _liveviewMode !== 'control') return;
+  _lastMouseSend = performance.now();
+  _enviarInput({ sid: _liveviewSid, type: 'mousemove', x: p.x, y: p.y });
+  clearTimeout(_mouseIdleTimer);
+  _mouseIdleTimer = setTimeout(() => {
+    _mouseIdleTimer = null;
+    if (_liveviewSid && _liveviewMode === 'control')
+      _enviarInput({ sid: _liveviewSid, type: 'mousemove', x: p.x, y: p.y }, true);
+  }, 80);
+}
+function _cancelarMovimientoPendiente() {
+  clearTimeout(_mouseTrailTimer); _mouseTrailTimer = null;
+  clearTimeout(_mouseIdleTimer);  _mouseIdleTimer = null;
+  _mousePending = null;
+}
+
+function _enviarInput(payload, fiable = false) {
   const tipo = payload.type;
-  const esMovimiento = tipo === 'mousemove';
+  const esMovimiento = tipo === 'mousemove' && !fiable;
   const channel = esMovimiento && _dc_mouse?.readyState === 'open' ? _dc_mouse : _dc_kbd;
   if (channel?.readyState === 'open') {
     // No encolar posiciones viejas detrás de un canal congestionado.
@@ -2524,11 +2555,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
   body.addEventListener('mousemove', (e) => {
     if (_liveviewMode !== 'control' || !_liveviewSid) return;
-    const now = Date.now();
-    if (now - _lastMouseSend < 10) return;   // throttle ≈ 100 eventos/s
-    _lastMouseSend = now;
     const { x, y } = _traducirCoords(e);
     if (_overlayEnabled && _overlayDrawMode && _overlayTool === 'brush' && (e.buttons & 1)) {
+      const now = performance.now();
+      if (now - _lastMouseSend < 10) return;   // throttle ≈ 100 eventos/s
+      _lastMouseSend = now;
       const p0 = _overlayLastPoint || { x, y };
       _emitOverlay({
         type: 'overlay_draw',
@@ -2540,7 +2571,7 @@ document.addEventListener('DOMContentLoaded', function () {
       _overlayLastPoint = { x, y };
       return;
     }
-    _enviarInput({ sid: _liveviewSid, type: 'mousemove', x, y });
+    _moverRaton(x, y);
   });
 
   body.addEventListener('mousedown', (e) => {
@@ -2576,6 +2607,7 @@ document.addEventListener('DOMContentLoaded', function () {
       return;
     }
     ov.focus();
+    _cancelarMovimientoPendiente();   // el clic ya lleva su posición
     const btn = ['left','middle','right'][e.button] || 'left';
     const mods = [];
     if (e.ctrlKey)  mods.push('ctrl');
@@ -2592,6 +2624,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     const { x, y } = _traducirCoords(e);
     const btn = ['left','middle','right'][e.button] || 'left';
+    _cancelarMovimientoPendiente();
     _enviarInput({ sid: _liveviewSid, type: 'mouseup', x, y, button: btn });
   });
 
