@@ -228,7 +228,7 @@ instalar_cliente.sh ────────────────────
   Arranca el cliente inmediatamente sin esperar al siguiente reinicio.
 
 test_remote_control.py ─────────────────────────────────────────────
-  Suite de tests (unittest) para el control remoto. 77 tests. Ejecutar:
+  Suite de tests (unittest) para el control remoto. 82 tests. Ejecutar:
     python3 test_remote_control.py
   Cubre: mapas de teclas xdotool, _procesar_input (ratón + teclado),
   backend ydotool (Wayland), teclado por uinput (vigia_input), caché de
@@ -324,7 +324,8 @@ Dashboard → Cliente            : eventos teclado (RTCDataChannel 'vigia-input'
   4. *Capturar una sola vez*: miniaturas y WebRTC comparten frame con `max_age`; capturar dos veces satura el appsink de PipeWire (max-buffers=1) y el compositor.
   5. *No reenviar lo que no cambia*: la pantalla compartida del profesor omite los frames idénticos (dashboard y servidor).
   6. *Teclado sin fork*: con el demonio `vigia-input` nuevo las teclas van por uinput; con uno antiguo, cada pulsación cuesta un proceso ydotool.
-- **Coordenadas en modo control WebRTC:** el `<video>` usa `max-width:100%;max-height:100%` (no `width:100%;height:100%`) para que `getBoundingClientRect()` devuelva el área real del contenido, igual que el `<img>`.
+- **Tamaño de la vista en vivo:** `<img>` y `<video>` usan `width:100%;height:100%;object-fit:contain` (NO `max-width/max-height`: con eso se pintaban a su tamaño intrínseco y la vista encogía/crecía cada vez que la resolución adaptativa del alumno cambiaba de escalón). `_traducirCoords`/`_canvasCoords` descuentan las bandas negras con la relación de aspecto de `screen_info`.
+- **Teclado español en Wayland:** uinput/ydotool inyectan códigos físicos y `ydotool type` asume teclado US («/» salía como «-»). `client.py` traduce cada carácter con `_LAYOUT_ES` (Shift, AltGr y teclas muertas ´ ¨ ` ^) y lo inyecta por el demonio `vigia-input` o `ydotool key`; `ydotool type` solo queda para caracteres que no existen en el teclado español.
 - **Adjuntos en mensajes:** el dashboard codifica los archivos en base64 (límite 10 MB total) y los envía junto al mensaje. El cliente los decodifica y guarda en `~/Descargas`, con botón para abrir cada uno con `xdg-open`.
 - **IP por defecto del cliente:** `instalar_cliente.sh` auto-detecta la IP local con `ip route get 1.1.1.1` y sustituye el último octeto por `.2` para apuntar al servidor por convención.
 - **Web App Manifest.** `server.py` sirve `/manifest.json` con iconos `icon-192.png` e `icon-512.png` para que Chrome muestre el icono de VIGIA en lugar del icono genérico de Chrome en modo `--app`.

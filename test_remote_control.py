@@ -506,8 +506,21 @@ class TestProcesarInputYdotool(unittest.TestCase):
         self.assertIn(['/usr/bin/ydotool', 'mousemove', '-w', '-x', '0', '-y', '-3'], calls)
 
     def test_type_texto(self):
+        # Con códigos físicos del teclado español, no `ydotool type` (US).
         calls = self._run({'type': 'type', 'char': 'hola'})
-        self.assertIn(['/usr/bin/ydotool', 'type', '--', 'hola'], calls)
+        self.assertEqual(calls, [['/usr/bin/ydotool', 'key',
+                                  '35:1', '35:0', '24:1', '24:0',
+                                  '38:1', '38:0', '30:1', '30:0']])
+
+    def test_type_barra_teclado_espanol(self):
+        # «/» en español es Shift+7; `ydotool type` pulsaba KEY_SLASH = «-».
+        calls = self._run({'type': 'type', 'char': '/'})
+        self.assertEqual(calls, [['/usr/bin/ydotool', 'key',
+                                  '42:1', '8:1', '8:0', '42:0']])
+
+    def test_type_caracter_fuera_del_teclado_usa_type(self):
+        calls = self._run({'type': 'type', 'char': '→'})
+        self.assertEqual(calls, [['/usr/bin/ydotool', 'type', '--', '→']])
 
     def test_keypress_enter(self):
         calls = self._run({'type': 'keypress', 'key': 'enter'})
@@ -618,7 +631,7 @@ class TestVigiaInputTeclado(unittest.TestCase):
 
     def test_tecla_desconocida_cae_a_ydotool(self):
         with patch.object(client, '_procesar_input_ydo') as ydo:
-            client._procesar_input({'type': 'keypress', 'key': 'ñ'})
+            client._procesar_input({'type': 'keypress', 'key': 'f13'})
         self.assertEqual(self.vi.calls, [])
         ydo.assert_called_once()
 
@@ -633,13 +646,38 @@ class TestVigiaInputTeclado(unittest.TestCase):
             client._procesar_input({'type': 'keypress', 'key': 'enter'})
         self.assertEqual(self.vi.calls, [('key', 28, 1), ('key', 28, 0)])
 
-    def test_escritura_sigue_yendo_por_ydotool(self):
-        # 'type' admite cualquier carácter Unicode: eso lo resuelve ydotool
-        # (remapea el teclado), no los códigos de kernel.
+    def test_caracter_fuera_del_teclado_va_por_ydotool(self):
+        # Solo lo que no existe en el teclado español cae a `ydotool type`.
         with patch.object(client, '_procesar_input_ydo') as ydo:
-            client._procesar_input({'type': 'type', 'char': 'á'})
+            client._procesar_input({'type': 'type', 'char': '→'})
         self.assertEqual(self.vi.calls, [])
         ydo.assert_called_once()
+
+    def _teclas(self, texto):
+        client._procesar_input({'type': 'type', 'char': texto})
+        return [(c, s) for _, c, s in self.vi.calls]
+
+    def test_simbolos_teclado_espanol(self):
+        casos = {
+            '/': [(42, 1), (8, 1), (8, 0), (42, 0)],     # Shift+7
+            '-': [(53, 1), (53, 0)],                      # tecla junto a Shift der.
+            '(': [(42, 1), (9, 1), (9, 0), (42, 0)],      # Shift+8
+            '@': [(100, 1), (3, 1), (3, 0), (100, 0)],    # AltGr+2
+            'ñ': [(39, 1), (39, 0)],
+            'Ñ': [(42, 1), (39, 1), (39, 0), (42, 0)],
+        }
+        for ch, esperado in casos.items():
+            self.vi.calls.clear()
+            self.assertEqual(self._teclas(ch), esperado, ch)
+
+    def test_tilde_con_tecla_muerta(self):
+        # á = ´ (tecla muerta, código 40) + a
+        self.assertEqual(self._teclas('á'), [(40, 1), (40, 0), (30, 1), (30, 0)])
+
+    def test_keycombo_con_simbolo(self):
+        client._procesar_input({'type': 'keycombo', 'combo': 'ctrl+-'})
+        self.assertEqual(self.vi.calls, [('key', 29, 1), ('key', 53, 1),
+                                         ('key', 53, 0), ('key', 29, 0)])
 
 
 class TestCacheCapturas(unittest.TestCase):

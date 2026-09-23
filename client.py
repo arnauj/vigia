@@ -563,6 +563,75 @@ _YDO_KEY_MAP = {
     'end': 107, 'down': 108, 'pagedown': 109, 'insert': 110, 'delete': 111,
     'win': 125,
 }
+
+# ── Distribución de teclado ESPAÑOL (España) para escribir en Wayland ─────────
+# uinput y ydotool inyectan CÓDIGOS FÍSICOS de tecla, no caracteres: KWin los
+# traduce con la distribución del alumno (es). `ydotool type` asume un teclado
+# US, así que «/» salía como KEY_SLASH = «-» en español, «(» como «)», etc.
+# Aquí cada carácter se traduce a la(s) pulsación(es) que lo producen en un
+# teclado español: lista de pasos (modificadoras, código). Varios pasos = tecla
+# muerta (á = ´ + a).
+_KC_SHIFT, _KC_ALTGR = 42, 100          # KEY_LEFTSHIFT, KEY_RIGHTALT (AltGr)
+_KC_ACUTE, _KC_GRAVE, _KC_SPACE = 40, 26, 57
+
+def _construir_layout_es():
+    S, A = (_KC_SHIFT,), (_KC_ALTGR,)
+    m = {}
+    for c, code in _YDO_KEY_MAP.items():
+        if len(c) == 1:                       # letras y dígitos
+            m[c] = [((), code)]
+            if c.isalpha():
+                m[c.upper()] = [(S, code)]
+    m[' '] = [((), _KC_SPACE)]
+    base = {'º': 41, "'": 12, '¡': 13, '+': 27, 'ñ': 39, 'ç': 43,
+            '<': 86, ',': 51, '.': 52, '-': 53}
+    shift = {'ª': 41, '!': 2, '"': 3, '·': 4, '$': 5, '%': 6, '&': 7,
+             '/': 8, '(': 9, ')': 10, '=': 11, '?': 12, '¿': 13, '*': 27,
+             'Ñ': 39, 'Ç': 43, '>': 86, ';': 51, ':': 52, '_': 53}
+    altgr = {'\\': 41, '|': 2, '@': 3, '#': 4, '~': 5, '½': 6, '¬': 7,
+             '€': 18, '[': 26, ']': 27, '{': 40, '}': 43}
+    for tabla, mods in ((base, ()), (shift, S), (altgr, A)):
+        for c, code in tabla.items():
+            m[c] = [(mods, code)]
+    # Teclas muertas: ´ (40), ¨ (Shift+40), ` (26), ^ (Shift+26)
+    muertas = (((), _KC_ACUTE, 'áéíóú', '´'), (S, _KC_ACUTE, 'äëïöü', '¨'),
+               ((), _KC_GRAVE, 'àèìòù', '`'), (S, _KC_GRAVE, 'âêîôû', '^'))
+    for mods, code, vocales, suelta in muertas:
+        for acentuada, vocal in zip(vocales, 'aeiou'):
+            v = _YDO_KEY_MAP[vocal]
+            m[acentuada] = [(mods, code), ((), v)]
+            m[acentuada.upper()] = [(mods, code), (S, v)]
+        m[suelta] = [(mods, code), ((), _KC_SPACE)]
+    return m
+
+_LAYOUT_ES = _construir_layout_es()
+
+def _codigo_tecla(nombre):
+    """Código de kernel de una tecla de un keycombo ('ctrl', 'a', '-'…)."""
+    code = _YDO_KEY_MAP.get(nombre.lower())
+    if code is None and len(nombre) == 1:
+        pasos = _LAYOUT_ES.get(nombre.lower()) or _LAYOUT_ES.get(nombre)
+        if pasos and len(pasos) == 1 and not pasos[0][0]:
+            code = pasos[0][1]
+    return code
+
+def _pulsaciones_es(texto):
+    """Traduce texto a eventos (código, estado) para un teclado español.
+
+    Devuelve None si algún carácter no existe en el teclado español (se deja
+    entonces a `ydotool type` como último recurso).
+    """
+    eventos = []
+    for ch in texto:
+        pasos = _LAYOUT_ES.get(ch)
+        if pasos is None:
+            return None
+        for mods, code in pasos:
+            eventos += [(mm, 1) for mm in mods]
+            eventos += [(code, 1), (code, 0)]
+            eventos += [(mm, 0) for mm in reversed(mods)]
+    return eventos
+
 # Botones de ratón ydotool: código base | 0x40 (down) / 0x80 (up)
 _BTN_MAP_YDO = {'left': 0x00, 'right': 0x01, 'middle': 0x02}
 
@@ -1115,11 +1184,17 @@ def _procesar_input_ydo(tipo, data, x, y):
         return
     if tipo == 'type':
         char = data.get('char', '')
-        if char:
+        if not char:
+            return
+        eventos = _pulsaciones_es(char)
+        if eventos:
+            # Códigos físicos del teclado español: `ydotool type` asume US.
+            _ydo_sync('key', *[f'{c}:{st}' for c, st in eventos])
+        else:
             _ydo_sync('type', *_YDO_TYPE_ARGS, '--', char)
         return
     if tipo in ('keypress', 'keydown', 'keyup'):
-        code = _YDO_KEY_MAP.get(data.get('key', '').lower())
+        code = _codigo_tecla(data.get('key', ''))
         if code is None:
             return
         if tipo == 'keypress':
@@ -1131,7 +1206,7 @@ def _procesar_input_ydo(tipo, data, x, y):
         return
     if tipo == 'keycombo':
         combo = data.get('combo', '')
-        codes = [_YDO_KEY_MAP.get(p.lower()) for p in combo.split('+') if p]
+        codes = [_codigo_tecla(p) for p in combo.split('+') if p]
         if not codes or None in codes:
             return
         args = [f'{c}:1' for c in codes] + [f'{c}:0' for c in reversed(codes)]
@@ -1196,15 +1271,23 @@ def _procesar_teclado_vigia(tipo, data):
     idéntico — pero sin lanzar un proceso por pulsación. Las teclas que no estén
     en el mapa se devuelven como no tratadas para que las haga ydotool.
     """
+    if tipo == 'type':
+        eventos = _pulsaciones_es(data.get('char', ''))
+        if not eventos:
+            return False
+        ok = True
+        for code, estado in eventos:
+            ok = _VIGIA_INPUT.key(code, estado) and ok
+        return ok
     if tipo in ('keypress', 'keydown', 'keyup'):
-        code = _YDO_KEY_MAP.get(data.get('key', '').lower())
+        code = _codigo_tecla(data.get('key', ''))
         if code is None:
             return False
         if tipo == 'keypress':
             return bool(_VIGIA_INPUT.key(code, 1) and _VIGIA_INPUT.key(code, 0))
         return _VIGIA_INPUT.key(code, 1 if tipo == 'keydown' else 0)
     if tipo == 'keycombo':
-        codes = [_YDO_KEY_MAP.get(p.lower())
+        codes = [_codigo_tecla(p)
                  for p in data.get('combo', '').split('+') if p]
         if not codes or None in codes:
             return False
@@ -1237,7 +1320,7 @@ def _procesar_input(data):
 
     # Teclas por el mismo demonio uinput si lo soporta: ahorra un fork+exec de
     # ydotool por pulsación (lo que hacía «pegajoso» escribir en remoto).
-    if tipo in ('keypress', 'keydown', 'keyup', 'keycombo') \
+    if tipo in ('type', 'keypress', 'keydown', 'keyup', 'keycombo') \
             and _vi_teclado_disponible():
         if _procesar_teclado_vigia(tipo, data):
             return
