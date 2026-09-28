@@ -773,6 +773,46 @@ class TestStreamProfesor(unittest.TestCase):
         self.assertEqual(restantes, [4, 5])
 
 
+class TestVentanaProfesorEncima(unittest.TestCase):
+    """El profesor decide si su pantalla compartida tapa las ventanas del alumno."""
+
+    def setUp(self):
+        self._antes = client._prof_encima
+        self.addCleanup(setattr, client, '_prof_encima', self._antes)
+
+    def _ventana(self):
+        v = object.__new__(client._VentanaProfesor)
+        v.top = MagicMock()
+        v.encima = None
+        return v
+
+    def test_por_defecto_no_se_fija(self):
+        import ast
+        with open(client.__file__, encoding='utf-8') as f:
+            arbol = ast.parse(f.read())
+        valores = [n.value.value for n in arbol.body if isinstance(n, ast.Assign)
+                   and any(getattr(t, 'id', '') == '_prof_encima' for t in n.targets)]
+        self.assertEqual(valores, [False])
+
+    def test_ajuste_del_aula_llega_al_alumno(self):
+        client.on_class_settings({'teacher_on_top': True})
+        self.assertTrue(client._prof_encima)
+        client.on_class_settings({'teacher_on_top': 'si'})  # inválido: se ignora
+        self.assertTrue(client._prof_encima)
+        client.on_class_settings({'teacher_on_top': False})
+        self.assertFalse(client._prof_encima)
+
+    def test_cambia_topmost_solo_cuando_hace_falta(self):
+        v = self._ventana()
+        v.fijar_encima(False)
+        v.top.attributes.assert_called_once_with('-topmost', False)
+        v.fijar_encima(False)
+        v.top.attributes.assert_called_once()
+        v.fijar_encima(True)
+        v.top.attributes.assert_called_with('-topmost', True)
+        v.top.lift.assert_called_once()
+
+
 class TestScreenCaptureSession(unittest.TestCase):
     """Detección de tipo de sesión en screen_capture (Wayland vs X11)."""
 
@@ -847,6 +887,7 @@ if __name__ == '__main__':
                 TestCoordenadas, TestDataChannelRouting,
                 TestProcesarInputYdotool, TestVigiaInputPointer,
                 TestVigiaInputTeclado, TestCacheCapturas, TestStreamProfesor,
+                TestVentanaProfesorEncima,
                 TestScreenCaptureSession):
         suite.addTests(loader.loadTestsFromTestCase(cls))
     runner = unittest.TextTestRunner(verbosity=2)

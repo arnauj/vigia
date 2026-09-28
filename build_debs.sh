@@ -49,6 +49,20 @@ cp "$SCRIPT_DIR/templates/"* "$SERVER_BUILD_DIR/opt/vigia-server/templates/"
 cp "$SCRIPT_DIR/img/logo2.png" "$SERVER_BUILD_DIR/opt/vigia-server/img/"
 cp "$SCRIPT_DIR/img/logo2_mini.png" "$SERVER_BUILD_DIR/opt/vigia-server/img/"
 cp "$SCRIPT_DIR/img/logo2_mini.png" "$SERVER_BUILD_DIR/usr/share/pixmaps/vigia-server.png"
+# Alias ocultos para fijar VIGIA en el gestor de tareas de KDE: en Wayland la
+# ventana de Chrome --app se llama chrome-localhost__-Default, no «vigia».
+mkdir -p "$SERVER_BUILD_DIR/usr/share/applications"
+(cd "$SCRIPT_DIR" && python3 - "$SERVER_BUILD_DIR/usr/share/applications" <<'PYEOF'
+import sys
+from pathlib import Path
+import desktop_setup
+for app_id in desktop_setup.chrome_app_ids('http://localhost:5000/'):
+    entry = desktop_setup.chrome_alias_entry(
+        app_id, '/opt/vigia-server/venv/bin/python3 /opt/vigia-server/vigia-launcher.py',
+        'vigia-server')
+    Path(sys.argv[1], f'{app_id}.desktop').write_text(entry, encoding='utf-8')
+PYEOF
+)
 [ -f "$SCRIPT_DIR/img/icon-192.png" ] && cp "$SCRIPT_DIR/img/icon-192.png" "$SERVER_BUILD_DIR/opt/vigia-server/img/"
 [ -f "$SCRIPT_DIR/img/icon-512.png" ] && cp "$SCRIPT_DIR/img/icon-512.png" "$SERVER_BUILD_DIR/opt/vigia-server/img/"
 

@@ -4,6 +4,8 @@ python3 test_streaming.py
 Las pruebas del servidor requieren flask-socketio.
 """
 
+import os
+import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
@@ -155,6 +157,25 @@ class TestServerStreaming(unittest.TestCase):
         dashboard.emit('register_teacher')
         self.assertEqual(self.events(dashboard, 'config_update'), [PRESETS['light']])
         self.assertEqual(self.start()['config'], PRESETS['light'])
+
+    def test_teacher_window_on_top_is_off_by_default_and_reaches_everyone(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(self.server, '_CLASS_SETTINGS_FILE', os.path.join(tmp, 'aula.json')), \
+             patch.object(self.server, '_class_settings', {'teacher_on_top': False}):
+            fresh = self.peer()
+            fresh.emit('register', {'name': 'Nuevo'})
+            self.assertEqual(self.events(fresh, 'class_settings'), [{'teacher_on_top': False}])
+            self.teacher.emit('update_class_settings', {'teacher_on_top': True})
+            self.assertEqual(self.events(self.student, 'class_settings'), [{'teacher_on_top': True}])
+            self.assertEqual(self.events(self.teacher, 'class_settings'), [{'teacher_on_top': True}])
+            dashboard = self.peer()
+            dashboard.emit('register_teacher')
+            self.assertEqual(self.events(dashboard, 'class_settings'), [{'teacher_on_top': True}])
+            # Persistente: sobrevive a reiniciar el servidor.
+            self.server._class_settings = {'teacher_on_top': False}
+            self.assertEqual(self.server._load_class_settings(), {'teacher_on_top': True})
+            self.teacher.emit('update_class_settings', {'teacher_on_top': 'yes'})
+            self.assertEqual(self.events(self.student, 'class_settings'), [{'teacher_on_top': False}])
 
     def test_binary_jpeg_and_render_confirmation_round_trip(self):
         self.start()

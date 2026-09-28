@@ -11,6 +11,7 @@ import io
 import re
 import time
 import base64
+import json
 import threading
 import subprocess
 import webbrowser
@@ -137,6 +138,46 @@ _share_cfg = {'width': 1600, 'quality': 70, 'sleep': 0.1}
 _teacher_stream = {'active': False, 'sid': None, 'sids': None,
                    'codec': 'h264', 'w': 0, 'h': 0}
 
+# Ajustes del aula que el profesor cambia desde «Configuración» y que los
+# alumnos aplican al vuelo. teacher_on_top: la ventana con la pantalla del
+# profesor se queda SIEMPRE encima en los alumnos. Por defecto NO: si no, el
+# alumno no puede traer al frente su propia ventana para trabajar en paralelo.
+# Se guardan en disco para no tener que reactivarlos tras reiniciar.
+_CLASS_SETTINGS_DEFAULT = {'teacher_on_top': False}
+_CLASS_SETTINGS_FILE = os.path.join(
+    os.environ.get('APPDATA') if platform_utils.IS_WINDOWS and os.environ.get('APPDATA')
+    else os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config'),
+    'vigia', 'aula.json')
+
+
+def normalize_class_settings(data, current=None):
+    settings = dict(_CLASS_SETTINGS_DEFAULT if current is None else current)
+    if isinstance(data, dict) and isinstance(data.get('teacher_on_top'), bool):
+        settings['teacher_on_top'] = data['teacher_on_top']
+    return settings
+
+
+def _load_class_settings():
+    try:
+        with open(_CLASS_SETTINGS_FILE, encoding='utf-8') as f:
+            return normalize_class_settings(json.load(f))
+    except (OSError, ValueError):
+        return dict(_CLASS_SETTINGS_DEFAULT)
+
+
+def _save_class_settings(settings):
+    try:
+        os.makedirs(os.path.dirname(_CLASS_SETTINGS_FILE), exist_ok=True)
+        tmp = _CLASS_SETTINGS_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(settings, f)
+        os.replace(tmp, _CLASS_SETTINGS_FILE)
+    except OSError as error:
+        print(f"[!] No se pudieron guardar los ajustes del aula: {error}")
+
+
+_class_settings = _load_class_settings()
+
 
 def get_local_ip():
     """Detecta la IP local de la máquina."""
@@ -246,6 +287,7 @@ def on_register_teacher():
     """Dashboard joins the 'professors' room so broadcasts target only teachers."""
     join_room('professors')
     emit('config_update', _performance_config)
+    emit('class_settings', _class_settings)
     print(f"[👁] Dashboard registrado en sala 'professors': {request.sid}")
 
 
@@ -294,6 +336,7 @@ def on_register(data):
     print(f"[+] Registrado: {name}  ({client_ip})")
     emit('registered', {'status': 'ok', 'sid': request.sid})
     emit('config_update', _performance_config)
+    emit('class_settings', _class_settings)
     socketio.emit('student_connected', {
         'sid': request.sid, 'name': name, 'ip': client_ip,
         'connected_at': now, 'vstream': students[request.sid]['vstream'],
@@ -400,6 +443,19 @@ def on_update_config(data):
     _share_cfg['width']   = cfg['live_width']
     print(f"[*] Configuración actualizada: intervalo={cfg['thumb_interval']}s, "
           f"JPEG live={cfg['live_fps']}fps, WebRTC={cfg['webrtc_fps']}fps")
+
+
+@socketio.on('update_class_settings')
+def on_update_class_settings(data):
+    """Ajustes del aula (no de rendimiento): se difunden a alumnos y paneles."""
+    global _class_settings
+    settings = normalize_class_settings(data, _class_settings)
+    if settings != _class_settings:
+        _class_settings = settings
+        _save_class_settings(settings)
+    socketio.emit('class_settings', settings)
+    print(f"[*] Ventana del profesor en alumnos: "
+          f"{'siempre encima' if settings['teacher_on_top'] else 'normal'}")
 
 
 def _get_window_list():

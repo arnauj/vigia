@@ -49,6 +49,11 @@ server.py ───────────────────────�
   Estado en memoria:
     students = {sid: {name, ip, screenshot, last_seen, locked, …}}
     viewers  = {student_sid: {prof_sid, mode}}   # sesiones activas view/control
+    _class_settings = {teacher_on_top}           # ajustes del aula (Configuración)
+  Ajustes del aula: update_class_settings (panel) → class_settings (a todos;
+  también al registrarse alumno/panel). Persisten en ~/.config/vigia/aula.json.
+  teacher_on_top=False por defecto: la ventana del profesor en el alumno NO va
+  siempre encima (el alumno puede trabajar en sus ventanas).
   Señalización WebRTC: relaya webrtc_offer/answer/ice entre dashboard
   y cliente usando viewers para autorización.
   Ruta /manifest.json: Web App Manifest para PWA/Chrome app (icono VIGIA).
@@ -127,6 +132,11 @@ vigia-launcher.py ────────────────────�
   3. Navegador del sistema (webbrowser.open) como último recurso.
   Detecta si Flask ya corre como servicio systemd (wait_for_port 1.5 s) y lo
   reutiliza sin arrancar un segundo proceso ni matarlo al cerrar la ventana.
+  Anclado en KDE: en Wayland la ventana Chrome --app NO se llama «vigia» sino
+  chrome-localhost__-Default (--class solo afecta a X11). Sin un .desktop con
+  ese nombre, «Fijar en el gestor de tareas» se perdía al reiniciar. El .deb
+  instala alias ocultos (NoDisplay) chrome-/chromium-localhost__-Default.desktop
+  y el lanzador los crea por usuario si faltan (desktop_setup.install_chrome_app_aliases).
 
 templates/dashboard.html ───────────────────────────────────────────
   SPA con JS vanilla + Socket.IO 4.x + Bootstrap 5 (todo por CDN).
@@ -242,7 +252,7 @@ instalar_cliente.sh ────────────────────
   Arranca el cliente inmediatamente sin esperar al siguiente reinicio.
 
 test_remote_control.py ─────────────────────────────────────────────
-  Suite de tests (unittest) para el control remoto. 82 tests. Ejecutar:
+  Suite de tests (unittest) para el control remoto. 85 tests. Ejecutar:
     python3 test_remote_control.py
   Cubre: mapas de teclas xdotool, _procesar_input (ratón + teclado),
   backend ydotool (Wayland), teclado por uinput (vigia_input), caché de
@@ -291,6 +301,8 @@ build_debs.sh ──────────────────────
 | `teacher_screenshot` | dashboard → servidor → clientes | Pantalla del profesor en alumnos (respaldo JPEG) |
 | `teacher_stream_start` | dashboard → servidor → clientes | Empieza el vídeo del profesor (codec, w, h) |
 | `teacher_stream_chunk` | dashboard → servidor → clientes | Trozo codificado `{k: clave?, d: bytes}` |
+| `update_class_settings` | dashboard → servidor | Ajustes del aula (`teacher_on_top`) |
+| `class_settings` | servidor → dashboard/clientes | Difusión de los ajustes del aula |
 | `teacher_stream_stop` | dashboard → servidor → clientes | Fin del vídeo del profesor |
 | `webrtc_offer` | dashboard → servidor → cliente | SDP offer para WebRTC |
 | `webrtc_answer` | cliente → servidor → dashboard | SDP answer para WebRTC |

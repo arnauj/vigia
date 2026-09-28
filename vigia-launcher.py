@@ -262,6 +262,26 @@ def dashboard_url(port: int) -> str:
     return url
 
 
+def install_pin_aliases(url: str, port: int) -> None:
+    """Permite que «Fijar en el gestor de tareas» de KDE sobreviva al reinicio.
+
+    La ventana de Chrome --app en Wayland no se llama «vigia» sino
+    chrome-localhost__-Default; sin un .desktop con ese nombre, Plasma fija
+    un lanzador provisional que se pierde al reiniciar la sesión.
+    """
+    import desktop_setup
+    script = os.path.join(SCRIPT_DIR, 'vigia-launcher.py')
+    exec_line = f'"{sys.executable}" "{script}"'
+    if port != 5000:
+        exec_line += f' {port}'
+    icon = os.path.join(SCRIPT_DIR, 'img', 'logo2_mini.png')
+    try:
+        desktop_setup.install_chrome_app_aliases(url, exec_line, icon)
+    except Exception as error:  # nunca impedir que se abra el panel
+        print(f'[VIGIA] No se pudo preparar el anclado en el gestor de tareas: {error}',
+              file=sys.stderr)
+
+
 def report_server_mismatch(port):
     message = (f'El servidor del puerto {port} no corresponde a VIGIA {VERSION}. '
                'Cierra las ventanas antiguas de VIGIA y reinstala el paquete nuevo. '
@@ -333,6 +353,8 @@ def main() -> None:
 
     # 1) Chrome/Chromium app mode, con la captura adecuada para esta sesión.
     base_url = dashboard_url(port)
+    if platform_utils.IS_LINUX:
+        install_pin_aliases(base_url, port)
     if run_chrome_app(base_url, proc):
         return
 

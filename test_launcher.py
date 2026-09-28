@@ -18,6 +18,9 @@ class TestLauncher(unittest.TestCase):
         setup = patch.object(desktop_setup, 'configure_kde_capture', return_value=False)
         self.desktop_setup = setup.start()
         self.addCleanup(setup.stop)
+        aliases = patch.object(self.launcher, 'install_pin_aliases')
+        self.pin_aliases = aliases.start()
+        self.addCleanup(aliases.stop)
         ready = patch.object(self.launcher, 'wait_for_current_server', return_value=True)
         self.server_ready = ready.start()
         self.addCleanup(ready.stop)
@@ -39,6 +42,7 @@ class TestLauncher(unittest.TestCase):
              patch.object(self.launcher.subprocess, 'Popen') as start:
             self.launcher.main()
         chrome.assert_called_once_with('http://localhost:5001/?capture=server', None)
+        self.pin_aliases.assert_called_once_with('http://localhost:5001/?capture=server', 5001)
         start.assert_not_called()
         self.desktop_setup.assert_called_once_with()
         self.server_ready.assert_called_once_with(5001, timeout=3)

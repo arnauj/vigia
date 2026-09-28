@@ -869,6 +869,9 @@ def _b64(jpeg: bytes) -> str:
 _cola_stream  = queue.Queue(maxsize=12)   # trozos codificados por descodificar
 _stream_perdido = False                   # se descartó algo: esperar al próximo key
 _prof_destino = [0, 0]                    # tamaño útil de la ventana del alumno
+# El profesor decide en «Configuración» si su pantalla se queda siempre encima.
+# Por defecto NO: así el alumno puede traer al frente sus ventanas y trabajar.
+_prof_encima = False
 
 
 def _poner_profesor(item):
@@ -1704,6 +1707,13 @@ def on_config_update(data):
     print(f"[*] Config actualizada: intervalo={INTERVALO_SEG}s, "
           f"live={live_fps}fps, webrtc={_WEBRTC_FPS}fps")
 
+@sio.on('class_settings')
+def on_class_settings(data):
+    global _prof_encima
+    if isinstance(data, dict) and isinstance(data.get('teacher_on_top'), bool):
+        # Lo aplica el hilo de Tk (check) sobre la ventana abierta, si la hay.
+        _prof_encima = data['teacher_on_top']
+
 @sio.on('teacher_screen')
 def on_teacher_screen(data):
     _poner_profesor(data)
@@ -1917,7 +1927,8 @@ class _VentanaProfesor:
             self.top.state('zoomed')
         else:
             self.top.attributes('-zoomed', True)
-        self.top.attributes('-topmost', True)
+        self.encima = None
+        self.fijar_encima(_prof_encima)
         self._label = tk.Label(self.top, bg='#0f1117', text="⏳ Esperando imagen…", fg='#718096', font=('Segoe UI', 12))
         self._label.pack(expand=True, fill='both')
         self._foto = None
@@ -1983,6 +1994,20 @@ class _VentanaProfesor:
             self._render()
         except Exception as e:
             print(f"  [!] Error actualizando pantalla del profesor: {e}")
+
+    def fijar_encima(self, encima):
+        """Siempre encima (el profesor lo exige) o ventana normal que el alumno
+        puede dejar detrás de las suyas."""
+        encima = bool(encima)
+        if encima == self.encima:
+            return
+        self.encima = encima
+        try:
+            self.top.attributes('-topmost', encima)
+            if encima:
+                self.top.lift()
+        except tk.TclError:
+            pass
 
     def destruir(self): self.top.destroy()
 
@@ -2330,6 +2355,8 @@ def ejecutar_interfaz():
                 elif v_prof:
                     v_prof.destruir(); v_prof = None
                     _prof_destino[0] = _prof_destino[1] = 0
+            if v_prof:
+                v_prof.fijar_encima(_prof_encima)
             while not _cola_bloqueo.empty():
                 if _cola_bloqueo.get_nowait():
                     if not v_bloq: v_bloq = _VentanaBloqueo(root)

@@ -197,5 +197,39 @@ class TestInstallerUser(unittest.TestCase):
             self.assertEqual(setup.installation_user(), 'profesor')
 
 
+class TestPinAliases(unittest.TestCase):
+    """KDE: fijar la ventana Chrome --app del panel debe sobrevivir al reinicio."""
+
+    def test_app_id_matches_chrome_wayland_naming(self):
+        self.assertEqual(setup.chrome_app_ids('http://localhost:5000/?capture=server'),
+                         ['chrome-localhost__-Default', 'chromium-localhost__-Default'])
+
+    def test_aliases_are_hidden_launchers_matching_the_window(self):
+        with tempfile.TemporaryDirectory() as home, \
+             patch.object(setup.shutil, 'which', return_value=None):
+            written = setup.install_chrome_app_aliases(
+                'http://localhost:5000/', '"/usr/bin/python3" "/opt/v/vigia-launcher.py"',
+                '/opt/v/logo.png', data_home=home, system_dirs=[])
+            self.assertEqual(len(written), 2)
+            entry = (Path(home) / 'applications/chrome-localhost__-Default.desktop').read_text()
+            self.assertIn('Exec="/usr/bin/python3" "/opt/v/vigia-launcher.py"\n', entry)
+            self.assertIn('NoDisplay=true\n', entry)
+            self.assertIn('StartupWMClass=chrome-localhost__-Default\n', entry)
+            # Idempotente: no reescribe ni refresca la caché de KDE en cada arranque.
+            self.assertEqual(setup.install_chrome_app_aliases(
+                'http://localhost:5000/', '"/usr/bin/python3" "/opt/v/vigia-launcher.py"',
+                '/opt/v/logo.png', data_home=home, system_dirs=[]), [])
+
+    def test_package_alias_is_not_duplicated_per_user(self):
+        with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as system:
+            apps = Path(system) / 'applications'
+            apps.mkdir()
+            for app_id in setup.chrome_app_ids('http://localhost:5000/'):
+                (apps / f'{app_id}.desktop').write_text('[Desktop Entry]\n')
+            self.assertEqual(setup.install_chrome_app_aliases(
+                'http://localhost:5000/', 'x', 'y', data_home=home, system_dirs=[system]), [])
+            self.assertFalse((Path(home) / 'applications').exists())
+
+
 if __name__ == '__main__':
     unittest.main()
