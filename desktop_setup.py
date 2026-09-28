@@ -7,6 +7,7 @@ import pwd
 import shutil
 import subprocess
 import sys
+from urllib.parse import urlsplit
 
 import desktop_session
 
@@ -86,6 +87,77 @@ def configure_kde_capture():
         print('[VIGIA] Se ha corregido QPainter forzado en KDE. Guarda tu trabajo y '
               'reinicia el equipo para poder compartir pantalla.')
     return changed
+
+
+# ── Fijar VIGIA en el gestor de tareas de KDE ────────────────────────────────
+# En Wayland, Chrome/Chromium NO usa --class para las ventanas --app: su app_id
+# es «chrome-<host>_<ruta>-<perfil>» (p. ej. chrome-localhost__-Default). Plasma
+# no encontraba ningún .desktop con ese nombre ni con ese StartupWMClass, así que
+# «Fijar en el gestor de tareas» guardaba un lanzador provisional que desaparecía
+# al reiniciar. Un .desktop oculto con ese nombre exacto da a Plasma un lanzador
+# estable (applications:<app_id>.desktop) que vuelve a abrir VIGIA.
+CHROME_APP_PREFIXES = ('chrome', 'chromium')
+
+
+def chrome_app_ids(url, profile='Default'):
+    """app_id Wayland que Chrome/Chromium asignan a una ventana --app=url."""
+    parts = urlsplit(url)
+    name = f'{parts.hostname or ""}_{parts.path or "/"}'.replace('/', '_')
+    return [f'{prefix}-{name}-{profile}' for prefix in CHROME_APP_PREFIXES]
+
+
+def chrome_alias_entry(app_id, exec_line, icon):
+    return ('[Desktop Entry]\n'
+            'Type=Application\n'
+            'Name=VIGIA Servidor\n'
+            'Comment=Panel del profesor — supervisión de aula\n'
+            f'Exec={exec_line}\n'
+            f'Icon={icon}\n'
+            'Terminal=false\n'
+            'NoDisplay=true\n'
+            f'StartupWMClass={app_id}\n')
+
+
+def _xdg_data_dirs():
+    dirs = os.environ.get('XDG_DATA_DIRS') or '/usr/local/share:/usr/share'
+    return [Path(d) for d in dirs.split(':') if d]
+
+
+def install_chrome_app_aliases(url, exec_line, icon, data_home=None, system_dirs=None):
+    """Crea (si faltan) los alias por usuario. Devuelve las rutas escritas.
+
+    Si el paquete ya instala el alias en el sistema no se duplica: el del
+    usuario quedaría apuntando a una ruta vieja al desinstalar el .deb.
+    """
+    if data_home is None:
+        data_home = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share')
+    apps = Path(data_home) / 'applications'
+    system_dirs = _xdg_data_dirs() if system_dirs is None else system_dirs
+    written = []
+    for app_id in chrome_app_ids(url):
+        name = f'{app_id}.desktop'
+        if any((Path(d) / 'applications' / name).is_file() for d in system_dirs):
+            continue
+        path = apps / name
+        content = chrome_alias_entry(app_id, exec_line, icon)
+        try:
+            if path.is_file() and path.read_text(encoding='utf-8') == content:
+                continue
+            apps.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding='utf-8')
+        except OSError as error:
+            print(f'[VIGIA] No se pudo crear {path}: {error}', file=sys.stderr)
+            continue
+        written.append(path)
+    if written:
+        # Plasma lee los .desktop de su caché (sycoca); refrescarla sin esperar.
+        tool = shutil.which('kbuildsycoca6') or shutil.which('kbuildsycoca5')
+        if tool:
+            try:
+                subprocess.Popen([tool], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except OSError:
+                pass
+    return written
 
 
 if __name__ == '__main__':
