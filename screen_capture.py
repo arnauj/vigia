@@ -144,6 +144,8 @@ class CliBackend:
 
     def __init__(self, tool):
         self.name = tool
+        self.index = 0          # 0 = todas las pantallas, 1..n = un monitor
+        self._mons = None       # geometrías lógicas (wayland_monitors)
         self._cmd = self.TOOLS[tool]
         self._path = shutil.which(tool)
         if not self._path:
@@ -164,7 +166,54 @@ class CliBackend:
             self.grab()
         return self._geom
 
+    def monitors(self):
+        """[todas, monitor 1, …] en coordenadas lógicas, como mss."""
+        if self._mons is None:
+            self._mons = wayland_monitors()
+        mons = self._mons
+        if not mons:
+            return []
+        x0 = min(m['left'] for m in mons); y0 = min(m['top'] for m in mons)
+        x1 = max(m['left'] + m['width'] for m in mons)
+        y1 = max(m['top'] + m['height'] for m in mons)
+        return [{'left': x0, 'top': y0, 'width': x1 - x0, 'height': y1 - y0}] + mons
+
+    def set_monitor(self, index):
+        """La herramienta solo captura el escritorio entero: un monitor
+        concreto se recorta de esa imagen (ver _recortar)."""
+        self._mons = wayland_monitors()   # releer por si cambió la disposición
+        index = int(index)
+        self.index = index if 0 < index <= len(self._mons) else 0
+        self._geom = None
+
+    def _recortar(self, img):
+        mons = self.monitors()
+        if not self.index or self.index >= len(mons):
+            return img
+        todo, m = mons[0], mons[self.index]
+        # spectacle/grim devuelven el escritorio en píxeles físicos: escalar
+        # las coordenadas lógicas al tamaño real de la imagen (HiDPI).
+        fx = img.width / todo['width']
+        fy = img.height / todo['height']
+        caja = (round((m['left'] - todo['left']) * fx),
+                round((m['top'] - todo['top']) * fy),
+                round((m['left'] - todo['left'] + m['width']) * fx),
+                round((m['top'] - todo['top'] + m['height']) * fy))
+        caja = (max(0, caja[0]), max(0, caja[1]),
+                min(img.width, caja[2]), min(img.height, caja[3]))
+        if caja[2] - caja[0] < 2 or caja[3] - caja[1] < 2:
+            return img
+        return img.crop(caja)
+
     def grab(self, max_age=0.0):
+        img = self._grab_full(max_age)
+        if self.index:
+            img = self._recortar(img)
+            self._geom = {'left': 0, 'top': 0,
+                          'width': img.width, 'height': img.height}
+        return img
+
+    def _grab_full(self, max_age=0.0):
         from PIL import Image
         # spectacle/grim lanzan un proceso y escriben un PNG (~0,5 s): compartir
         # el último frame entre miniaturas y observación en vivo evita duplicar
@@ -199,6 +248,75 @@ class CliBackend:
             os.remove(self._tmp)
         except OSError:
             pass
+
+
+# ── Monitores en Wayland ─────────────────────────────────────────────────────
+
+def _monitores_kscreen():
+    """Geometría lógica de las salidas activas según kscreen-doctor (KDE)."""
+    import json
+    exe = shutil.which('kscreen-doctor')
+    if not exe:
+        return []
+    r = subprocess.run([exe, '-j'], capture_output=True, text=True,
+                       errors='replace', timeout=5)
+    if r.returncode != 0:
+        return []
+    salidas = json.loads(r.stdout or '{}').get('outputs', [])
+    mons = []
+    for o in salidas:
+        if not (o.get('enabled') and o.get('connected', True)):
+            continue
+        size = o.get('size') or {}
+        if not size.get('width'):
+            for mode in o.get('modes', []):
+                if str(mode.get('id')) == str(o.get('currentModeId')):
+                    size = mode.get('size') or {}
+        w, h = size.get('width'), size.get('height')
+        if not w or not h:
+            continue
+        if o.get('rotation') in (2, 8):          # girada 90°/270°
+            w, h = h, w
+        scale = float(o.get('scale') or 1) or 1.0
+        pos = o.get('pos') or {}
+        mons.append({'left': int(pos.get('x', 0)), 'top': int(pos.get('y', 0)),
+                     'width': round(w / scale), 'height': round(h / scale),
+                     'name': o.get('name', ''), 'primary': o.get('priority') == 1})
+    return mons
+
+
+def _monitores_xrandr():
+    """Respaldo: monitores tal como los ve XWayland (también vale en X11)."""
+    import re
+    exe = shutil.which('xrandr')
+    if not exe or not os.environ.get('DISPLAY'):
+        return []
+    r = subprocess.run([exe, '--listmonitors'], capture_output=True, text=True,
+                       errors='replace', timeout=5)
+    mons = []
+    for linea in r.stdout.splitlines() if r.returncode == 0 else []:
+        m = re.search(r'(\*?)(\d+)/\d+x(\d+)/\d+\+(-?\d+)\+(-?\d+)\s+(\S+)\s*$', linea)
+        if m:
+            mons.append({'left': int(m.group(4)), 'top': int(m.group(5)),
+                         'width': int(m.group(2)), 'height': int(m.group(3)),
+                         'name': m.group(6), 'primary': '*' in linea})
+    return mons
+
+
+def wayland_monitors():
+    """Lista de monitores (coordenadas lógicas, de izquierda a derecha).
+
+    spectacle/grim solo capturan el escritorio completo; esta geometría permite
+    al profesor elegir UNA pantalla y recortarla, como hace el selector de
+    Chrome. Lista vacía si no se puede saber (se comparte todo)."""
+    for fuente in (_monitores_kscreen, _monitores_xrandr):
+        try:
+            mons = fuente()
+        except Exception:
+            mons = []
+        if mons:
+            return sorted(mons, key=lambda m: (m['left'], m['top']))
+    return []
 
 
 # ── Backend PipeWire (Wayland fluido, vía portal ScreenCast) ──────────────────

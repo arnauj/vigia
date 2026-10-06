@@ -95,6 +95,24 @@ class TestSessionEnvironment(unittest.TestCase):
         self.assertEqual(screen_capture.session_type(), 'wayland')
         self.assertEqual(os.environ['WAYLAND_DISPLAY'], 'wayland-2')
 
+    def test_launcher_session_wins_over_stale_service_environment(self):
+        self.socket('bus')
+        self.socket('wayland-0')
+        self.socket('wayland-1')        # dos sockets: el servicio no sabría cuál
+        self.assertEqual(screen_capture.session_type(), 'unknown')
+        self.assertTrue(session.set_session_override({
+            'WAYLAND_DISPLAY': 'wayland-1', 'XDG_CURRENT_DESKTOP': 'KDE',
+            'XDG_RUNTIME_DIR': '/run/user/otro', 'PATH': '/malo'}))
+        self.assertEqual(screen_capture.session_type(), 'wayland')
+        self.assertEqual(os.environ['WAYLAND_DISPLAY'], 'wayland-1')
+        self.assertEqual(os.environ['XDG_RUNTIME_DIR'], str(self.runtime))
+        self.assertNotEqual(os.environ.get('PATH'), '/malo')
+        self.addCleanup(session._session_override.clear)
+
+    def test_launcher_session_without_own_socket_is_rejected(self):
+        self.assertFalse(session.set_session_override({'WAYLAND_DISPLAY': 'wayland-9'}))
+        self.assertEqual(session._session_override, {})
+
     def test_missing_session_does_not_launch_crashing_tools(self):
         with patch.object(screen_capture, 'CliBackend') as cli, \
                 patch.object(screen_capture, 'MssBackend') as mss:
@@ -102,6 +120,58 @@ class TestSessionEnvironment(unittest.TestCase):
                 screen_capture.create_capturer(allow_portal=False)
         cli.assert_not_called()
         mss.assert_not_called()
+
+
+class TestWaylandMonitors(unittest.TestCase):
+    KSCREEN = {'outputs': [
+        {'name': 'HDMI-A-1', 'enabled': True, 'connected': True, 'priority': 2,
+         'pos': {'x': 1536, 'y': 0}, 'scale': 1, 'rotation': 1,
+         'size': {'width': 1920, 'height': 1080}},
+        {'name': 'eDP-1', 'enabled': True, 'connected': True, 'priority': 1,
+         'pos': {'x': 0, 'y': 0}, 'scale': 1.25, 'rotation': 1,
+         'currentModeId': '3', 'modes': [{'id': '3', 'size': {'width': 1920, 'height': 1200}}]},
+        {'name': 'DP-2', 'enabled': False, 'connected': True,
+         'pos': {'x': 0, 'y': 0}, 'scale': 1, 'size': {'width': 800, 'height': 600}},
+    ]}
+
+    def test_kscreen_logical_geometry_sorted_left_to_right(self):
+        import json
+        done = subprocess.CompletedProcess([], 0, json.dumps(self.KSCREEN), '')
+        with patch.object(screen_capture.shutil, 'which', return_value='/usr/bin/kscreen-doctor'), \
+             patch.object(screen_capture.subprocess, 'run', return_value=done):
+            mons = screen_capture.wayland_monitors()
+        self.assertEqual([(m['name'], m['left'], m['width'], m['height'], m['primary']) for m in mons],
+                         [('eDP-1', 0, 1536, 960, True), ('HDMI-A-1', 1536, 1920, 1080, False)])
+
+    def test_xrandr_fallback(self):
+        out = ('Monitors: 2\n 0: +*XWAYLAND0 1920/510x1080/290+0+0  XWAYLAND0\n'
+               ' 1: +XWAYLAND1 1280/340x1024/270+1920+0  XWAYLAND1\n')
+        done = subprocess.CompletedProcess([], 0, out, '')
+        with patch.dict(os.environ, {'DISPLAY': ':0'}), \
+             patch.object(screen_capture, '_monitores_kscreen', return_value=[]), \
+             patch.object(screen_capture.shutil, 'which', return_value='/usr/bin/xrandr'), \
+             patch.object(screen_capture.subprocess, 'run', return_value=done):
+            mons = screen_capture.wayland_monitors()
+        self.assertEqual([(m['left'], m['width'], m['height'], m['primary']) for m in mons],
+                         [(0, 1920, 1080, True), (1920, 1280, 1024, False)])
+
+    def test_selected_monitor_is_cropped_from_hidpi_desktop(self):
+        from PIL import Image
+        full = Image.new('RGB', (2 * 3456, 2 * 1080))   # escritorio a escala 2
+        full.paste((255, 0, 0), (2 * 1536, 0, full.width, full.height))
+        cap = object.__new__(screen_capture.CliBackend)
+        cap.index = 0; cap._geom = None
+        cap._grab_full = lambda max_age=0.0: full
+        mons = [{'left': 0, 'top': 0, 'width': 1536, 'height': 960},
+                {'left': 1536, 'top': 0, 'width': 1920, 'height': 1080}]
+        with patch.object(screen_capture, 'wayland_monitors', return_value=mons):
+            cap.set_monitor(2)
+            img = cap.grab()
+            self.assertEqual(img.size, (3840, 2160))
+            self.assertEqual(img.getpixel((10, 10)), (255, 0, 0))
+            self.assertEqual(cap.monitor()['width'], 3840)
+            cap.set_monitor(7)          # fuera de rango → todo el escritorio
+            self.assertEqual(cap.grab().size, full.size)
 
 
 class TestKdeSetup(unittest.TestCase):

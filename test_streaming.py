@@ -215,22 +215,20 @@ class TestServerStreaming(unittest.TestCase):
         self.teacher.emit('remote_input', {'sid': self.sid, 'type': 'mousedown'})
         self.assertEqual(self.events(self.student, 'do_input'), [])
 
-    def test_browser_share_is_default_even_on_kde_wayland(self):
-        # La captura del servidor fallaba si el servicio arrancó antes que la
-        # sesión gráfica; el selector nativo de Chrome no depende de eso.
-        for address, desktop, wayland in [
-            ('127.0.0.1', 'KDE', True),
-            ('::1', 'plasma', True),
-            ('192.0.2.25', 'KDE', True),
-            ('127.0.0.1', 'KDE', False),
-            ('127.0.0.1', '', True),
+    def test_direct_share_default_only_for_local_kde_wayland(self):
+        for address, desktop, wayland, expected in [
+            ('127.0.0.1', 'KDE', True, 'true'),
+            ('::1', 'plasma', True, 'true'),
+            ('192.0.2.25', 'KDE', True, 'false'),
+            ('127.0.0.1', 'KDE', False, 'false'),
+            ('127.0.0.1', 'GNOME', True, 'false'),
         ]:
             with self.subTest(address=address, desktop=desktop, wayland=wayland), \
                  patch.dict('os.environ', {'XDG_CURRENT_DESKTOP': desktop}), \
                  patch.object(self.server.screen_capture, 'is_wayland', return_value=wayland):
                 response = self.server.app.test_client().get('/', environ_base={'REMOTE_ADDR': address})
                 self.assertEqual(response.status_code, 200)
-                self.assertIn('const PREFER_SERVER_CAPTURE = false', response.text)
+                self.assertIn(f'const PREFER_SERVER_CAPTURE = {expected}', response.text)
 
     def test_version_identifies_running_server_and_panel(self):
         from vigia_version import VERSION
@@ -239,6 +237,52 @@ class TestServerStreaming(unittest.TestCase):
         self.assertEqual(response.json, {'app': 'vigia-server', 'version': VERSION})
         self.assertEqual(response.headers['Cache-Control'], 'no-store')
         self.assertIn(f'<title>VIGIA {VERSION}', client.get('/').text)
+
+    def test_wayland_screen_list_offers_each_monitor(self):
+        from PIL import Image
+        import screen_capture as sc
+        full = Image.new('RGB', (3840, 1080), 'blue')
+        capture = object.__new__(sc.CliBackend)
+        capture.name = 'spectacle'; capture.index = 0; capture._geom = None
+        capture._mons = [
+            {'left': 0, 'top': 0, 'width': 1920, 'height': 1080, 'name': 'eDP-1', 'primary': True},
+            {'left': 1920, 'top': 0, 'width': 1920, 'height': 1080, 'name': 'HDMI-A-1', 'primary': False},
+        ]
+        capture._grab_full = lambda max_age=0.0: full
+        capture.close = lambda: None
+        with patch.object(self.server.screen_capture, 'create_capturer', return_value=capture):
+            self.teacher.emit('get_screens')
+        screens = self.events(self.teacher, 'screens_list')[0]['screens']
+        self.assertEqual([s['index'] for s in screens], [0, 1, 2])
+        self.assertIn('Todas las pantallas (3840×1080)', screens[0]['label'])
+        self.assertIn('HDMI-A-1 (1920×1080)', screens[2]['label'])
+
+    def test_direct_capture_retries_while_desktop_starts(self):
+        capture = Mock(name='capture')
+        fallo = self.server.screen_capture.CaptureError('spectacle devolvió 1')
+        with patch.object(self.server.screen_capture, 'create_capturer',
+                          side_effect=[fallo, fallo, capture]) as create, \
+             patch.object(self.server.socketio, 'sleep') as sleep:
+            self.assertIs(self.server._crear_capturador_profesor(), capture)
+        self.assertEqual(create.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+        with patch.object(self.server.screen_capture, 'create_capturer', side_effect=fallo), \
+             patch.object(self.server.socketio, 'sleep'):
+            with self.assertRaises(self.server.screen_capture.CaptureError):
+                self.server._crear_capturador_profesor()
+
+    def test_session_env_only_from_local_launcher(self):
+        import desktop_session
+        client = self.server.app.test_client()
+        with patch.object(desktop_session, 'set_session_override', return_value=True) as adopt:
+            r = client.post('/api/session-env', json={'WAYLAND_DISPLAY': 'wayland-0'},
+                            environ_base={'REMOTE_ADDR': '192.0.2.25'})
+            self.assertEqual(r.status_code, 403)
+            adopt.assert_not_called()
+            r = client.post('/api/session-env', json={'WAYLAND_DISPLAY': 'wayland-0'},
+                            environ_base={'REMOTE_ADDR': '127.0.0.1'})
+        self.assertTrue(r.json['ok'])
+        adopt.assert_called_once_with({'WAYLAND_DISPLAY': 'wayland-0'})
 
     def test_screen_list_does_not_open_portal_or_share_with_students(self):
         from PIL import Image
@@ -253,6 +297,13 @@ class TestServerStreaming(unittest.TestCase):
         self.assertTrue(screens[0]['thumb'].startswith('data:image/jpeg;base64,'))
         self.assertEqual(self.events(self.student, 'teacher_screen'), [])
         capture.close.assert_called_once()
+
+    def test_service_without_desktop_environment_uses_installed_kde_capture(self):
+        with patch.dict('os.environ', {'XDG_CURRENT_DESKTOP': ''}), \
+             patch.object(self.server.screen_capture, 'is_wayland', return_value=True), \
+             patch.object(self.server.shutil, 'which', return_value='/usr/bin/spectacle'):
+            response = self.server.app.test_client().get('/', environ_base={'REMOTE_ADDR': '127.0.0.1'})
+        self.assertIn('const PREFER_SERVER_CAPTURE = true', response.text)
 
     def test_launcher_can_choose_capture_independently_of_service_environment(self):
         for address, query, expected in [

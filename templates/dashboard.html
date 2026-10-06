@@ -2823,7 +2823,26 @@ function toggleCompartir() {
   }
 }
 
-function compartirDesdeNavegador() {
+// La captura directa del servidor es la vía por defecto. Si falla (p. ej. el
+// equipo acaba de encender y Plasma aún no está listo) se pasa SOLO al
+// selector de Chrome; si ni eso puede abrirse, se muestra el error con el
+// botón del selector, para que un clic lo abra.
+function _respaldoNavegador(error) {
+  console.warn('[VIGIA] Captura directa no disponible:', error);
+  if (!_canGetDisplayMedia()) { _mostrarErrorCaptura(error); return; }
+  toast('Captura directa no disponible: usando el selector de Chrome', '');
+  compartirDesdeNavegador(error);
+}
+
+function _mostrarErrorCaptura(error) {
+  _screenListRequested = false;
+  const list = document.getElementById('screen-list');
+  list.textContent = 'No se pudo usar la captura directa: ' + error;
+  document.getElementById('screen-browser').hidden = !_canGetDisplayMedia();
+  document.getElementById('screen-overlay').classList.add('show');
+}
+
+function compartirDesdeNavegador(errorServidor = null) {
   if (_sharing || _sharePicking) return;
   cerrarScreenModal();
   if (_canGetDisplayMedia()) {
@@ -2869,6 +2888,11 @@ function compartirDesdeNavegador() {
         // pudo arrancar (p. ej. KWin en QPainter) → probar la captura directa.
         const porSistema = /system/i.test(err.message || '');
         if (err.name === 'AbortError' || (err.name === 'NotAllowedError' && !porSistema)) return;
+        if (typeof errorServidor === 'string') {
+          // Ya venimos del respaldo: no volver a la captura que ha fallado.
+          _mostrarErrorCaptura(errorServidor);
+          return;
+        }
         console.warn('[VIGIA] getDisplayMedia falló, usando captura del servidor:', err.message);
         abrirScreenModal();
       })
@@ -2896,7 +2920,7 @@ socket.on('screens_list', data => {
   _screenListRequested = false;
   const list = document.getElementById('screen-list');
   list.innerHTML = '';
-  if (data.error) { list.textContent = data.error; return; }
+  if (data.error) { cerrarScreenModal(); _respaldoNavegador(data.error); return; }
   const monitors = data.screens.filter(s => s.type === 'monitor');
   const windows  = data.screens.filter(s => s.type === 'window');
 
@@ -2957,7 +2981,12 @@ function _iniciarCapturaServidor(params) {
 
 socket.on('teacher_screen_preview', data => {
   if (!_sharing || _shareStream) return;
-  if (data.error) { alert('No se pudo compartir la pantalla:\n' + data.error); detenerCompartir(); return; }
+  if (data.error) {
+    const sids = _shareSids;          // conservar los alumnos elegidos
+    detenerCompartir(); _shareSids = sids;
+    _respaldoNavegador(data.error);
+    return;
+  }
   const prev = document.getElementById('share-preview');
   prev.src = data.image;
   if (!prev.classList.contains('show')) prev.classList.add('show');
@@ -3516,7 +3545,7 @@ function _actualizarPrompt(cwd) {
   <div id="screen-box">
     <h3 class="d-flex align-items-center gap-2"><i data-lucide="tv" size="12"></i> Selecciona qué compartir</h3>
     <div id="screen-list"><!-- se rellena dinámicamente --></div>
-    <button id="screen-browser" class="sel-btn primary" onclick="compartirDesdeNavegador()" hidden>Pestaña o ventana del navegador…</button>
+    <button id="screen-browser" class="sel-btn primary" onclick="compartirDesdeNavegador()" hidden>Usar el selector de Chrome…</button>
     <button id="screen-cancel" onclick="cerrarScreenModal()">Cancelar</button>
   </div>
 </div>

@@ -15,6 +15,7 @@ import json
 import threading
 import subprocess
 import webbrowser
+import shutil
 import platform_utils
 import screen_capture
 from vigia_version import VERSION
@@ -198,12 +199,16 @@ def dashboard():
     # Chrome, Firefox y Chromium se identifican con su nombre en el UA.
     # WebKit2GTK (el launcher) usa AppleWebKit pero sin esos tokens.
     is_launcher = not any(b in ua for b in ('Chrome/', 'Chromium/', 'Firefox/'))
-    # Por defecto se comparte con getDisplayMedia (selector nativo de Chrome),
-    # que no depende del entorno con el que arrancó el servicio. Si falla, el
-    # panel cae solo a la captura del servidor; ?capture=server la fuerza.
+    # El lanzador conoce la sesión gráfica aunque Flask haya arrancado antes
+    # del login. Su elección explícita no depende del entorno de systemd.
     capture_mode = request.args.get('capture')
+    desktop = os.environ.get('XDG_CURRENT_DESKTOP', '').lower()
+    kde_capture = any(d in desktop for d in ('kde', 'plasma')) or (
+        not desktop and shutil.which('spectacle') is not None)
     prefer_server_capture = (request.remote_addr in ('127.0.0.1', '::1')
-                             and capture_mode == 'server')
+                             and (capture_mode == 'server' or (
+                                 capture_mode != 'browser'
+                                 and screen_capture.is_wayland() and kde_capture)))
     resp = make_response(render_template('dashboard.html', is_launcher=is_launcher,
                                         vigia_version=VERSION,
                                         prefer_server_capture=prefer_server_capture,
@@ -212,6 +217,21 @@ def dashboard():
     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     resp.headers['Pragma'] = 'no-cache'
     return resp
+
+
+@app.route('/api/session-env', methods=['POST'])
+def api_session_env():
+    """El lanzador, abierto dentro de la sesión gráfica, entrega su entorno.
+
+    El servicio systemd arranca con el equipo, antes del login: sin esto la
+    captura directa podía fallar hasta reiniciar el servidor. Solo local."""
+    if request.remote_addr not in ('127.0.0.1', '::1'):
+        return jsonify(ok=False), 403
+    import desktop_session
+    ok = desktop_session.set_session_override(request.get_json(silent=True) or {})
+    if ok:
+        screen_capture.ensure_session_env()
+    return jsonify(ok=ok, session=screen_capture.session_type())
 
 
 @app.route('/api/version')
@@ -463,6 +483,25 @@ def _get_window_region(wid):
     return platform_utils.get_window_region(wid)
 
 
+def _crear_capturador_profesor(verbose=True, intentos=3):
+    """Capturador directo (sin portal) con reintentos.
+
+    Justo después de encender el equipo Plasma aún está arrancando y la primera
+    llamada a spectacle puede fallar aunque segundos después funcione; antes el
+    error obligaba a matar el servidor. Cada intento vuelve a leer el entorno
+    de la sesión gráfica (screen_capture.session_type → ensure_session_env)."""
+    error = None
+    opciones = {'allow_portal': False} if verbose else {'verbose': False, 'allow_portal': False}
+    for intento in range(intentos):
+        try:
+            return screen_capture.create_capturer(**opciones)
+        except Exception as e:
+            error = e
+            if intento + 1 < intentos:
+                socketio.sleep(1.0 + intento)
+    raise error
+
+
 def _teacher_capture_loop(capture):
     """Captura la pantalla del profesor y emite los frames por Socket.IO.
     Usa screen_capture (mss en X11, spectacle/grim en Wayland)."""
@@ -494,7 +533,7 @@ def _teacher_capture_loop(capture):
             return
     else:
         try:
-            capturer = screen_capture.create_capturer(allow_portal=False)
+            capturer = _crear_capturador_profesor()
             if hasattr(capturer, 'set_monitor'):
                 capturer.set_monitor(capture.get('monitor', 1))
         except Exception as e:
@@ -755,7 +794,7 @@ def on_get_screens():
         screens = []
         # Este selector es la alternativa al portal del navegador. No abrir
         # otro portal al generar miniaturas ni al comenzar la transmisión.
-        capturer = screen_capture.create_capturer(verbose=False, allow_portal=False)
+        capturer = _crear_capturador_profesor(verbose=False)
         try:
             if capturer.name == 'mss':
                 sct = capturer._sct
@@ -780,14 +819,35 @@ def on_get_screens():
                         'icon': _get_window_app_icon(win['wid']),
                     })
             else:
-                # Wayland (spectacle/grim/gnome-screenshot): solo pantalla completa.
-                # La lista de ventanas/monitores individuales requiere X11.
+                # Wayland (spectacle/grim/gnome-screenshot): la herramienta
+                # captura el escritorio entero; cada monitor se recorta de esa
+                # misma imagen. Las ventanas sueltas siguen requiriendo X11.
+                mons = capturer.monitors() if hasattr(capturer, 'monitors') else []
+                if not isinstance(mons, list) or not hasattr(capturer, '_recortar'):
+                    mons = []
                 img = capturer.grab()
-                screens.append({
-                    'type': 'monitor', 'index': 1,
-                    'label': f'Pantalla completa ({img.width}×{img.height})',
-                    'thumb': _thumb_from_image(img),
-                })
+                if len(mons) > 2:   # [todas, m1, m2, …]
+                    screens.append({
+                        'type': 'monitor', 'index': 0,
+                        'label': f'Todas las pantallas ({img.width}×{img.height})',
+                        'thumb': _thumb_from_image(img),
+                    })
+                    for i, mon in enumerate(mons[1:], start=1):
+                        capturer.index = i
+                        parte = capturer._recortar(img)
+                        nombre = f' — {mon["name"]}' if mon.get('name') else ''
+                        principal = ' · principal' if mon.get('primary') else ''
+                        screens.append({
+                            'type': 'monitor', 'index': i,
+                            'label': f'Pantalla {i}{nombre} ({parte.width}×{parte.height}){principal}',
+                            'thumb': _thumb_from_image(parte),
+                        })
+                else:
+                    screens.append({
+                        'type': 'monitor', 'index': 0,
+                        'label': f'Pantalla completa ({img.width}×{img.height})',
+                        'thumb': _thumb_from_image(img),
+                    })
         finally:
             capturer.close()
         emit('screens_list', {'screens': screens})

@@ -249,11 +249,17 @@ def run_browser_fallback(url: str, proc) -> None:  # proc puede ser None
 
 
 def dashboard_url(port: int) -> str:
-    # Sin «?capture=server»: Chrome comparte con su selector nativo (portal
-    # ScreenCast de KDE), que funciona aunque el servicio Flask arrancara antes
-    # de la sesión gráfica. La captura del servidor queda como respaldo
-    # automático si getDisplayMedia falla, o explícita con ?capture=server.
-    return f'http://localhost:{port}/'
+    url = f'http://localhost:{port}/'
+    if platform_utils.IS_LINUX:
+        import screen_capture
+        desktop = os.environ.get('XDG_CURRENT_DESKTOP', '').lower()
+        kde_capture = any(d in desktop for d in ('kde', 'plasma')) or (
+            not desktop and shutil.which('spectacle') is not None)
+        if screen_capture.is_wayland() and kde_capture:
+            # Flask puede ser un servicio iniciado antes de la sesión gráfica.
+            # Elegir aquí la captura directa evita depender de su entorno.
+            url += '?capture=server'
+    return url
 
 
 def install_pin_aliases(url: str, port: int) -> None:
@@ -274,6 +280,28 @@ def install_pin_aliases(url: str, port: int) -> None:
     except Exception as error:  # nunca impedir que se abra el panel
         print(f'[VIGIA] No se pudo preparar el anclado en el gestor de tareas: {error}',
               file=sys.stderr)
+
+
+def share_session_env(port: int) -> None:
+    """Entrega al servidor el entorno de ESTA sesión gráfica.
+
+    El servicio systemd arranca al encender el equipo, antes del login, y la
+    captura directa (spectacle) podía fallar hasta reiniciar Flask. El
+    lanzador se abre desde el escritorio y conoce el entorno exacto."""
+    import json
+    import urllib.request
+    import desktop_session
+    env = {k: os.environ[k] for k in desktop_session.SESSION_KEYS if os.environ.get(k)}
+    if not (env.get('WAYLAND_DISPLAY') or env.get('DISPLAY')):
+        return
+    req = urllib.request.Request(
+        f'http://127.0.0.1:{port}/api/session-env', data=json.dumps(env).encode(),
+        headers={'Content-Type': 'application/json'}, method='POST')
+    try:
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            print(f'[VIGIA] Sesión gráfica entregada al servidor: {resp.read().decode()}')
+    except Exception as error:  # servidor antiguo o sin la ruta: no es grave
+        print(f'[VIGIA] No se pudo entregar la sesión al servidor: {error}', file=sys.stderr)
 
 
 def report_server_mismatch(port):
@@ -348,6 +376,7 @@ def main() -> None:
     # 1) Chrome/Chromium app mode, con la captura adecuada para esta sesión.
     base_url = dashboard_url(port)
     if platform_utils.IS_LINUX:
+        share_session_env(port)
         install_pin_aliases(base_url, port)
     if run_chrome_app(base_url, proc):
         return
