@@ -32,7 +32,7 @@ class TestLauncher(unittest.TestCase):
         cls.launcher = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cls.launcher)
 
-    def test_chrome_inherits_capture_choice_when_reusing_service(self):
+    def test_chrome_uses_native_picker_when_reusing_service(self):
         with patch.dict('os.environ', {'XDG_CURRENT_DESKTOP': 'KDE'}), \
              patch.object(screen_capture, 'is_wayland', return_value=True), \
              patch.object(self.launcher.platform_utils, 'IS_LINUX', True), \
@@ -41,8 +41,10 @@ class TestLauncher(unittest.TestCase):
              patch.object(self.launcher, 'run_chrome_app', return_value=True) as chrome, \
              patch.object(self.launcher.subprocess, 'Popen') as start:
             self.launcher.main()
-        chrome.assert_called_once_with('http://localhost:5001/?capture=server', None)
-        self.pin_aliases.assert_called_once_with('http://localhost:5001/?capture=server', 5001)
+        # Chrome comparte con su selector nativo: el servicio reutilizado puede
+        # haber arrancado sin el entorno gráfico y su captura fallar.
+        chrome.assert_called_once_with('http://localhost:5001/', None)
+        self.pin_aliases.assert_called_once_with('http://localhost:5001/', 5001)
         start.assert_not_called()
         self.desktop_setup.assert_called_once_with()
         self.server_ready.assert_called_once_with(5001, timeout=3)
@@ -68,11 +70,11 @@ class TestLauncher(unittest.TestCase):
              patch.object(self.launcher, 'run_webview', side_effect=ImportError('Sin WebKit')) as webview, \
              patch.object(self.launcher, 'run_browser_fallback') as browser:
             self.launcher.main()
-        webview.assert_called_once_with('http://localhost:5000/?capture=server&launcher=1', None)
-        browser.assert_called_once_with('http://localhost:5000/?capture=server', None)
+        webview.assert_called_once_with('http://localhost:5000/?launcher=1', None)
+        browser.assert_called_once_with('http://localhost:5000/', None)
 
-    def test_other_platforms_and_x11_keep_browser_capture(self):
-        for linux, wayland in [(False, True), (True, False)]:
+    def test_all_sessions_default_to_browser_capture(self):
+        for linux, wayland in [(False, True), (True, False), (True, True)]:
             with self.subTest(linux=linux, wayland=wayland), \
                  patch.dict('os.environ', {'XDG_CURRENT_DESKTOP': 'KDE'}), \
                  patch.object(self.launcher.platform_utils, 'IS_LINUX', linux), \

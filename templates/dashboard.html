@@ -437,6 +437,7 @@
       content: attr(data-placeholder);
       color: var(--muted); pointer-events: none;
     }
+    #compose-body { tab-size: 4; }
     #compose-body ul, #compose-body ol { padding-left: 22px; margin: 4px 0; }
     #compose-body b, #compose-body strong { color: #fff; }
     #compose-footer {
@@ -1734,6 +1735,7 @@ function enviarCompose() {
   if (typeof _sourceMode !== 'undefined' && _sourceMode) toggleSource();
   const titulo = document.getElementById('compose-titulo').value.trim()
                  || 'Mensaje del profesor';
+  _protegerTabs(document.getElementById('compose-body'));
   const body   = document.getElementById('compose-body').innerHTML.trim();
   const attachments = _composeFiles.map(f => ({ name: f.name, type: f.type, data: f.data }));
   // Requiere al menos texto o adjuntos
@@ -1757,6 +1759,70 @@ function enviarCompose() {
   }
   cerrarCompose();
 }
+
+// ── Tabulaciones en el mensaje ─────────────────────────────────────────────
+// En HTML un «\t» suelto es espacio colapsable: el editor no lo muestra y el
+// alumno lo recibía como un espacio. Cada tabulación va en un
+// <span style="white-space:pre">, que el editor pinta y client.py conserva.
+const _TAB_SPAN = '<span style="white-space:pre">\t</span>';
+
+function _enPre(node, root) {
+  for (let n = node.parentNode; n && n !== root; n = n.parentNode) {
+    if (n.nodeType === 1 && (n.tagName === 'PRE' || /^pre/.test(n.style.whiteSpace))) return true;
+  }
+  return false;
+}
+
+// Envuelve las tabulaciones sueltas (p. ej. de un texto pegado).
+function _protegerTabs(root) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodos = [];
+  while (walker.nextNode()) {
+    const n = walker.currentNode;
+    if (n.nodeValue.includes('\t') && !_enPre(n, root)) nodos.push(n);
+  }
+  nodos.forEach(n => {
+    const frag = document.createDocumentFragment();
+    n.nodeValue.split('\t').forEach((trozo, i) => {
+      if (i) {
+        const s = document.createElement('span');
+        s.style.whiteSpace = 'pre';
+        s.textContent = '\t';
+        frag.appendChild(s);
+      }
+      if (trozo) frag.appendChild(document.createTextNode(trozo));
+    });
+    n.parentNode.replaceChild(frag, n);
+  });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const body = document.getElementById('compose-body');
+  // Tab escribe una tabulación en vez de saltar al siguiente control.
+  // En una lista mantiene el comportamiento de editor: sangrar/desangrar.
+  body.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab' || e.ctrlKey || e.altKey || e.metaKey) return;
+    e.preventDefault();
+    const sel = window.getSelection();
+    const nodo = sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
+    const el = nodo && (nodo.nodeType === 1 ? nodo : nodo.parentElement);
+    if (el && el.closest('li') && body.contains(el.closest('li'))) {
+      document.execCommand(e.shiftKey ? 'outdent' : 'indent', false, null);
+    } else if (!e.shiftKey) {
+      document.execCommand('insertHTML', false, _TAB_SPAN);
+    }
+  });
+  // Texto pegado con tabulaciones (código, columnas de una hoja de cálculo):
+  // se pega como texto con las tabulaciones protegidas para que no se pierdan.
+  body.addEventListener('paste', (e) => {
+    const texto = e.clipboardData && e.clipboardData.getData('text/plain');
+    if (!texto || !texto.includes('\t')) return;
+    e.preventDefault();
+    const html = texto.replace(/\r\n?/g, '\n').split('\n')
+      .map(l => escHtml(l).split('\t').join(_TAB_SPAN)).join('<br>');
+    document.execCommand('insertHTML', false, html);
+  });
+});
 
 function fmt(cmd) {
   document.getElementById('compose-body').focus();
@@ -2798,8 +2864,11 @@ function compartirDesdeNavegador() {
         }
       })
       .catch(err => {
-        if (err.name === 'NotAllowedError' || err.name === 'AbortError') return;
-        // Si getDisplayMedia falla, intentar captura del servidor como fallback
+        // Cancelar el selector no es un error. «Permission denied by system»
+        // (también NotAllowedError) sí lo es: el portal ScreenCast de KDE no
+        // pudo arrancar (p. ej. KWin en QPainter) → probar la captura directa.
+        const porSistema = /system/i.test(err.message || '');
+        if (err.name === 'AbortError' || (err.name === 'NotAllowedError' && !porSistema)) return;
         console.warn('[VIGIA] getDisplayMedia falló, usando captura del servidor:', err.message);
         abrirScreenModal();
       })

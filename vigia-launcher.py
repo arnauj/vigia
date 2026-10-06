@@ -249,17 +249,11 @@ def run_browser_fallback(url: str, proc) -> None:  # proc puede ser None
 
 
 def dashboard_url(port: int) -> str:
-    url = f'http://localhost:{port}/'
-    if platform_utils.IS_LINUX:
-        import screen_capture
-        desktop = os.environ.get('XDG_CURRENT_DESKTOP', '').lower()
-        kde_capture = any(d in desktop for d in ('kde', 'plasma')) or (
-            not desktop and shutil.which('spectacle') is not None)
-        if screen_capture.is_wayland() and kde_capture:
-            # Flask puede ser un servicio iniciado antes de la sesión gráfica.
-            # Elegir aquí la captura directa evita depender de su entorno.
-            url += '?capture=server'
-    return url
+    # Sin «?capture=server»: Chrome comparte con su selector nativo (portal
+    # ScreenCast de KDE), que funciona aunque el servicio Flask arrancara antes
+    # de la sesión gráfica. La captura del servidor queda como respaldo
+    # automático si getDisplayMedia falla, o explícita con ?capture=server.
+    return f'http://localhost:{port}/'
 
 
 def install_pin_aliases(url: str, port: int) -> None:

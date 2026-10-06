@@ -2093,6 +2093,10 @@ def _render_html_mensaje(txt, html_src):
                 undo += ['bold', 'size']
             elif tag in ('p', 'div', 'blockquote', 'tr'):
                 self._nl()
+            if re.search(r'white-space\s*:\s*pre(?!-line)', a.get('style', '')):
+                # <span style="white-space:pre">\t</span>: así protege el
+                # compositor las tabulaciones (y Chrome sus «tab spans»).
+                self.pre += 1; undo.append('pre')
             elif tag == 'br':
                 txt.insert('end', '\n')
             elif tag in ('ul', 'ol'):
@@ -2136,11 +2140,11 @@ def _render_html_mensaje(txt, html_src):
             if self.pre:
                 self._emit(data)
                 return
-            s = re.sub(r'\s+', ' ', data)
-            if s == ' ' and self._linestart():
-                return
+            # Colapsar solo el espacio en blanco del HTML: las tabulaciones
+            # y los &nbsp; los ha escrito el profesor y deben llegar tal cual.
+            s = re.sub(r'[ \n\r\f\v]+', ' ', data)
             if self._linestart():
-                s = s.lstrip()
+                s = s.lstrip(' ')
             self._emit(s)
 
     _R().feed(html_src)
@@ -2161,6 +2165,12 @@ class _VentanaMensaje:
             txt = tk.Text(c, bg='#1a1d27', fg='#e2e8f0', font=('Segoe UI', 12),
                           wrap='word', height=6, width=52, relief='flat',
                           highlightthickness=0)
+            try:
+                # Tabulaciones de 4 espacios, como en el compositor del panel.
+                import tkinter.font as tkfont
+                txt.config(tabs=(tkfont.Font(font=txt['font']).measure('    '),))
+            except Exception:
+                pass
             try:
                 _render_html_mensaje(txt, body_html)
             except Exception:
