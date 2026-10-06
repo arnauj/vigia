@@ -215,20 +215,22 @@ class TestServerStreaming(unittest.TestCase):
         self.teacher.emit('remote_input', {'sid': self.sid, 'type': 'mousedown'})
         self.assertEqual(self.events(self.student, 'do_input'), [])
 
-    def test_direct_share_default_only_for_local_kde_wayland(self):
-        for address, desktop, wayland, expected in [
-            ('127.0.0.1', 'KDE', True, 'true'),
-            ('::1', 'plasma', True, 'true'),
-            ('192.0.2.25', 'KDE', True, 'false'),
-            ('127.0.0.1', 'KDE', False, 'false'),
-            ('127.0.0.1', 'GNOME', True, 'false'),
+    def test_browser_share_is_default_even_on_kde_wayland(self):
+        # La captura del servidor fallaba si el servicio arrancó antes que la
+        # sesión gráfica; el selector nativo de Chrome no depende de eso.
+        for address, desktop, wayland in [
+            ('127.0.0.1', 'KDE', True),
+            ('::1', 'plasma', True),
+            ('192.0.2.25', 'KDE', True),
+            ('127.0.0.1', 'KDE', False),
+            ('127.0.0.1', '', True),
         ]:
             with self.subTest(address=address, desktop=desktop, wayland=wayland), \
                  patch.dict('os.environ', {'XDG_CURRENT_DESKTOP': desktop}), \
                  patch.object(self.server.screen_capture, 'is_wayland', return_value=wayland):
                 response = self.server.app.test_client().get('/', environ_base={'REMOTE_ADDR': address})
                 self.assertEqual(response.status_code, 200)
-                self.assertIn(f'const PREFER_SERVER_CAPTURE = {expected}', response.text)
+                self.assertIn('const PREFER_SERVER_CAPTURE = false', response.text)
 
     def test_version_identifies_running_server_and_panel(self):
         from vigia_version import VERSION
@@ -251,13 +253,6 @@ class TestServerStreaming(unittest.TestCase):
         self.assertTrue(screens[0]['thumb'].startswith('data:image/jpeg;base64,'))
         self.assertEqual(self.events(self.student, 'teacher_screen'), [])
         capture.close.assert_called_once()
-
-    def test_service_without_desktop_environment_uses_installed_kde_capture(self):
-        with patch.dict('os.environ', {'XDG_CURRENT_DESKTOP': ''}), \
-             patch.object(self.server.screen_capture, 'is_wayland', return_value=True), \
-             patch.object(self.server.shutil, 'which', return_value='/usr/bin/spectacle'):
-            response = self.server.app.test_client().get('/', environ_base={'REMOTE_ADDR': '127.0.0.1'})
-        self.assertIn('const PREFER_SERVER_CAPTURE = true', response.text)
 
     def test_launcher_can_choose_capture_independently_of_service_environment(self):
         for address, query, expected in [

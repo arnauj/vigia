@@ -813,6 +813,47 @@ class TestVentanaProfesorEncima(unittest.TestCase):
         v.top.lift.assert_called_once()
 
 
+class _TextoFalso:
+    """tk.Text mínimo: guarda el texto insertado (sin Tk)."""
+    def __init__(self): self.contenido = ''
+    def index(self, _pos):
+        lineas = self.contenido.split('\n')
+        return f'{len(lineas)}.{len(lineas[-1])}'
+    def insert(self, _pos, s, *_tags): self.contenido += s
+    def tag_configure(self, *a, **k): pass
+    def tag_bind(self, *a, **k): pass
+    def winfo_rgb(self, _c): return (0, 0, 0)
+    def config(self, **k): pass
+
+
+class TestMensajeTabulaciones(unittest.TestCase):
+    """Las tabulaciones del mensaje del profesor llegan al alumno."""
+
+    def _render(self, html):
+        t = _TextoFalso()
+        client._render_html_mensaje(t, html)
+        return t.contenido
+
+    def test_tab_protegida_por_el_compositor(self):
+        html = ('<div>Nombre<span style="white-space:pre">\t</span>Nota</div>'
+                '<div><span style="white-space: pre;">\t</span>sangrado</div>')
+        self.assertEqual(self._render(html), 'Nombre\tNota\n\tsangrado\n')
+
+    def test_tab_suelta_no_se_convierte_en_espacio(self):
+        self.assertEqual(self._render('<p>a\tb</p>'), 'a\tb\n')
+        self.assertEqual(self._render('<p>\tc</p>'), '\tc\n')
+
+    def test_espacios_del_html_siguen_colapsando(self):
+        self.assertEqual(self._render('<p>\n   hola\n   mundo  </p>'), 'hola mundo \n')
+
+    def test_compositor_protege_tabs(self):
+        with open(os.path.join(os.path.dirname(__file__), 'templates', 'dashboard.html'),
+                  encoding='utf-8') as f:
+            html = f.read()
+        self.assertIn('<span style="white-space:pre">\\t</span>', html)
+        self.assertIn("_protegerTabs(document.getElementById('compose-body'))", html)
+
+
 class TestScreenCaptureSession(unittest.TestCase):
     """Detección de tipo de sesión en screen_capture (Wayland vs X11)."""
 
@@ -887,7 +928,7 @@ if __name__ == '__main__':
                 TestCoordenadas, TestDataChannelRouting,
                 TestProcesarInputYdotool, TestVigiaInputPointer,
                 TestVigiaInputTeclado, TestCacheCapturas, TestStreamProfesor,
-                TestVentanaProfesorEncima,
+                TestVentanaProfesorEncima, TestMensajeTabulaciones,
                 TestScreenCaptureSession):
         suite.addTests(loader.loadTestsFromTestCase(cls))
     runner = unittest.TextTestRunner(verbosity=2)

@@ -155,6 +155,14 @@ templates/dashboard.html ──────────────────�
   antes de volver a JPEG. También se activa si ICE falla tras P2P activo.
   Resolución de pantalla: viene de screen_info (Socket.IO); onloadedmetadata
   solo actúa como fallback si screen_info aún no llegó (valores 1280×720).
+  Compartir pantalla: por defecto getDisplayMedia (selector nativo de Chrome /
+  portal de KDE). La captura del servidor solo se usa si getDisplayMedia falla
+  («Permission denied by system», p. ej. KWin en QPainter) o con ?capture=server:
+  el servicio Flask puede haber arrancado antes de la sesión gráfica y su
+  captura fallaba al abrir el panel anclado en KDE.
+  Tabulaciones en mensajes: Tab inserta <span style="white-space:pre">\t</span>
+  (en listas sangra/desangra) y _protegerTabs() envuelve las sueltas al pegar o
+  enviar; client.py conserva \t y &nbsp; (solo colapsa espacios/saltos del HTML).
   Adjuntos en mensajes: _composeFiles [], _addFiles(), _renderFileList().
   IMPORTANTE: declarar `let _composeFiles` antes de cualquier código
   que pueda lanzar excepciones (riesgo de TDZ en JS).
