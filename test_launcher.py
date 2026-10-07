@@ -66,6 +66,33 @@ class TestLauncher(unittest.TestCase):
         start.assert_called_once()
         self.assertIs(chrome.call_args[0][1], start.return_value)
 
+    def test_server_of_user_still_logged_in_is_reused_with_browser_capture(self):
+        import os
+        info = {'app': 'vigia-server', 'version': 'x', 'graphical': True,
+                'session': '9', 'uid': os.getuid() + 1, 'user': 'profesor'}
+        with patch.object(self.launcher.platform_utils, 'IS_LINUX', True), \
+             patch.object(self.launcher.sys, 'argv', ['vigia-launcher.py']), \
+             patch.object(self.launcher, 'wait_for_port', return_value=True), \
+             patch.object(self.launcher, 'server_info', return_value=info), \
+             patch.object(self.launcher, 'retire_outside_server', return_value=False), \
+             patch.object(self.launcher, 'run_chrome_app', return_value=True) as chrome, \
+             patch.object(self.launcher.subprocess, 'Popen') as start:
+            self.launcher.main()
+        start.assert_not_called()
+        chrome.assert_called_once_with('http://localhost:5000/?capture=browser', None)
+        self.share_env.assert_not_called()
+
+    def test_launcher_started_server_dies_with_launcher(self):
+        import os
+        with patch.object(self.launcher.platform_utils, 'IS_LINUX', True), \
+             patch.object(self.launcher.platform_utils, 'IS_WINDOWS', False), \
+             patch.object(self.launcher.sys, 'argv', ['vigia-launcher.py']), \
+             patch.object(self.launcher, 'wait_for_port', return_value=False), \
+             patch.object(self.launcher, 'run_chrome_app', return_value=True), \
+             patch.object(self.launcher.subprocess, 'Popen') as start:
+            self.launcher.main()
+        self.assertEqual(start.call_args.kwargs['env']['VIGIA_PARENT_PID'], str(os.getpid()))
+
     def test_old_server_on_port_is_not_reused(self):
         self.server_ready.return_value = False
         with patch.object(self.launcher.sys, 'argv', ['vigia-launcher.py']), \

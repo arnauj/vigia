@@ -141,6 +141,18 @@ def retire_autostart_services(users=None):
     return cleaned
 
 
+def disable_linger(users):
+    """El linger solo lo activaba VIGIA para ese servicio: con él el gestor
+    systemd del usuario arrancaba al encender el equipo aunque no iniciara
+    sesión, y sus procesos podían sobrevivir a su logout."""
+    import shutil
+    import subprocess
+    exe = shutil.which('loginctl')
+    for user in users if exe else ():
+        subprocess.run([exe, 'disable-linger', user], capture_output=True,
+                       timeout=10, check=False)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     action = parser.add_mutually_exclusive_group(required=True)
@@ -154,6 +166,7 @@ if __name__ == '__main__':
         if options.retire_all:
             users = retire_autostart_services()
             if users:
+                disable_linger(users)
                 print(f'[VIGIA] Arranque automático retirado de: {", ".join(users)}')
             count = stop_installed_servers(options.retire_all)
             print(f'[VIGIA] Procesos anteriores retirados: {count}')

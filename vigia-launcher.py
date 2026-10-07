@@ -249,8 +249,12 @@ def run_browser_fallback(url: str, proc) -> None:  # proc puede ser None
             pass
 
 
-def dashboard_url(port: int) -> str:
+def dashboard_url(port: int, foreign: bool = False) -> str:
     url = f'http://localhost:{port}/'
+    if foreign:
+        # Servidor de otro usuario: su captura directa vería SU sesión (o
+        # ninguna). Compartir esta pantalla solo es posible desde Chrome.
+        return url + '?capture=browser'
     if platform_utils.IS_LINUX:
         import screen_capture
         desktop = os.environ.get('XDG_CURRENT_DESKTOP', '').lower()
@@ -341,10 +345,22 @@ def retire_outside_server(port, info=None) -> bool:
         print(f'[VIGIA] No se pudo detener el servidor anterior: {error}', file=sys.stderr)
     if _port_freed(port):
         return True
+    owner = (info or {}).get('user') or f"uid {(info or {}).get('uid')}"
+    if (info or {}).get('graphical'):
+        # VIGIA abierto en la sesión de OTRO usuario conectado a la vez (cambio
+        # rápido de usuario): no se le cierra la clase. Se reutiliza su
+        # servidor; la pantalla propia se comparte con el selector de Chrome.
+        message = (f'VIGIA ya está abierto en la sesión del usuario {owner}. '
+                   'Se usará ese servidor; para compartir tu pantalla se usará '
+                   'el selector de Chrome. Cierra VIGIA en su sesión para tener '
+                   'el tuyo propio.')
+        print(f'[VIGIA] {message}', file=sys.stderr)
+        if shutil.which('kdialog'):
+            subprocess.Popen(['kdialog', '--title', 'VIGIA', '--passivepopup', message, '10'])
+        return False
     # Pertenece a otro usuario (el antiguo servicio se instalaba en quien hizo
     # la instalación): hace falta root UNA vez para retirarlo de todos.
-    owner = (info or {}).get('uid')
-    print(f'[VIGIA] El servidor anterior es de otro usuario (uid {owner}); '
+    print(f'[VIGIA] El servidor anterior es del usuario {owner}; '
           'pidiendo permiso para retirarlo…', file=sys.stderr)
     cmd = [sys.executable, os.path.join(SCRIPT_DIR, 'server_runtime.py'),
            '--retire-all', SCRIPT_DIR]
@@ -394,6 +410,7 @@ def main() -> None:
     # sin arrancar un segundo proceso. Si nació fuera de esta sesión gráfica
     # (antiguo servicio del arranque), sustituirlo por uno abierto desde aquí.
     reuse = False
+    foreign = False
     if wait_for_port(port, timeout=1.5):
         if not wait_for_current_server(port, timeout=3):
             report_server_mismatch(port)
@@ -402,6 +419,9 @@ def main() -> None:
         reuse = not (platform_utils.IS_LINUX
                      and started_outside_session(info)
                      and retire_outside_server(port, info))
+        uid = (info or {}).get('uid')
+        foreign = reuse and isinstance(uid, int) and hasattr(os, 'getuid') \
+            and uid != os.getuid()
     if reuse:
         print(f'[VIGIA] Servidor detectado en :{port}, reutilizando…')
         proc = None
@@ -439,6 +459,8 @@ def main() -> None:
                 popen_kwargs['args'] = [_py, server_py, '--no-browser', str(port)]
         else:
             popen_kwargs['args'] = [sys.executable, server_py, str(port)]
+            # El servidor se cierra solo si este lanzador muere (logout).
+            popen_kwargs['env'] = {**os.environ, 'VIGIA_PARENT_PID': str(os.getpid())}
         proc = subprocess.Popen(**popen_kwargs)
         if not wait_for_current_server(port, timeout=30):
             print(f'[VIGIA] El servidor {VERSION} no respondió en 30 s', file=sys.stderr)
@@ -446,8 +468,8 @@ def main() -> None:
             sys.exit(1)
 
     # 1) Chrome/Chromium app mode, con la captura adecuada para esta sesión.
-    base_url = dashboard_url(port)
-    if platform_utils.IS_LINUX:
+    base_url = dashboard_url(port, foreign)
+    if platform_utils.IS_LINUX and not foreign:
         share_session_env(port)
         install_pin_aliases(base_url, port)
     if run_chrome_app(base_url, proc):
