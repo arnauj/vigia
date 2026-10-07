@@ -32,6 +32,35 @@ class TestStartedOutsideSession(unittest.TestCase):
         self.assertFalse(runtime.started_outside_session({'version': VERSION}, {}))
 
 
+class TestRetireServices(unittest.TestCase):
+    def test_removes_unit_and_wants_link_of_every_user(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as root:
+            users = []
+            for name in ('admin', 'profe', 'otro'):
+                home = Path(root, name)
+                base = home / '.config' / 'systemd' / 'user'
+                (base / 'default.target.wants').mkdir(parents=True)
+                if name != 'otro':
+                    (base / runtime.SERVICE).write_text('[Unit]\n')
+                    (base / 'default.target.wants' / runtime.SERVICE).symlink_to(
+                        base / runtime.SERVICE)
+                (base / 'otro.service').write_text('x')
+                users.append(SimpleNamespace(pw_name=name, pw_dir=str(home)))
+            self.assertEqual(runtime.retire_autostart_services(users), ['admin', 'profe'])
+            for name in ('admin', 'profe'):
+                base = Path(root, name, '.config', 'systemd', 'user')
+                self.assertFalse((base / runtime.SERVICE).exists())
+                self.assertFalse((base / 'default.target.wants' / runtime.SERVICE).is_symlink())
+                self.assertTrue((base / 'otro.service').exists())
+
+    def test_server_of_other_user_is_outside(self):
+        info = {'graphical': True, 'session': '3', 'uid': os.getuid() + 1}
+        self.assertTrue(runtime.started_outside_session(info, {'XDG_SESSION_ID': '3'}))
+        info['uid'] = os.getuid()
+        self.assertFalse(runtime.started_outside_session(info, {'XDG_SESSION_ID': '3'}))
+
+
 class TestVersionCheck(unittest.TestCase):
     def setUp(self):
         self.status = 200

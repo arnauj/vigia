@@ -239,9 +239,13 @@ def api_session_env():
     return jsonify(ok=ok, session=screen_capture.session_type())
 
 
+def _uid():
+    return os.getuid() if hasattr(os, 'getuid') else None
+
+
 @app.route('/api/version')
 def api_version():
-    response = jsonify(app='vigia-server', version=VERSION, pid=os.getpid(),
+    response = jsonify(app='vigia-server', version=VERSION, pid=os.getpid(), uid=_uid(),
                        graphical=_LAUNCH_GRAPHICAL, session=_LAUNCH_SESSION)
     response.headers['Cache-Control'] = 'no-store'
     return response

@@ -305,13 +305,22 @@ def share_session_env(port: int) -> None:
         print(f'[VIGIA] No se pudo entregar la sesión al servidor: {error}', file=sys.stderr)
 
 
-def retire_outside_server(port) -> bool:
+def _port_freed(port, timeout=5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not wait_for_port(port, timeout=0.2):
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def retire_outside_server(port, info=None) -> bool:
     """Retira el servidor que arrancó fuera de esta sesión gráfica.
 
     Es lo que antes había que hacer a mano (kill + abrir VIGIA): un servidor
-    nacido antes del login —el antiguo servicio systemd— no podía usar la
-    captura directa y el panel acababa siempre en el selector de Chrome.
-    Devuelve True si el puerto quedó libre para arrancar uno nuevo."""
+    nacido antes del login —el antiguo servicio systemd, a veces de OTRO
+    usuario— no podía usar la captura directa y el panel acababa siempre en el
+    selector de Chrome. Devuelve True si el puerto quedó libre."""
     print('[VIGIA] El servidor activo se abrió fuera de esta sesión; reiniciándolo…')
     systemctl = shutil.which('systemctl')
     if systemctl:
@@ -327,14 +336,36 @@ def retire_outside_server(port) -> bool:
     except OSError:
         pass
     try:
-        stop_installed_servers(SCRIPT_DIR)
+        stop_installed_servers(SCRIPT_DIR, timeout=2)
     except (OSError, RuntimeError) as error:
         print(f'[VIGIA] No se pudo detener el servidor anterior: {error}', file=sys.stderr)
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline:
-        if not wait_for_port(port, timeout=0.2):
+    if _port_freed(port):
+        return True
+    # Pertenece a otro usuario (el antiguo servicio se instalaba en quien hizo
+    # la instalación): hace falta root UNA vez para retirarlo de todos.
+    owner = (info or {}).get('uid')
+    print(f'[VIGIA] El servidor anterior es de otro usuario (uid {owner}); '
+          'pidiendo permiso para retirarlo…', file=sys.stderr)
+    cmd = [sys.executable, os.path.join(SCRIPT_DIR, 'server_runtime.py'),
+           '--retire-all', SCRIPT_DIR]
+    for prefix in (['sudo', '-n'], ['pkexec']):
+        if not shutil.which(prefix[0]):
+            continue
+        try:
+            result = subprocess.run(prefix + cmd, capture_output=True, text=True,
+                                    timeout=120, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if result.returncode == 0 and _port_freed(port):
             return True
-        time.sleep(0.2)
+    message = ('Hay un servidor VIGIA de otro usuario ocupando el puerto '
+               f'{port} (el antiguo arranque automático). Sin él la captura '
+               'directa no funciona. Ejecuta en una terminal:\n\n'
+               f'sudo {sys.executable} {cmd[1]} --retire-all {SCRIPT_DIR}\n\n'
+               'y vuelve a abrir VIGIA.')
+    print(f'[VIGIA] {message}', file=sys.stderr)
+    if shutil.which('kdialog'):
+        subprocess.run(['kdialog', '--title', 'VIGIA', '--sorry', message], check=False)
     return False
 
 
@@ -367,9 +398,10 @@ def main() -> None:
         if not wait_for_current_server(port, timeout=3):
             report_server_mismatch(port)
             sys.exit(1)
+        info = server_info(port)
         reuse = not (platform_utils.IS_LINUX
-                     and started_outside_session(server_info(port))
-                     and retire_outside_server(port))
+                     and started_outside_session(info)
+                     and retire_outside_server(port, info))
     if reuse:
         print(f'[VIGIA] Servidor detectado en :{port}, reutilizando…')
         proc = None

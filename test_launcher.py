@@ -62,7 +62,7 @@ class TestLauncher(unittest.TestCase):
              patch.object(self.launcher, 'run_chrome_app', return_value=True) as chrome, \
              patch.object(self.launcher.subprocess, 'Popen') as start:
             self.launcher.main()
-        retire.assert_called_once_with(5000)
+        retire.assert_called_once_with(5000, info)
         start.assert_called_once()
         self.assertIs(chrome.call_args[0][1], start.return_value)
 

@@ -137,6 +137,12 @@ vigia-launcher.py ────────────────────�
   arranque) lo retira (systemctl stop/disable + server_runtime.stop_installed_
   servers) y arranca uno propio: un servidor así no podía usar spectacle y el
   panel acababa siempre en el selector de Chrome hasta matarlo a mano.
+  Si ese servidor es de OTRO usuario (uid distinto en /api/version: el servicio
+  se instalaba en quien hizo la instalación, p.ej. «profesor», y con linger
+  arrancaba al encender aunque nadie iniciara sesión con él) pide root UNA vez
+  (sudo -n → pkexec) para `server_runtime.py --retire-all`, que borra el
+  servicio y su enlace default.target.wants de TODOS los usuarios y para los
+  servidores de la instalación. El postinst y el prerm también lo ejecutan.
   Anclado en KDE: en Wayland la ventana Chrome --app NO se llama «vigia» sino
   chrome-localhost__-Default (--class solo afecta a X11). Sin un .desktop con
   ese nombre, «Fijar en el gestor de tareas» se perdía al reiniciar. El .deb
