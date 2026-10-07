@@ -177,47 +177,21 @@ StartupNotify=true
 EOD
 chmod 644 "$APPS_DIR/vigia-server.desktop"
 
-# ── Servicio systemd de usuario (arranque automático) ────────
+# ── Sin arranque automático ──────────────────────────────────
+# El servidor NO arranca con el equipo: lo abre el profesor desde el menú
+# (VIGIA Servidor) y vigia-launcher.py lo arranca y lo para con la ventana.
+# Retirar el servicio systemd de versiones anteriores, que sí arrancaba solo.
 if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
-  SYSTEMD_DIR="$REAL_HOME/.config/systemd/user"
-  su - "$REAL_USER" -c "mkdir -p '$SYSTEMD_DIR'"
-  cat > "$SYSTEMD_DIR/vigia-servidor.service" <<EOD
-[Unit]
-Description=VIGIA — Servidor del Panel del Profesor
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=$PYTHON3 $VIGIA_DIR/server.py 5000
-WorkingDirectory=$VIGIA_DIR
-Environment=PYTHONUNBUFFERED=1
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-EOD
-  chown "$REAL_USER:" "$SYSTEMD_DIR/vigia-servidor.service"
-  loginctl enable-linger "$REAL_USER" 2>/dev/null || true
+  _user_systemctl disable vigia-servidor 2>/dev/null || true
+  rm -f "$REAL_HOME/.config/systemd/user/vigia-servidor.service" 2>/dev/null || true
+  _user_systemctl daemon-reload 2>/dev/null || true
   # No reiniciar el compositor: cerraría las aplicaciones de la sesión.
   runuser -u "$REAL_USER" -- env \
     "XDG_RUNTIME_DIR=/run/user/$REAL_UID" \
     "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$REAL_UID/bus" \
     "$PYTHON3" "$VIGIA_DIR/desktop_setup.py" || \
     echo '[!] La configuración de KDE se volverá a comprobar al abrir VIGIA.'
-  # enable --now no reinicia un servicio que ya está activo: conservaría el
-  # código y las plantillas anteriores pese a haber reinstalado el paquete.
-  if _user_systemctl daemon-reload && \
-     _user_systemctl enable vigia-servidor && \
-     _user_systemctl restart vigia-servidor; then
-    # Type=simple puede anunciar inicio y fallar después por puerto ocupado.
-    # Confirmar por HTTP qué versión ha cargado el proceso que responde.
-    "$PYTHON3" "$VIGIA_DIR/server_runtime.py" --wait-current 5000
-    echo "Servicio 'vigia-servidor' actualizado y reiniciado para $REAL_USER."
-  else
-    echo "[!] No se pudo reiniciar el servidor. En la sesión del profesor ejecuta:"
-    echo "    systemctl --user restart vigia-servidor"
-  fi
+  echo "VIGIA Servidor no arranca automáticamente: ábrelo desde el menú de inicio."
 fi
 
 # ── Sudo sin contraseña (necesario para exec_command remoto) ──
