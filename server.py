@@ -17,6 +17,11 @@ import subprocess
 import webbrowser
 import shutil
 import platform_utils
+# Entorno con el que se abrió el proceso, ANTES de que screen_capture lo
+# complete: el lanzador sabe así si este servidor nació fuera de la sesión
+# gráfica (antiguo servicio systemd) y debe sustituirlo.
+_LAUNCH_GRAPHICAL = bool(os.environ.get('WAYLAND_DISPLAY') or os.environ.get('DISPLAY'))
+_LAUNCH_SESSION = os.environ.get('XDG_SESSION_ID', '')
 import screen_capture
 from vigia_version import VERSION
 from streaming import PRESETS, normalize_config
@@ -236,7 +241,8 @@ def api_session_env():
 
 @app.route('/api/version')
 def api_version():
-    response = jsonify(app='vigia-server', version=VERSION)
+    response = jsonify(app='vigia-server', version=VERSION, pid=os.getpid(),
+                       graphical=_LAUNCH_GRAPHICAL, session=_LAUNCH_SESSION)
     response.headers['Cache-Control'] = 'no-store'
     return response
 
@@ -483,23 +489,31 @@ def _get_window_region(wid):
     return platform_utils.get_window_region(wid)
 
 
-def _crear_capturador_profesor(verbose=True, intentos=3):
+def _crear_capturador_profesor(verbose=True, intentos=3, espera_max=0.0, al_esperar=None):
     """Capturador directo (sin portal) con reintentos.
 
     Justo después de encender el equipo Plasma aún está arrancando y la primera
     llamada a spectacle puede fallar aunque segundos después funcione; antes el
     error obligaba a matar el servidor. Cada intento vuelve a leer el entorno
-    de la sesión gráfica (screen_capture.session_type → ensure_session_env)."""
+    de la sesión gráfica (screen_capture.session_type → ensure_session_env).
+    Con espera_max (s) se sigue reintentando hasta ese plazo; al_esperar(error)
+    se llama tras cada fallo para avisar al panel."""
     error = None
     opciones = {'allow_portal': False} if verbose else {'verbose': False, 'allow_portal': False}
-    for intento in range(intentos):
+    limite = time.monotonic() + espera_max
+    intento = 0
+    while True:
         try:
             return screen_capture.create_capturer(**opciones)
         except Exception as e:
             error = e
-            if intento + 1 < intentos:
-                socketio.sleep(1.0 + intento)
-    raise error
+            intento += 1
+            print(f'[!] Captura directa (intento {intento}): {e}')
+            if intento >= intentos and time.monotonic() >= limite:
+                raise error
+            if al_esperar is not None:
+                al_esperar(e)
+            socketio.sleep(min(1.0 + intento, 3.0))
 
 
 def _teacher_capture_loop(capture):
@@ -794,7 +808,16 @@ def on_get_screens():
         screens = []
         # Este selector es la alternativa al portal del navegador. No abrir
         # otro portal al generar miniaturas ni al comenzar la transmisión.
-        capturer = _crear_capturador_profesor(verbose=False)
+        sid = request.sid
+
+        def _esperando(_error):
+            socketio.emit('screens_status', {
+                'message': 'Esperando a que el escritorio termine de arrancar…'}, to=sid)
+
+        # Recién encendido el equipo Plasma tarda en aceptar capturas: esperar
+        # hasta 30 s antes de recurrir al selector de Chrome.
+        capturer = _crear_capturador_profesor(verbose=False, espera_max=30.0,
+                                              al_esperar=_esperando)
         try:
             if capturer.name == 'mss':
                 sct = capturer._sct

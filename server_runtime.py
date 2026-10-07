@@ -13,17 +13,38 @@ from urllib.request import ProxyHandler, build_opener
 from vigia_version import VERSION
 
 
-def server_version(port):
+def server_info(port):
+    """Datos de /api/version del servidor VIGIA local, o None."""
     try:
         # La comprobación local no debe pasar por un proxy HTTP del aula.
         with build_opener(ProxyHandler({})).open(
                 f'http://127.0.0.1:{int(port)}/api/version', timeout=1) as response:
             data = json.loads(response.read(8192))
-        if data.get('app') == 'vigia-server':
-            return data.get('version')
+        if isinstance(data, dict) and data.get('app') == 'vigia-server':
+            return data
     except (OSError, ValueError, AttributeError, URLError):
         pass
     return None
+
+
+def server_version(port):
+    info = server_info(port)
+    return info.get('version') if info else None
+
+
+def started_outside_session(info, env=None):
+    """True si el servidor que responde NO se abrió desde esta sesión gráfica.
+
+    Es el caso del antiguo servicio systemd (arrancaba con el equipo, antes del
+    login) o de un proceso que sobrevivió a una sesión anterior: su captura
+    directa (spectacle) fallaba hasta matarlo y abrir VIGIA de nuevo."""
+    if not info or 'graphical' not in info:
+        return False
+    if not info.get('graphical'):
+        return True
+    env = os.environ if env is None else env
+    mine, theirs = env.get('XDG_SESSION_ID'), info.get('session')
+    return bool(mine and theirs and mine != theirs)
 
 
 def wait_for_current_server(port, timeout=15):

@@ -132,6 +132,11 @@ vigia-launcher.py ────────────────────�
   3. Navegador del sistema (webbrowser.open) como último recurso.
   Detecta si Flask ya corre (wait_for_port 1.5 s; p.ej. server.py a mano) y lo
   reutiliza sin arrancar un segundo proceso ni matarlo al cerrar la ventana.
+  PERO si ese servidor nació fuera de la sesión gráfica (/api/version devuelve
+  graphical=False o un XDG_SESSION_ID distinto: el antiguo servicio systemd del
+  arranque) lo retira (systemctl stop/disable + server_runtime.stop_installed_
+  servers) y arranca uno propio: un servidor así no podía usar spectacle y el
+  panel acababa siempre en el selector de Chrome hasta matarlo a mano.
   Anclado en KDE: en Wayland la ventana Chrome --app NO se llama «vigia» sino
   chrome-localhost__-Default (--class solo afecta a X11). Sin un .desktop con
   ese nombre, «Fijar en el gestor de tareas» se perdía al reiniciar. El .deb
@@ -164,8 +169,10 @@ templates/dashboard.html ──────────────────�
   se muestra el error con el botón «Usar el selector de Chrome…».
   El servidor NO arranca solo con el equipo (lo abre el profesor). El lanzador
   (que sí corre en la sesión) envía su entorno a POST /api/session-env (solo
-  localhost) → desktop_session.set_session_override, y la captura reintenta 3
-  veces (_crear_capturador_profesor) mientras Plasma termina de arrancar.
+  localhost) → desktop_session.set_session_override, y la captura reintenta
+  (_crear_capturador_profesor) mientras Plasma termina de arrancar: get_screens
+  espera hasta 30 s avisando con screens_status («Esperando a que el
+  escritorio…») y solo entonces recurre al selector de Chrome.
   Tabulaciones en mensajes: Tab inserta <span style="white-space:pre">\t</span>
   (en listas sangra/desangra) y _protegerTabs() envuelve las sueltas al pegar o
   enviar; client.py conserva \t y &nbsp; (solo colapsa espacios/saltos del HTML).
@@ -315,6 +322,7 @@ build_debs.sh ──────────────────────
 | `teacher_screenshot` | dashboard → servidor → clientes | Pantalla del profesor en alumnos (respaldo JPEG) |
 | `teacher_stream_start` | dashboard → servidor → clientes | Empieza el vídeo del profesor (codec, w, h) |
 | `teacher_stream_chunk` | dashboard → servidor → clientes | Trozo codificado `{k: clave?, d: bytes}` |
+| `screens_status` | servidor → dashboard | Aviso mientras get_screens espera a Plasma |
 | `update_class_settings` | dashboard → servidor | Ajustes del aula (`teacher_on_top`) |
 | `class_settings` | servidor → dashboard/clientes | Difusión de los ajustes del aula |
 | `teacher_stream_stop` | dashboard → servidor → clientes | Fin del vídeo del profesor |

@@ -15,6 +15,23 @@ import server_runtime as runtime
 from vigia_version import VERSION
 
 
+class TestStartedOutsideSession(unittest.TestCase):
+    def test_service_started_before_login_is_outside(self):
+        info = {'version': VERSION, 'graphical': False, 'session': ''}
+        self.assertTrue(runtime.started_outside_session(info, {'XDG_SESSION_ID': '3'}))
+
+    def test_other_session_is_outside(self):
+        info = {'version': VERSION, 'graphical': True, 'session': '2'}
+        self.assertTrue(runtime.started_outside_session(info, {'XDG_SESSION_ID': '3'}))
+
+    def test_same_session_or_unknown_is_reused(self):
+        info = {'version': VERSION, 'graphical': True, 'session': '3'}
+        self.assertFalse(runtime.started_outside_session(info, {'XDG_SESSION_ID': '3'}))
+        self.assertFalse(runtime.started_outside_session(info, {}))
+        self.assertFalse(runtime.started_outside_session(None, {}))
+        self.assertFalse(runtime.started_outside_session({'version': VERSION}, {}))
+
+
 class TestVersionCheck(unittest.TestCase):
     def setUp(self):
         self.status = 200

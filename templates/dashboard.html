@@ -2914,6 +2914,12 @@ function abrirScreenModal() {
   socket.emit('get_screens');
 }
 
+// El escritorio aún está arrancando: el servidor sigue reintentando.
+socket.on('screens_status', data => {
+  if (!_screenListRequested) return;
+  document.getElementById('screen-list').textContent = data.message || 'Cargando pantallas…';
+});
+
 socket.on('screens_list', data => {
   // Una respuesta tardía no debe volver a abrir un selector cancelado.
   if (!_screenListRequested) return;

@@ -17,7 +17,8 @@ import subprocess
 import time
 import platform_utils
 from vigia_version import VERSION
-from server_runtime import wait_for_current_server
+from server_runtime import (server_info, started_outside_session,
+                            stop_installed_servers, wait_for_current_server)
 
 # ---------------------------------------------------------------------------
 # Windows: ejecutar SIEMPRE sin ventana de consola visible.
@@ -304,6 +305,39 @@ def share_session_env(port: int) -> None:
         print(f'[VIGIA] No se pudo entregar la sesión al servidor: {error}', file=sys.stderr)
 
 
+def retire_outside_server(port) -> bool:
+    """Retira el servidor que arrancó fuera de esta sesión gráfica.
+
+    Es lo que antes había que hacer a mano (kill + abrir VIGIA): un servidor
+    nacido antes del login —el antiguo servicio systemd— no podía usar la
+    captura directa y el panel acababa siempre en el selector de Chrome.
+    Devuelve True si el puerto quedó libre para arrancar uno nuevo."""
+    print('[VIGIA] El servidor activo se abrió fuera de esta sesión; reiniciándolo…')
+    systemctl = shutil.which('systemctl')
+    if systemctl:
+        for args in (['stop', 'vigia-servidor'], ['disable', 'vigia-servidor']):
+            subprocess.run([systemctl, '--user', *args], capture_output=True,
+                           timeout=15, check=False)
+    unit = os.path.expanduser('~/.config/systemd/user/vigia-servidor.service')
+    try:
+        os.remove(unit)
+        if systemctl:
+            subprocess.run([systemctl, '--user', 'daemon-reload'],
+                           capture_output=True, timeout=15, check=False)
+    except OSError:
+        pass
+    try:
+        stop_installed_servers(SCRIPT_DIR)
+    except (OSError, RuntimeError) as error:
+        print(f'[VIGIA] No se pudo detener el servidor anterior: {error}', file=sys.stderr)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if not wait_for_port(port, timeout=0.2):
+            return True
+        time.sleep(0.2)
+    return False
+
+
 def report_server_mismatch(port):
     message = (f'El servidor del puerto {port} no corresponde a VIGIA {VERSION}. '
                'Cierra las ventanas antiguas de VIGIA y reinstala el paquete nuevo. '
@@ -325,12 +359,18 @@ def main() -> None:
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
             print(f'[VIGIA] No se pudo preparar la captura en KDE: {error}')
 
-    # Si Flask ya está corriendo (p.ej. como servicio systemd), reutilizarlo
-    # sin arrancar un segundo proceso.
+    # Si Flask ya está corriendo (p.ej. server.py lanzado a mano), reutilizarlo
+    # sin arrancar un segundo proceso. Si nació fuera de esta sesión gráfica
+    # (antiguo servicio del arranque), sustituirlo por uno abierto desde aquí.
+    reuse = False
     if wait_for_port(port, timeout=1.5):
         if not wait_for_current_server(port, timeout=3):
             report_server_mismatch(port)
             sys.exit(1)
+        reuse = not (platform_utils.IS_LINUX
+                     and started_outside_session(server_info(port))
+                     and retire_outside_server(port))
+    if reuse:
         print(f'[VIGIA] Servidor detectado en :{port}, reutilizando…')
         proc = None
     else:
