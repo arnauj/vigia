@@ -52,6 +52,20 @@ class TestLauncher(unittest.TestCase):
         self.desktop_setup.assert_called_once_with()
         self.server_ready.assert_called_once_with(5001, timeout=3)
 
+    def test_server_started_outside_session_is_replaced(self):
+        info = {'app': 'vigia-server', 'version': 'x', 'graphical': False, 'session': ''}
+        with patch.object(self.launcher.platform_utils, 'IS_LINUX', True), \
+             patch.object(self.launcher.sys, 'argv', ['vigia-launcher.py']), \
+             patch.object(self.launcher, 'wait_for_port', return_value=True), \
+             patch.object(self.launcher, 'server_info', return_value=info), \
+             patch.object(self.launcher, 'retire_outside_server', return_value=True) as retire, \
+             patch.object(self.launcher, 'run_chrome_app', return_value=True) as chrome, \
+             patch.object(self.launcher.subprocess, 'Popen') as start:
+            self.launcher.main()
+        retire.assert_called_once_with(5000)
+        start.assert_called_once()
+        self.assertIs(chrome.call_args[0][1], start.return_value)
+
     def test_old_server_on_port_is_not_reused(self):
         self.server_ready.return_value = False
         with patch.object(self.launcher.sys, 'argv', ['vigia-launcher.py']), \
