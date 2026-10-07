@@ -282,6 +282,28 @@ def install_pin_aliases(url: str, port: int) -> None:
               file=sys.stderr)
 
 
+def share_session_env(port: int) -> None:
+    """Entrega al servidor el entorno de ESTA sesión gráfica.
+
+    El servicio systemd arranca al encender el equipo, antes del login, y la
+    captura directa (spectacle) podía fallar hasta reiniciar Flask. El
+    lanzador se abre desde el escritorio y conoce el entorno exacto."""
+    import json
+    import urllib.request
+    import desktop_session
+    env = {k: os.environ[k] for k in desktop_session.SESSION_KEYS if os.environ.get(k)}
+    if not (env.get('WAYLAND_DISPLAY') or env.get('DISPLAY')):
+        return
+    req = urllib.request.Request(
+        f'http://127.0.0.1:{port}/api/session-env', data=json.dumps(env).encode(),
+        headers={'Content-Type': 'application/json'}, method='POST')
+    try:
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            print(f'[VIGIA] Sesión gráfica entregada al servidor: {resp.read().decode()}')
+    except Exception as error:  # servidor antiguo o sin la ruta: no es grave
+        print(f'[VIGIA] No se pudo entregar la sesión al servidor: {error}', file=sys.stderr)
+
+
 def report_server_mismatch(port):
     message = (f'El servidor del puerto {port} no corresponde a VIGIA {VERSION}. '
                'Cierra las ventanas antiguas de VIGIA y reinstala el paquete nuevo. '
@@ -354,6 +376,7 @@ def main() -> None:
     # 1) Chrome/Chromium app mode, con la captura adecuada para esta sesión.
     base_url = dashboard_url(port)
     if platform_utils.IS_LINUX:
+        share_session_env(port)
         install_pin_aliases(base_url, port)
     if run_chrome_app(base_url, proc):
         return

@@ -148,45 +148,17 @@ StartupNotify=true
 DESKTOP_EOF
 chmod +x "$DESKTOP" 2>/dev/null || true
 
-# ── Servicio systemd de usuario (arranque automático) ────────
-echo "[*] Configurando inicio automático del servidor..."
-
-SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
-mkdir -p "$SYSTEMD_USER_DIR"
-
-cat > "$SYSTEMD_USER_DIR/vigia-servidor.service" <<SERVICE_EOF
-[Unit]
-Description=VIGIA — Servidor del Panel del Profesor
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=$PYTHON3 $SCRIPT_DIR/server.py 5000
-WorkingDirectory=$SCRIPT_DIR
-Environment=PYTHONUNBUFFERED=1
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-SERVICE_EOF
-
-# Detener versión anterior si está corriendo, luego recargar y activar
+# ── Sin arranque automático ──────────────────────────────────
+# El servidor NO arranca con el equipo: se abre desde el menú (VIGIA Servidor)
+# y vigia-launcher.py lo arranca y lo para con la ventana. Retirar el servicio
+# systemd de instalaciones anteriores, que sí arrancaba solo.
 systemctl --user stop vigia-servidor 2>/dev/null || true
+systemctl --user disable vigia-servidor 2>/dev/null || true
+rm -f "$HOME/.config/systemd/user/vigia-servidor.service"
+systemctl --user daemon-reload 2>/dev/null || true
 "$PYTHON3" "$SCRIPT_DIR/server_runtime.py" --stop-installed "$SCRIPT_DIR" || exit 1
-systemctl --user daemon-reload
-systemctl --user enable --now vigia-servidor
-"$PYTHON3" "$SCRIPT_DIR/server_runtime.py" --wait-current 5000 || exit 1
 
-# Permitir que el servicio arranque en el boot aunque el usuario no haya iniciado
-# sesión gráfica (los alumnos podrán conectar desde el primer momento)
-loginctl enable-linger "$USER" 2>/dev/null || true
-
-echo "[✓] Servicio systemd 'vigia-servidor' activo y habilitado."
-echo "    Comandos útiles:"
-echo "      systemctl --user status vigia-servidor"
-echo "      systemctl --user restart vigia-servidor"
-echo "      journalctl --user -u vigia-servidor -f"
+echo "[✓] VIGIA Servidor no arranca automáticamente: ábrelo desde el menú de inicio."
 
 echo ""
 echo "═══════════════════════════════════════════════"

@@ -21,6 +21,9 @@ class TestLauncher(unittest.TestCase):
         aliases = patch.object(self.launcher, 'install_pin_aliases')
         self.pin_aliases = aliases.start()
         self.addCleanup(aliases.stop)
+        share = patch.object(self.launcher, 'share_session_env')
+        self.share_env = share.start()
+        self.addCleanup(share.stop)
         ready = patch.object(self.launcher, 'wait_for_current_server', return_value=True)
         self.server_ready = ready.start()
         self.addCleanup(ready.stop)
@@ -43,6 +46,8 @@ class TestLauncher(unittest.TestCase):
             self.launcher.main()
         chrome.assert_called_once_with('http://localhost:5001/?capture=server', None)
         self.pin_aliases.assert_called_once_with('http://localhost:5001/?capture=server', 5001)
+        # El servicio arrancó antes del login: recibe el entorno de la sesión.
+        self.share_env.assert_called_once_with(5001)
         start.assert_not_called()
         self.desktop_setup.assert_called_once_with()
         self.server_ready.assert_called_once_with(5001, timeout=3)

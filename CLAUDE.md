@@ -30,7 +30,7 @@ python3 client.py [ip_servidor] [puerto]
 
 ```bash
 bash instalar.sh                               # Instalador gráfico tkinter (servidor o cliente)
-bash instalar_servidor.sh                      # Instala deps Python + desktop + servicio systemd de usuario
+bash instalar_servidor.sh                      # Instala deps Python + desktop (sin arranque automático)
 bash instalar_cliente.sh [IP_DEL_SERVIDOR]     # Idem para alumnos; auto-detecta X.X.X.2 si no se pasa IP
 bash build_debs.sh                             # Genera dist/vigia-server_1.2_amd64.deb y vigia-client_1.2_all.deb
 ```
@@ -130,7 +130,7 @@ vigia-launcher.py ────────────────────�
      WEBKIT_DISABLE_COMPOSITING_MODE, LIBGL_ALWAYS_SOFTWARE) para evitar
      pantalla negra en KWin.
   3. Navegador del sistema (webbrowser.open) como último recurso.
-  Detecta si Flask ya corre como servicio systemd (wait_for_port 1.5 s) y lo
+  Detecta si Flask ya corre (wait_for_port 1.5 s; p.ej. server.py a mano) y lo
   reutiliza sin arrancar un segundo proceso ni matarlo al cerrar la ventana.
   Anclado en KDE: en Wayland la ventana Chrome --app NO se llama «vigia» sino
   chrome-localhost__-Default (--class solo afecta a X11). Sin un .desktop con
@@ -155,6 +155,20 @@ templates/dashboard.html ──────────────────�
   antes de volver a JPEG. También se activa si ICE falla tras P2P activo.
   Resolución de pantalla: viene de screen_info (Socket.IO); onloadedmetadata
   solo actúa como fallback si screen_info aún no llegó (valores 1280×720).
+  Compartir pantalla: en KDE/Wayland local la vía por defecto es la captura
+  DIRECTA del servidor (spectacle), con selector propio de pantalla: «Todas las
+  pantallas» + cada monitor (geometría de kscreen-doctor -j, respaldo xrandr;
+  CliBackend.set_monitor recorta el monitor de la captura completa, escalando a
+  HiDPI). Si la captura directa falla (screens_list/teacher_screen_preview con
+  error) se abre SOLO el selector de Chrome (_respaldoNavegador); si tampoco,
+  se muestra el error con el botón «Usar el selector de Chrome…».
+  El servidor NO arranca solo con el equipo (lo abre el profesor). El lanzador
+  (que sí corre en la sesión) envía su entorno a POST /api/session-env (solo
+  localhost) → desktop_session.set_session_override, y la captura reintenta 3
+  veces (_crear_capturador_profesor) mientras Plasma termina de arrancar.
+  Tabulaciones en mensajes: Tab inserta <span style="white-space:pre">\t</span>
+  (en listas sangra/desangra) y _protegerTabs() envuelve las sueltas al pegar o
+  enviar; client.py conserva \t y &nbsp; (solo colapsa espacios/saltos del HTML).
   Adjuntos en mensajes: _composeFiles [], _addFiles(), _renderFileList().
   IMPORTANTE: declarar `let _composeFiles` antes de cualquier código
   que pueda lanzar excepciones (riesgo de TDZ en JS).
@@ -237,9 +251,8 @@ instalar_servidor.sh ───────────────────�
   (flask, flask-socketio, simple-websocket, mss). Sin eventlet.
   Crea ~/.local/share/applications/vigia-servidor.desktop con
   Exec apuntando a vigia-launcher.py.
-  Crea ~/.config/systemd/user/vigia-servidor.service y lo habilita
-  (arranca automáticamente con la sesión del usuario).
-  loginctl enable-linger permite arranque sin sesión gráfica activa.
+  NO arranca con el equipo: retira el servicio systemd vigia-servidor de
+  versiones anteriores; el profesor lo abre desde el menú.
 
 instalar_cliente.sh ────────────────────────────────────────────────
   Instala deps de sistema vía apt (python3-tk, python3-pil[.imagetk],
@@ -266,7 +279,8 @@ build_debs.sh ──────────────────────
   - vigia-server_1.2_amd64.deb  → instala en /opt/vigia-server/
       postinst: recrea el venv (--system-site-packages), instala solo lo
       que falte (wheels puros → red → aviso, nunca aborta), crea desktop
-      en /usr/share/applications/ y servicio systemd del usuario real.
+      en /usr/share/applications/ y retira el antiguo servicio systemd
+      (el servidor ya NO arranca solo: se abre desde el menú).
   - vigia-client_1.2_all.deb   → instala en /opt/vigia-client/
       usa debconf para preguntar la IP del servidor durante la instalación.
       postinst: idem venv + deps, habilita ydotoold (Wayland), crea
@@ -336,7 +350,7 @@ Dashboard → Cliente            : eventos teclado (RTCDataChannel 'vigia-input'
 - **Pantalla del profesor en vídeo, no en JPEG.** Enviar un JPEG de 1600 px 10 veces por segundo son ~20 Mbps POR ALUMNO: con 30 equipos se come una red de gigabit entera. El panel codifica una sola vez con WebCodecs (H.264, VP8 de respaldo) y el servidor reparte los mismos bytes: ~1-2 Mbps en total y el alumno descodifica en C con PyAV (~3 ms/frame) en vez de descomprimir un JPEG enorme y reescalarlo con PIL. Se conserva el camino JPEG completo como respaldo automático.
 - **WebRTC P2P.** Si `python3-aiortc` está instalado en el cliente, el stream de vídeo viaja directamente alumno→profesor por UDP (H.264 preferido, VP8 de respaldo). Los eventos de input van por dos DataChannels con `priority:'high'`: `vigia-mouse` (unordered, sin retransmisiones) para ratón y `vigia-input` (ordered, fiable) para teclado. Fallback automático a JPEG si WebRTC falla (incluido tras P2P establecido).
 - **Lanzador Chrome --app.** `vigia-launcher.py` usa un perfil temporal aislado (`tempfile.mkdtemp`) para no interferir con el Chrome del usuario. `--class=vigia` hace que KDE asocie la ventana al `.desktop` y muestre el icono correcto.
-- **Detección de Flask ya activo.** `vigia-launcher.py` sondea el puerto 5000 durante 1,5 s antes de arrancar Flask. Si ya corre (servicio systemd), lo reutiliza y no lo mata al cerrar la ventana.
+- **Detección de Flask ya activo.** `vigia-launcher.py` sondea el puerto 5000 durante 1,5 s antes de arrancar Flask. Si ya corre (p.ej. `server.py` lanzado a mano), lo reutiliza y no lo mata al cerrar la ventana.
 - **GPU desactivado en WebKit2GTK.** Las variables `WEBKIT_DISABLE_DMABUF_RENDERER=1`, `WEBKIT_DISABLE_COMPOSITING_MODE=1`, `LIBGL_ALWAYS_SOFTWARE=1` se fijan antes de importar GTK para evitar el deadlock con KWin/KDE que produce pantalla negra.
 - **`_instalar()` en client.py** detecta si pip falta, lo instala vía `apt-get python3-pip` y hace fallback a `pip3` si `python -m pip` falla. aiortc NO se auto-instala (requiere apt por las libs nativas).
 - **Tkinter en client.py** se usa solo para ventanas flotantes (pantalla del profesor, mensajes, bloqueo). Si no está disponible el cliente sigue funcionando pero sin UI.
@@ -385,7 +399,7 @@ sudo dpkg -r vigia-client
 ```
 
 El servidor se instala en `/opt/vigia-server/`. El cliente en `/opt/vigia-client/`.
-`postinst` del servidor crea el servicio systemd de usuario y el desktop entry.
+`postinst` del servidor crea el desktop entry y retira el antiguo servicio systemd (el servidor no arranca automáticamente).
 `postinst` del cliente usa debconf para preguntar la IP, crea autostart XDG y arranca el cliente.
 `prerm` del servidor para y deshabilita el servicio systemd.
 `prerm` del cliente mata el proceso y elimina el autostart.

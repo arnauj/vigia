@@ -16,7 +16,8 @@ import sys
 SESSION_KEYS = (
     'DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'XDG_RUNTIME_DIR',
     'DBUS_SESSION_BUS_ADDRESS', 'XDG_SESSION_TYPE', 'XDG_CURRENT_DESKTOP',
-    'XDG_CONFIG_HOME',
+    'XDG_CONFIG_HOME', 'XDG_SESSION_DESKTOP', 'KDE_FULL_SESSION',
+    'KDE_SESSION_VERSION',
 )
 _DESKTOPS = ('plasmashell', 'gnome-shell', 'kwin_wayland', 'kwin_x11',
              'xfce4-session', 'sway')
@@ -96,11 +97,44 @@ def _wayland_available(env):
     return bool(display and runtime and _owned(Path(runtime) / display, socket=True))
 
 
+# Entorno que el lanzador (abierto DENTRO de la sesión gráfica) entrega al
+# servicio. Es la fuente más fiable: el servicio arranca con el equipo, antes
+# del login, y lo que deduce de systemd o /proc puede estar incompleto o ser de
+# un arranque de Plasma a medias (la captura fallaba hasta reiniciar Flask).
+_session_override = {}
+
+
+def set_session_override(values):
+    """Adopta el entorno de la sesión gráfica que envía el lanzador.
+
+    Solo se aceptan las claves de sesión y únicamente si apuntan a una sesión
+    de ESTE usuario (socket Wayland propio o DISPLAY X11). Devuelve True si se
+    adoptó."""
+    env = {k: str(v) for k, v in (values or {}).items()
+           if k in SESSION_KEYS and v and isinstance(v, str) and '\0' not in v}
+    runtime = runtime_environment()
+    if runtime:
+        # Nunca rutas runtime/bus de otro usuario.
+        env.update(runtime)
+    if not (_wayland_available(env) or
+            (env.get('DISPLAY') and env.get('XDG_SESSION_TYPE') == 'x11')):
+        return False
+    _session_override.clear()
+    _session_override.update(env)
+    return True
+
+
 def capture_environment():
     """Devuelve únicamente las variables necesarias, sin modificar el escritorio."""
     env = {key: os.environ[key] for key in SESSION_KEYS if os.environ.get(key)}
     if not sys.platform.startswith('linux'):
         return env
+    if _session_override:
+        if _wayland_available(_session_override) or \
+                _session_override.get('XDG_SESSION_TYPE') == 'x11':
+            env.update(_session_override)
+        else:
+            _session_override.clear()   # esa sesión ya terminó
     env.update(runtime_environment())
     # Una sesión heredada completa tiene prioridad (incluidas sesiones X11).
     complete = (env.get('XDG_SESSION_TYPE') == 'x11' and env.get('DISPLAY')) or \

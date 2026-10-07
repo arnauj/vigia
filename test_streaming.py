@@ -238,6 +238,52 @@ class TestServerStreaming(unittest.TestCase):
         self.assertEqual(response.headers['Cache-Control'], 'no-store')
         self.assertIn(f'<title>VIGIA {VERSION}', client.get('/').text)
 
+    def test_wayland_screen_list_offers_each_monitor(self):
+        from PIL import Image
+        import screen_capture as sc
+        full = Image.new('RGB', (3840, 1080), 'blue')
+        capture = object.__new__(sc.CliBackend)
+        capture.name = 'spectacle'; capture.index = 0; capture._geom = None
+        capture._mons = [
+            {'left': 0, 'top': 0, 'width': 1920, 'height': 1080, 'name': 'eDP-1', 'primary': True},
+            {'left': 1920, 'top': 0, 'width': 1920, 'height': 1080, 'name': 'HDMI-A-1', 'primary': False},
+        ]
+        capture._grab_full = lambda max_age=0.0: full
+        capture.close = lambda: None
+        with patch.object(self.server.screen_capture, 'create_capturer', return_value=capture):
+            self.teacher.emit('get_screens')
+        screens = self.events(self.teacher, 'screens_list')[0]['screens']
+        self.assertEqual([s['index'] for s in screens], [0, 1, 2])
+        self.assertIn('Todas las pantallas (3840×1080)', screens[0]['label'])
+        self.assertIn('HDMI-A-1 (1920×1080)', screens[2]['label'])
+
+    def test_direct_capture_retries_while_desktop_starts(self):
+        capture = Mock(name='capture')
+        fallo = self.server.screen_capture.CaptureError('spectacle devolvió 1')
+        with patch.object(self.server.screen_capture, 'create_capturer',
+                          side_effect=[fallo, fallo, capture]) as create, \
+             patch.object(self.server.socketio, 'sleep') as sleep:
+            self.assertIs(self.server._crear_capturador_profesor(), capture)
+        self.assertEqual(create.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+        with patch.object(self.server.screen_capture, 'create_capturer', side_effect=fallo), \
+             patch.object(self.server.socketio, 'sleep'):
+            with self.assertRaises(self.server.screen_capture.CaptureError):
+                self.server._crear_capturador_profesor()
+
+    def test_session_env_only_from_local_launcher(self):
+        import desktop_session
+        client = self.server.app.test_client()
+        with patch.object(desktop_session, 'set_session_override', return_value=True) as adopt:
+            r = client.post('/api/session-env', json={'WAYLAND_DISPLAY': 'wayland-0'},
+                            environ_base={'REMOTE_ADDR': '192.0.2.25'})
+            self.assertEqual(r.status_code, 403)
+            adopt.assert_not_called()
+            r = client.post('/api/session-env', json={'WAYLAND_DISPLAY': 'wayland-0'},
+                            environ_base={'REMOTE_ADDR': '127.0.0.1'})
+        self.assertTrue(r.json['ok'])
+        adopt.assert_called_once_with({'WAYLAND_DISPLAY': 'wayland-0'})
+
     def test_screen_list_does_not_open_portal_or_share_with_students(self):
         from PIL import Image
         capture = Mock(name='capture')
