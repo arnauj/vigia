@@ -451,6 +451,10 @@ fi
 cat > /usr/local/bin/vigia-client <<LAUNCHER
 #!/bin/bash
 SERVER_IP="\$(cat /etc/vigia/client.conf 2>/dev/null | tr -d '[:space:]')"
+# Una sola instancia por usuario: el autostart de la sesión y el arranque del
+# postinst no deben conectar dos veces el mismo equipo.
+_LOCK="\${XDG_RUNTIME_DIR:-/tmp}/vigia-client-\$(id -u).lock"
+if { exec 9>"\$_LOCK"; } 2>/dev/null; then flock -n 9 || exit 0; fi
 exec $PYTHON3 $VIGIA_DIR/client.py "\$SERVER_IP"
 LAUNCHER
 chmod 755 /usr/local/bin/vigia-client
@@ -485,18 +489,35 @@ Categories=Education;
 EOD
 chmod 644 /etc/xdg/autostart/vigia-alumno.desktop
 
-# ── Arrancar el cliente inmediatamente para el usuario activo ─
-if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
-  # Detener cualquier instancia previa
-  pkill -u "$REAL_USER" -f "python.*client\.py" 2>/dev/null || true
-  sleep 0.3
-
-  # Detectar el entorno gráfico del usuario (X11 o Wayland) leyendo el
-  # entorno de sus procesos. En Kubuntu 26 (Wayland) DISPLAY puede ser el
-  # de XWayland y WAYLAND_DISPLAY/XDG_RUNTIME_DIR son imprescindibles para
-  # que spectacle/ydotool funcionen.
+# ── Arrancar el cliente YA en TODAS las sesiones gráficas abiertas ─
+# El autostart global solo actúa al iniciar sesión. Para no esperar al
+# siguiente login se arranca en cada sesión gráfica local abierta, de
+# cualquier usuario (no solo de quien instala: los alumnos no lo abren).
+# Detener primero las instancias previas de TODOS los usuarios.
+pkill -f "/opt/vigia-client/client\.py" 2>/dev/null || true
+sleep 0.3
+# IMPORTANTE: cerrar los descriptores heredados de apt/dpkg/debconf antes
+# de lanzar el cliente en segundo plano. Si el cliente mantiene abiertos
+# esos pipes, apt se queda esperando su EOF y la barra de progreso se
+# congela (~96%) aunque el postinst ya haya terminado.
+db_stop 2>/dev/null || true
+_SESS_USERS=""
+for _s in $(loginctl list-sessions --no-legend --no-pager 2>/dev/null | awk '{print $1}'); do
+  _props="$(loginctl show-session "$_s" -p Name -p Type -p Remote -p State 2>/dev/null || true)"
+  echo "$_props" | grep -qE '^Type=(wayland|x11)$' || continue
+  echo "$_props" | grep -q '^Remote=no$' || continue
+  echo "$_props" | grep -q '^State=closing$' && continue
+  _u="$(echo "$_props" | sed -n 's/^Name=//p')"
+  [ -n "$_u" ] && [ "$_u" != "root" ] || continue
+  case " $_SESS_USERS " in *" $_u "*) continue ;; esac
+  _SESS_USERS="$_SESS_USERS $_u"
+done
+for _u in $_SESS_USERS; do
+  # Entorno gráfico del usuario leído de sus procesos. En Kubuntu 26
+  # (Wayland) DISPLAY puede ser el de XWayland y WAYLAND_DISPLAY /
+  # XDG_RUNTIME_DIR son imprescindibles para que spectacle/ydotool funcionen.
   _SESS_ENV=""
-  for _pid in $(pgrep -u "$REAL_USER" 2>/dev/null | head -40); do
+  for _pid in $(pgrep -u "$_u" 2>/dev/null | head -60); do
     [ -r "/proc/$_pid/environ" ] || continue
     _CAND="$(tr '\0' '\n' < "/proc/$_pid/environ" 2>/dev/null \
              | grep -E '^(DISPLAY|WAYLAND_DISPLAY|XDG_SESSION_TYPE|XDG_RUNTIME_DIR|XDG_CURRENT_DESKTOP|DBUS_SESSION_BUS_ADDRESS|XAUTHORITY)=' || true)"
@@ -505,24 +526,21 @@ if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
       break
     fi
   done
-  _ENV_PREFIX="$(echo "$_SESS_ENV" | tr '\n' ' ')"
-  [ -z "$_ENV_PREFIX" ] && _ENV_PREFIX="DISPLAY=:0"
-
-  # IMPORTANTE: cerrar los descriptores heredados de apt/dpkg/debconf antes
-  # de lanzar el cliente en segundo plano. Si el cliente mantiene abiertos
-  # esos pipes, apt se queda esperando su EOF y la barra de progreso se
-  # congela (~96%) aunque el postinst ya haya terminado.
-  db_stop 2>/dev/null || true
-  su "$REAL_USER" -c "
+  [ -n "$_SESS_ENV" ] || continue
+  _ENV_PREFIX="$(echo "$_SESS_ENV" | sed "s/'/'\\\\''/g; s/^\(.*\)$/'\1'/" | tr '\n' ' ')"
+  # Registro POR USUARIO: un /tmp/vigia-cliente.log común era de quien lo
+  # creó primero y la redirección fallaba (sin cliente) para los demás.
+  su "$_u" -s /bin/bash -c "
     for _fd in /proc/self/fd/*; do
       _n=\"\${_fd##*/}\"
       [ \"\$_n\" -gt 2 ] 2>/dev/null && eval \"exec \$_n>&-\" || true
     done
+    mkdir -p \"\$HOME/.cache/vigia\" 2>/dev/null
     env $_ENV_PREFIX setsid /usr/local/bin/vigia-client \
-        >/tmp/vigia-cliente.log 2>&1 </dev/null &
+        >\"\$HOME/.cache/vigia/cliente.log\" 2>&1 </dev/null &
   " 2>/dev/null || true
-  echo "Cliente VIGIA iniciado para $REAL_USER."
-fi
+  echo "Cliente VIGIA iniciado para $_u."
+done
 
 # ── Sudo sin contraseña (necesario para exec_command remoto y apt) ──
 # Permite al alumno ejecutar comandos del terminal remoto sin prompt de contraseña.
@@ -546,7 +564,6 @@ cat > "$CLIENT_BUILD_DIR/DEBIAN/prerm" <<'EOF'
 #!/bin/bash
 # Matar instancias del cliente por ruta exacta (evitar matar a dpkg mismo)
 pkill -f "/opt/vigia-client/client\.py" 2>/dev/null || true
-pkill -f "python.*client\.py" 2>/dev/null || true
 # Parar/eliminar el demonio de input (libera cualquier grab de teclado/ratón)
 systemctl stop vigia-input.service 2>/dev/null || true
 systemctl disable vigia-input.service 2>/dev/null || true

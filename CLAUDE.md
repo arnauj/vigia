@@ -306,9 +306,14 @@ build_debs.sh ──────────────────────
   - vigia-client_1.2_all.deb   → instala en /opt/vigia-client/
       usa debconf para preguntar la IP del servidor durante la instalación.
       postinst: idem venv + deps, habilita ydotoold (Wayland), crea
-      desktop + XDG autostart, arranca cliente con el entorno de la
-      sesión real (DISPLAY/WAYLAND_DISPLAY detectados de /proc).
-      prerm: para el cliente y elimina autostart.
+      desktop + XDG autostart GLOBAL (/etc/xdg/autostart: se abre solo al
+      iniciar sesión CUALQUIER usuario; los alumnos no lo abren) y arranca
+      el cliente YA en TODAS las sesiones gráficas locales abiertas
+      (loginctl; entorno leído de /proc de cada usuario), con registro por
+      usuario en ~/.cache/vigia/cliente.log (un /tmp común fallaba para
+      el segundo usuario). /usr/local/bin/vigia-client usa flock en
+      $XDG_RUNTIME_DIR: una sola instancia por usuario.
+      prerm: para el cliente (ruta exacta) y elimina autostart.
   REGLAS CLAVE de empaquetado (Kubuntu 26):
   - Librerías nativas (Pillow, numpy, pynput, aiortc) SIEMPRE por apt
     (Depends); jamás wheels pip (un wheel cp312 no instala en Python
