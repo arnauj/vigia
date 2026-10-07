@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import pwd
 import signal
 import sys
 import time
@@ -42,6 +43,9 @@ def started_outside_session(info, env=None):
         return False
     if not info.get('graphical'):
         return True
+    uid = info.get('uid')
+    if isinstance(uid, int) and uid != os.getuid():
+        return True     # servicio antiguo de OTRO usuario (p.ej. quien instaló)
     env = os.environ if env is None else env
     mine, theirs = env.get('XDG_SESSION_ID'), info.get('session')
     return bool(mine and theirs and mine != theirs)
@@ -110,14 +114,50 @@ def stop_installed_servers(directory, timeout=5):
     return len(pids)
 
 
+SERVICE = 'vigia-servidor.service'
+
+
+def retire_autostart_services(users=None):
+    """Borra el antiguo servicio systemd de arranque de TODOS los usuarios.
+
+    Antes se instalaba en el usuario que ejecutaba la instalación (quien hizo
+    sudo/Discover), que no siempre es el profesor: ese servidor arrancaba con
+    el equipo con OTRO usuario, ocupaba el puerto 5000 y no podía capturar la
+    sesión del profesor. Solo toca ficheros con el nombre exacto del servicio.
+    Devuelve los usuarios limpiados."""
+    cleaned = []
+    for entry in pwd.getpwall() if users is None else users:
+        base = Path(entry.pw_dir) / '.config' / 'systemd' / 'user'
+        found = False
+        for path in (base / SERVICE, base / 'default.target.wants' / SERVICE):
+            try:
+                if path.is_symlink() or path.is_file():
+                    path.unlink()
+                    found = True
+            except OSError:
+                continue
+        if found:
+            cleaned.append(entry.pw_name)
+    return cleaned
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument('--stop-installed', metavar='DIRECTORIO')
     action.add_argument('--wait-current', type=int, metavar='PUERTO')
+    action.add_argument('--retire-all', metavar='DIRECTORIO',
+                        help='(root) quitar el arranque automático de todos los '
+                             'usuarios y parar los servidores de esta instalación')
     options = parser.parse_args()
     try:
-        if options.stop_installed:
+        if options.retire_all:
+            users = retire_autostart_services()
+            if users:
+                print(f'[VIGIA] Arranque automático retirado de: {", ".join(users)}')
+            count = stop_installed_servers(options.retire_all)
+            print(f'[VIGIA] Procesos anteriores retirados: {count}')
+        elif options.stop_installed:
             count = stop_installed_servers(options.stop_installed)
             print(f'[VIGIA] Procesos anteriores retirados: {count}')
         elif not wait_for_current_server(options.wait_current):

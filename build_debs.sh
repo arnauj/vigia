@@ -118,8 +118,11 @@ if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
   _user_systemctl stop vigia-servidor 2>/dev/null || true
 fi
 # Un servidor lanzado desde Chrome/VIGIA no pertenece a la unidad systemd.
-# Retirar también esos procesos exactos ANTES de reemplazar su venv.
-python3 "$VIGIA_DIR/server_runtime.py" --stop-installed "$VIGIA_DIR"
+# Retirar también esos procesos exactos ANTES de reemplazar su venv, y el
+# antiguo arranque automático de CUALQUIER usuario: se instalaba en quien
+# ejecutaba la instalación, que no siempre es el profesor, y ese servidor de
+# otro usuario ocupaba el puerto sin poder capturar la sesión del profesor.
+python3 "$VIGIA_DIR/server_runtime.py" --retire-all "$VIGIA_DIR"
 
 # ── Entorno Python ────────────────────────────────────────────
 # Se recrea SIEMPRE el venv: un venv heredado de otra versión de Python
@@ -221,6 +224,7 @@ su - "$REAL_USER" -c \
   "systemctl --user stop vigia-servidor 2>/dev/null; systemctl --user disable vigia-servidor 2>/dev/null" \
   2>/dev/null || true
 rm -f "$REAL_HOME/.config/systemd/user/vigia-servidor.service" 2>/dev/null || true
+python3 /opt/vigia-server/server_runtime.py --retire-all /opt/vigia-server 2>/dev/null || true
 rm -f /usr/share/applications/vigia-server.desktop 2>/dev/null || true
 # Eliminar regla sudoers de vigia
 rm -f "/etc/sudoers.d/vigia-${REAL_USER}" 2>/dev/null || true
