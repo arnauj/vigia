@@ -243,9 +243,17 @@ def _uid():
     return os.getuid() if hasattr(os, 'getuid') else None
 
 
+def _user():
+    try:
+        import getpass
+        return getpass.getuser()
+    except Exception:
+        return ''
+
+
 @app.route('/api/version')
 def api_version():
-    response = jsonify(app='vigia-server', version=VERSION, pid=os.getpid(), uid=_uid(),
+    response = jsonify(app='vigia-server', version=VERSION, pid=os.getpid(), uid=_uid(), user=_user(),
                        graphical=_LAUNCH_GRAPHICAL, session=_LAUNCH_SESSION)
     response.headers['Cache-Control'] = 'no-store'
     return response
@@ -1236,6 +1244,19 @@ if __name__ == '__main__':
         t = threading.Timer(0.5, _auto_open_browser, args=[port])
         t.daemon = True
         t.start()
+
+    # Abierto por el lanzador: morir con él. En un equipo con varios usuarios,
+    # un servidor que sobreviviera al cierre de sesión (logout sin cerrar la
+    # ventana) ocuparía el puerto y el siguiente usuario no podría capturar.
+    _parent = os.environ.get('VIGIA_PARENT_PID', '')
+    if _parent.isdecimal() and hasattr(os, 'getppid'):
+        def _vigilar_lanzador(parent=int(_parent)):
+            while True:
+                socketio.sleep(2)
+                if os.getppid() != parent:
+                    print('[*] El lanzador de VIGIA se ha cerrado: parando el servidor.')
+                    os._exit(0)
+        socketio.start_background_task(_vigilar_lanzador)
 
     if async_mode == 'threading':
         # Sin eventlet, flask-socketio usa Werkzeug y exige confirmar su uso

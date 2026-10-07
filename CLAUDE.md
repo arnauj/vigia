@@ -143,6 +143,15 @@ vigia-launcher.py ────────────────────�
   (sudo -n → pkexec) para `server_runtime.py --retire-all`, que borra el
   servicio y su enlace default.target.wants de TODOS los usuarios y para los
   servidores de la instalación. El postinst y el prerm también lo ejecutan.
+  VARIOS USUARIOS en el equipo del profesor (profesor, juanra, …): cada uno
+  abre su propio servidor desde el menú. --retire-all también hace
+  `loginctl disable-linger` de los usuarios limpiados. El servidor abierto por
+  el lanzador recibe VIGIA_PARENT_PID y se cierra solo si el lanzador muere
+  (logout sin cerrar la ventana), así no deja el puerto ocupado al siguiente.
+  Si el servidor es de otro usuario CON sesión gráfica abierta a la vez (cambio
+  rápido de usuario) no se le cierra la clase: se reutiliza con
+  ?capture=browser (su captura directa vería la otra sesión) y se avisa.
+  /api/version → {app, version, pid, uid, user, graphical, session}.
   Anclado en KDE: en Wayland la ventana Chrome --app NO se llama «vigia» sino
   chrome-localhost__-Default (--class solo afecta a X11). Sin un .desktop con
   ese nombre, «Fijar en el gestor de tareas» se perdía al reiniciar. El .deb
