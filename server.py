@@ -183,6 +183,45 @@ def _save_class_settings(settings):
 
 _class_settings = _load_class_settings()
 
+# Orden de las tarjetas del panel (lista de nombres de alumno; el sid cambia en
+# cada conexión, el nombre no). Lo guarda el servidor y no el navegador porque
+# el lanzador abre Chrome con un perfil temporal: localStorage se perdería.
+_STUDENT_ORDER_FILE = os.path.join(os.path.dirname(_CLASS_SETTINGS_FILE), 'orden.json')
+_STUDENT_ORDER_MAX = 1000
+
+
+def normalize_student_order(data):
+    order, seen = [], set()
+    for name in data if isinstance(data, list) else []:
+        if isinstance(name, str) and name.strip() and name not in seen:
+            seen.add(name)
+            order.append(name[:200])
+            if len(order) >= _STUDENT_ORDER_MAX:
+                break
+    return order
+
+
+def _load_student_order():
+    try:
+        with open(_STUDENT_ORDER_FILE, encoding='utf-8') as f:
+            return normalize_student_order(json.load(f))
+    except (OSError, ValueError):
+        return []
+
+
+def _save_student_order(order):
+    try:
+        os.makedirs(os.path.dirname(_STUDENT_ORDER_FILE), exist_ok=True)
+        tmp = _STUDENT_ORDER_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(order, f, ensure_ascii=False)
+        os.replace(tmp, _STUDENT_ORDER_FILE)
+    except OSError as error:
+        print(f"[!] No se pudo guardar el orden de los alumnos: {error}")
+
+
+_student_order = _load_student_order()
+
 
 def get_local_ip():
     """Detecta la IP local de la máquina."""
@@ -321,6 +360,7 @@ def on_register_teacher():
     join_room('professors')
     emit('config_update', _performance_config)
     emit('class_settings', _class_settings)
+    emit('student_order', _student_order)
     print(f"[👁] Dashboard registrado en sala 'professors': {request.sid}")
 
 
@@ -489,6 +529,17 @@ def on_update_class_settings(data):
     socketio.emit('class_settings', settings)
     print(f"[*] Ventana del profesor en alumnos: "
           f"{'siempre encima' if settings['teacher_on_top'] else 'normal'}")
+
+
+@socketio.on('update_student_order')
+def on_update_student_order(data):
+    """El profesor ha reordenado las tarjetas: se guarda y se avisa a los paneles."""
+    global _student_order
+    order = normalize_student_order(data)
+    if order != _student_order:
+        _student_order = order
+        _save_student_order(order)
+    socketio.emit('student_order', order, to='professors')
 
 
 def _get_window_list():

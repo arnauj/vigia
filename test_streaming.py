@@ -177,6 +177,22 @@ class TestServerStreaming(unittest.TestCase):
             self.teacher.emit('update_class_settings', {'teacher_on_top': 'yes'})
             self.assertEqual(self.events(self.student, 'class_settings'), [{'teacher_on_top': False}])
 
+    def test_student_order_is_saved_and_sent_to_new_dashboards(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(self.server, '_STUDENT_ORDER_FILE', os.path.join(tmp, 'orden.json')), \
+             patch.object(self.server, '_student_order', []):
+            self.teacher.emit('update_student_order', ['Luis', 'Ana', 'Luis', '', 7, 'Bea'])
+            self.assertEqual(self.events(self.teacher, 'student_order'), [['Luis', 'Ana', 'Bea']])
+            # Solo a los paneles, no a los alumnos.
+            self.assertEqual(self.events(self.student, 'student_order'), [])
+            dashboard = self.peer()
+            dashboard.emit('register_teacher')
+            self.assertEqual(self.events(dashboard, 'student_order'), [['Luis', 'Ana', 'Bea']])
+            # Persistente: sobrevive a reiniciar el servidor.
+            self.assertEqual(self.server._load_student_order(), ['Luis', 'Ana', 'Bea'])
+            self.teacher.emit('update_student_order', 'basura')
+            self.assertEqual(self.events(self.teacher, 'student_order'), [[]])
+
     def test_binary_jpeg_and_render_confirmation_round_trip(self):
         self.start()
         self.student.emit('remote_frame', {'image': b'\xff\xd8JPEG\xff\xd9', 'seq': 5,
