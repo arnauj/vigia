@@ -142,6 +142,10 @@
       border-color: var(--accent);
       box-shadow: 0 10px 30px rgba(58,160,255,.24);
     }
+    /* Reordenar arrastrando: la tarjeta que se mueve y el hueco de destino */
+    .student-card.dragging { opacity: .35; }
+    .student-card.drop-before { box-shadow: -4px 0 0 0 var(--accent), 0 8px 24px rgba(2, 8, 20, .34); }
+    .student-card.drop-after  { box-shadow:  4px 0 0 0 var(--accent), 0 8px 24px rgba(2, 8, 20, .34); }
     .student-card:hover .card-header {
       background: rgba(255,255,255,0.05);
     }
@@ -1092,6 +1096,11 @@
       font-variant-numeric: tabular-nums;
     }
     /* Interruptor moderno (ajustes del aula) */
+    .order-reset-btn {
+      background: none; border: 1px solid var(--card-border); color: var(--muted);
+      border-radius: 8px; padding: 6px 14px; font-size: .85rem; cursor: pointer;
+    }
+    .order-reset-btn:hover { border-color: var(--accent); color: var(--text); }
     .switch-row {
       display: flex; align-items: center; justify-content: space-between;
       gap: 14px; cursor: pointer; font-size: 0.82rem;
@@ -1363,6 +1372,110 @@ socket.on('class_settings', settings => {
   _classSettings = { ..._classSettings, ...settings };
 });
 
+// ── Orden de las tarjetas (arrastrar y soltar, guardado en el servidor) ────
+// Se ordena por NOMBRE: el sid cambia en cada conexión. Los alumnos que no
+// están en la lista guardada van al final, en orden de llegada.
+let _studentOrder = [];
+
+socket.on('student_order', order => {
+  _studentOrder = Array.isArray(order) ? order : [];
+  _aplicarOrden();
+});
+
+function _rangoAlumno(name) {
+  const i = _studentOrder.indexOf(name);
+  return i < 0 ? Infinity : i;
+}
+
+// Inserta la tarjeta en su sitio según el orden guardado.
+function _colocarTarjeta(div, name) {
+  const grid = document.getElementById('grid');
+  const rango = _rangoAlumno(name);
+  if (rango !== Infinity) {
+    for (const card of grid.querySelectorAll('.student-card')) {
+      if (card === div) continue;
+      if (_rangoAlumno(card.dataset.fullname) > rango) { grid.insertBefore(div, card); return; }
+    }
+  }
+  grid.appendChild(div);
+}
+
+function _aplicarOrden() {
+  const grid = document.getElementById('grid');
+  const cards = [...grid.querySelectorAll('.student-card')];
+  // sort estable: los que no tienen sitio guardado conservan su orden de llegada
+  cards.sort((a, b) => {
+    const ra = _rangoAlumno(a.dataset.fullname), rb = _rangoAlumno(b.dataset.fullname);
+    return ra === rb ? 0 : (ra < rb ? -1 : 1);
+  });
+  cards.forEach(card => grid.appendChild(card));
+}
+
+// Funde el orden visible con el guardado: los alumnos conectados ocupan, en su
+// nuevo orden, los huecos que ya tenían; los ausentes no pierden su posición.
+function _guardarOrden() {
+  const visibles = [...document.querySelectorAll('#grid .student-card')].map(c => c.dataset.fullname);
+  const presentes = new Set(visibles);
+  const cola = [...visibles];
+  const orden = [];
+  _studentOrder.forEach(name => orden.push(presentes.has(name) ? cola.shift() : name));
+  orden.push(...cola);
+  _studentOrder = orden;
+  socket.emit('update_student_order', orden);
+}
+
+function ordenarAlumnosPorNombre() {
+  const conectados = Object.values(students).map(s => s.name);
+  const ausentes = _studentOrder.filter(n => !conectados.includes(n));
+  _studentOrder = [...new Set([...conectados, ...ausentes])]
+    .sort((a, b) => a.localeCompare(b, 'es', { numeric: true, sensitivity: 'base' }));
+  _aplicarOrden();
+  socket.emit('update_student_order', _studentOrder);
+  toast('Alumnos ordenados por nombre');
+}
+
+let _dragCard = null;
+
+function _limpiarMarcasDrop() {
+  document.querySelectorAll('.student-card.drop-before, .student-card.drop-after')
+    .forEach(c => c.classList.remove('drop-before', 'drop-after'));
+}
+
+function _habilitarArrastre(div) {
+  div.draggable = true;
+  div.addEventListener('dragstart', e => {
+    _dragCard = div;
+    div.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', div.id);
+  });
+  div.addEventListener('dragend', () => {
+    div.classList.remove('dragging');
+    _limpiarMarcasDrop();
+    _dragCard = null;
+  });
+  div.addEventListener('dragover', e => {
+    if (!_dragCard || _dragCard === div) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const r = div.getBoundingClientRect();
+    const despues = e.clientX > r.left + r.width / 2;
+    _limpiarMarcasDrop();
+    div.classList.add(despues ? 'drop-after' : 'drop-before');
+  });
+  div.addEventListener('dragleave', e => {
+    if (!div.contains(e.relatedTarget)) div.classList.remove('drop-before', 'drop-after');
+  });
+  div.addEventListener('drop', e => {
+    if (!_dragCard || _dragCard === div) return;
+    e.preventDefault();
+    const despues = div.classList.contains('drop-after');
+    _limpiarMarcasDrop();
+    div.parentNode.insertBefore(_dragCard, despues ? div.nextSibling : div);
+    _guardarOrden();
+  });
+}
+
 socket.on('connect', () => {
   document.getElementById('server-status').textContent = 'Conectado';
   document.getElementById('server-status').style.color = 'var(--green)';
@@ -1441,6 +1554,7 @@ function renderCard(sid) {
   if (document.getElementById(`card-${sid}`)) {
     const el = document.getElementById(`card-${sid}`);
     el.querySelector('.card-name').textContent = students[sid].name;
+    el.dataset.fullname = students[sid].name;
     return;
   }
   const s = students[sid];
@@ -1448,6 +1562,7 @@ function renderCard(sid) {
   div.className = 'student-card';
   div.id = `card-${sid}`;
   div.dataset.name = s.name.toLowerCase();
+  div.dataset.fullname = s.name;
   div.innerHTML = `
     <div class="card-header">
       <span class="status-dot"></span>
@@ -1485,7 +1600,8 @@ function renderCard(sid) {
   if (_selectionMode) { toggleSelectCard(sid); return; }
   openModal(sid);
   });
-  document.getElementById('grid').appendChild(div);
+  _habilitarArrastre(div);
+  _colocarTarjeta(div, s.name);
   lucide.createIcons();
 
   if (s.image) updateCardImage(sid, s.image, s.last_seen);
@@ -1501,6 +1617,7 @@ function updateCardImage(sid, image, last_seen) {
   if (!img) {
     img = document.createElement('img');
     img.alt = 'Pantalla';
+    img.draggable = false;   // que el arrastre mueva la tarjeta, no la imagen
     screen.prepend(img);
   }
   img.src = image;
@@ -3701,6 +3818,12 @@ function _actualizarPrompt(cwd) {
           <span class="slider"></span>
         </span>
       </label>
+    </div>
+
+    <div class="settings-section">
+      <h4>Orden de los alumnos</h4>
+      <p class="switch-desc" style="margin:0 0 10px">Arrastra las tarjetas en el panel para colocarlas como en el aula. El orden se guarda y se recupera al volver a abrir VIGIA.</p>
+      <button type="button" class="order-reset-btn" onclick="ordenarAlumnosPorNombre()">Ordenar por nombre (A→Z)</button>
     </div>
 
     <div id="settings-footer">

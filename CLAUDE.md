@@ -50,8 +50,15 @@ server.py ───────────────────────�
     students = {sid: {name, ip, screenshot, last_seen, locked, …}}
     viewers  = {student_sid: {prof_sid, mode}}   # sesiones activas view/control
     _class_settings = {teacher_on_top}           # ajustes del aula (Configuración)
+    _student_order  = [nombre, …]                # orden de las tarjetas del panel
   Ajustes del aula: update_class_settings (panel) → class_settings (a todos;
   también al registrarse alumno/panel). Persisten en ~/.config/vigia/aula.json.
+  Orden de las tarjetas: el profesor las arrastra en el panel (drag & drop) →
+  update_student_order [nombres] → se guarda en ~/.config/vigia/orden.json y se
+  manda student_order a los paneles (también al registrarse). Va por NOMBRE (el
+  sid cambia en cada conexión) y en el servidor, no en localStorage (Chrome
+  --app usa un perfil temporal). Los ausentes conservan su hueco; los nuevos
+  van al final. Configuración tiene «Ordenar por nombre (A→Z)».
   teacher_on_top=False por defecto: la ventana del profesor en el alumno NO va
   siempre encima (el alumno puede trabajar en sus ventanas).
   Señalización WebRTC: relaya webrtc_offer/answer/ice entre dashboard
@@ -345,6 +352,8 @@ build_debs.sh ──────────────────────
 | `screens_status` | servidor → dashboard | Aviso mientras get_screens espera a Plasma |
 | `update_class_settings` | dashboard → servidor | Ajustes del aula (`teacher_on_top`) |
 | `class_settings` | servidor → dashboard/clientes | Difusión de los ajustes del aula |
+| `update_student_order` | dashboard → servidor | Nuevo orden de las tarjetas (lista de nombres) |
+| `student_order` | servidor → dashboards | Orden guardado de las tarjetas |
 | `teacher_stream_stop` | dashboard → servidor → clientes | Fin del vídeo del profesor |
 | `webrtc_offer` | dashboard → servidor → cliente | SDP offer para WebRTC |
 | `webrtc_answer` | cliente → servidor → dashboard | SDP answer para WebRTC |
