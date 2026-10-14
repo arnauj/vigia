@@ -222,6 +222,49 @@ def _save_student_order(order):
 
 _student_order = _load_student_order()
 
+# Nombres que el profesor pone a los alumnos ({nombre del equipo: nombre
+# visible}). La clave es el nombre con el que se registra el cliente
+# («usuario - equipo»), estable entre conexiones; el orden guardado también
+# usa esa clave, así que renombrar no descoloca la tarjeta.
+_STUDENT_ALIASES_FILE = os.path.join(os.path.dirname(_CLASS_SETTINGS_FILE), 'nombres.json')
+_STUDENT_ALIAS_MAX_LEN = 60
+
+
+def normalize_student_alias(name):
+    if not isinstance(name, str):
+        return ''
+    return ' '.join(name.split())[:_STUDENT_ALIAS_MAX_LEN]
+
+
+def _load_student_aliases():
+    try:
+        with open(_STUDENT_ALIASES_FILE, encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    aliases = {}
+    for key, name in data.items():
+        name = normalize_student_alias(name)
+        if isinstance(key, str) and key and name and name != key:
+            aliases[key] = name
+    return aliases
+
+
+def _save_student_aliases(aliases):
+    try:
+        os.makedirs(os.path.dirname(_STUDENT_ALIASES_FILE), exist_ok=True)
+        tmp = _STUDENT_ALIASES_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(aliases, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, _STUDENT_ALIASES_FILE)
+    except OSError as error:
+        print(f"[!] No se pudieron guardar los nombres de los alumnos: {error}")
+
+
+_student_aliases = _load_student_aliases()
+
 
 def get_local_ip():
     """Detecta la IP local de la máquina."""
@@ -361,6 +404,7 @@ def on_register_teacher():
     emit('config_update', _performance_config)
     emit('class_settings', _class_settings)
     emit('student_order', _student_order)
+    emit('student_aliases', _student_aliases)
     print(f"[👁] Dashboard registrado en sala 'professors': {request.sid}")
 
 
@@ -395,11 +439,12 @@ def on_disconnect():
 @socketio.on('register')
 def on_register(data):
     client_ip = _get_client_ip()
-    name = data.get('name', 'Alumno')
+    key = data.get('name') or 'Alumno'
+    name = _student_aliases.get(key, key)
     now = datetime.now().strftime('%H:%M:%S')
     caps = data.get('caps') or {}
     students[request.sid] = {
-        'name': name, 'ip': client_ip, 'screenshot': None,
+        'name': name, 'key': key, 'ip': client_ip, 'screenshot': None,
         'last_seen': now, 'connected_at': now, 'locked': False,
         # 'vstream': el alumno sabe descodificar el vídeo del profesor (PyAV).
         # El panel solo usa esa vía si TODOS los destinatarios pueden.
@@ -411,7 +456,7 @@ def on_register(data):
     emit('config_update', _performance_config)
     emit('class_settings', _class_settings)
     socketio.emit('student_connected', {
-        'sid': request.sid, 'name': name, 'ip': client_ip,
+        'sid': request.sid, 'name': name, 'key': key, 'ip': client_ip,
         'connected_at': now, 'vstream': students[request.sid]['vstream'],
         'webrtc': students[request.sid]['webrtc'],
     }, to='professors')
@@ -438,7 +483,8 @@ def on_request_students(_data=None):
     payload = []
     for sid, data in students.items():
         payload.append({
-            'sid': sid, 'name': data['name'], 'ip': data['ip'],
+            'sid': sid, 'name': data['name'], 'key': data.get('key', data['name']),
+            'ip': data['ip'],
             'last_seen': data['last_seen'], 'connected_at': data['connected_at'],
             'image': data['screenshot'], 'locked': data.get('locked', False),
             'vstream': data.get('vstream', False),
@@ -540,6 +586,28 @@ def on_update_student_order(data):
         _student_order = order
         _save_student_order(order)
     socketio.emit('student_order', order, to='professors')
+
+
+@socketio.on('rename_student')
+def on_rename_student(data):
+    """El profesor cambia el nombre visible de un alumno (vacío = el original)."""
+    if not isinstance(data, dict) or not isinstance(data.get('key'), str) or not data['key']:
+        return
+    key = data['key']
+    name = normalize_student_alias(data.get('name'))
+    if name and name != key:
+        _student_aliases[key] = name
+    else:
+        _student_aliases.pop(key, None)
+        name = key
+    _save_student_aliases(_student_aliases)
+    for sid, student in students.items():
+        if student.get('key', student['name']) == key:
+            student['name'] = name
+            socketio.emit('student_renamed', {'sid': sid, 'key': key, 'name': name},
+                          to='professors')
+    socketio.emit('student_aliases', _student_aliases, to='professors')
+    print(f"[*] Alumno renombrado: {key} -> {name}")
 
 
 def _get_window_list():

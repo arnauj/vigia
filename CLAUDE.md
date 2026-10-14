@@ -47,10 +47,11 @@ server.py ───────────────────────�
   TypeError con python-socketio/flask-socketio modernos de apt; emitir
   sin 'to' ya difunde a todos.
   Estado en memoria:
-    students = {sid: {name, ip, screenshot, last_seen, locked, …}}
+    students = {sid: {name, key, ip, screenshot, last_seen, locked, …}}
     viewers  = {student_sid: {prof_sid, mode}}   # sesiones activas view/control
     _class_settings = {teacher_on_top}           # ajustes del aula (Configuración)
-    _student_order  = [nombre, …]                # orden de las tarjetas del panel
+    _student_order  = [clave, …]                 # orden de las tarjetas del panel
+    _student_aliases = {clave: nombre visible}   # nombres puestos por el profesor
   Ajustes del aula: update_class_settings (panel) → class_settings (a todos;
   también al registrarse alumno/panel). Persisten en ~/.config/vigia/aula.json.
   Orden de las tarjetas: el profesor las arrastra en el panel (drag & drop) →
@@ -58,7 +59,14 @@ server.py ───────────────────────�
   manda student_order a los paneles (también al registrarse). Va por NOMBRE (el
   sid cambia en cada conexión) y en el servidor, no en localStorage (Chrome
   --app usa un perfil temporal). Los ausentes conservan su hueco; los nuevos
-  van al final. Configuración tiene «Ordenar por nombre (A→Z)».
+  van al final. Configuración tiene «Ordenar por nombre».
+  Nombres de los alumnos: la CLAVE de un alumno es el nombre con el que se
+  registra el cliente («usuario - equipo»); 'name' es el visible. El profesor lo
+  cambia con el lápiz de la tarjeta (o doble clic) o en Configuración → Alumnos
+  → rename_student {key, name} (vacío = volver a la clave) → se guarda en
+  ~/.config/vigia/nombres.json, se avisa con student_renamed {sid,key,name} y
+  student_aliases, y se aplica al volver a registrarse. El orden va por clave:
+  renombrar no mueve la tarjeta.
   teacher_on_top=False por defecto: la ventana del profesor en el alumno NO va
   siempre encima (el alumno puede trabajar en sus ventanas).
   Señalización WebRTC: relaya webrtc_offer/answer/ice entre dashboard
@@ -198,6 +206,10 @@ templates/dashboard.html ──────────────────�
   Tabulaciones en mensajes: Tab inserta <span style="white-space:pre">\t</span>
   (en listas sangra/desangra) y _protegerTabs() envuelve las sueltas al pegar o
   enviar; client.py conserva \t y &nbsp; (solo colapsa espacios/saltos del HTML).
+  Modal de Configuración: TODO con las clases comunes (.settings-section, h4 con
+  icono, .settings-hint 0.74rem, .settings-row 0.82rem, .settings-btn); nada de
+  estilos sueltos o la sección nueva desentona (pasó con «Orden de los alumnos»).
+  lucide ignora size=: el tamaño de los iconos se fija por CSS (svg {width}).
   Adjuntos en mensajes: _composeFiles [], _addFiles(), _renderFileList().
   IMPORTANTE: declarar `let _composeFiles` antes de cualquier código
   que pueda lanzar excepciones (riesgo de TDZ en JS).
@@ -354,6 +366,9 @@ build_debs.sh ──────────────────────
 | `class_settings` | servidor → dashboard/clientes | Difusión de los ajustes del aula |
 | `update_student_order` | dashboard → servidor | Nuevo orden de las tarjetas (lista de nombres) |
 | `student_order` | servidor → dashboards | Orden guardado de las tarjetas |
+| `rename_student` | dashboard → servidor | Cambiar el nombre visible `{key, name}` (vacío = original) |
+| `student_renamed` | servidor → dashboards | Un alumno conectado cambia de nombre `{sid, key, name}` |
+| `student_aliases` | servidor → dashboards | Todos los nombres guardados `{clave: nombre}` |
 | `teacher_stream_stop` | dashboard → servidor → clientes | Fin del vídeo del profesor |
 | `webrtc_offer` | dashboard → servidor → cliente | SDP offer para WebRTC |
 | `webrtc_answer` | cliente → servidor → dashboard | SDP answer para WebRTC |

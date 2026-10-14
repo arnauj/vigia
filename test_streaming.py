@@ -193,6 +193,30 @@ class TestServerStreaming(unittest.TestCase):
             self.teacher.emit('update_student_order', 'basura')
             self.assertEqual(self.events(self.teacher, 'student_order'), [[]])
 
+    def test_student_rename_is_saved_and_applied_on_reconnect(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(self.server, '_STUDENT_ALIASES_FILE', os.path.join(tmp, 'nombres.json')), \
+             patch.object(self.server, '_student_aliases', {}):
+            key = self.server.students[self.sid]['key']
+            self.teacher.emit('rename_student', {'key': key, 'name': '  Lucía   P. '})
+            received = self.teacher.get_received()
+            pick = lambda name: [e['args'][0] for e in received if e['name'] == name]
+            self.assertEqual(pick('student_renamed'), [{'sid': self.sid, 'key': key, 'name': 'Lucía P.'}])
+            self.assertEqual(pick('student_aliases'), [{key: 'Lucía P.'}])
+            self.assertEqual(self.server._load_student_aliases(), {key: 'Lucía P.'})
+            # Al volver a conectarse llega ya con el nombre nuevo (y su clave).
+            again = self.peer()
+            again.emit('register', {'name': key})
+            connected = self.events(self.teacher, 'student_connected')[-1]
+            self.assertEqual((connected['name'], connected['key']), ('Lucía P.', key))
+            dashboard = self.peer()
+            dashboard.emit('register_teacher')
+            self.assertEqual(self.events(dashboard, 'student_aliases'), [{key: 'Lucía P.'}])
+            # Vacío = vuelve al nombre del equipo.
+            self.teacher.emit('rename_student', {'key': key, 'name': ''})
+            self.assertEqual(self.server._load_student_aliases(), {})
+            self.assertEqual(self.server.students[self.sid]['name'], key)
+
     def test_binary_jpeg_and_render_confirmation_round_trip(self):
         self.start()
         self.student.emit('remote_frame', {'image': b'\xff\xd8JPEG\xff\xd9', 'seq': 5,
