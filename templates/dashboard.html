@@ -677,8 +677,10 @@
       overflow: hidden; display: flex; flex-direction: column;
     }
     .screen-option:hover { border-color: var(--accent); background: #1a1d3a; }
+    /* contain, NO cover: con dos monitores la captura es 32:9 y «cover» la
+       recortaba al centro (media pantalla de cada monitor). */
     .screen-option .s-thumb {
-      width: 100%; aspect-ratio: 16/10; object-fit: cover;
+      width: 100%; aspect-ratio: 16/10; object-fit: contain;
       background: #0a0c1a; display: block;
     }
     .screen-option .s-thumb-placeholder {
@@ -695,7 +697,9 @@
     }
     .screen-option .s-label {
       font-size: 0.78rem; font-weight: 500; flex: 1; min-width: 0;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      overflow: hidden; display: -webkit-box;
+      -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      overflow-wrap: anywhere; line-height: 1.3;
     }
     #screen-cancel {
       background: none; border: 1px solid var(--card-border); color: var(--muted);
@@ -3223,6 +3227,7 @@ socket.on('screens_list', data => {
   function makeCard(s, icon, params) {
     const b = document.createElement('button');
     b.className = 'screen-option';
+    b.title = s.label;
     if (s.thumb) {
       const img = document.createElement('img');
       img.className = 's-thumb'; img.src = s.thumb; img.alt = s.label;
@@ -3257,7 +3262,7 @@ socket.on('screens_list', data => {
     const h = document.createElement('p');
     h.className = 'screen-section-header'; h.textContent = 'Ventanas';
     list.appendChild(h);
-    windows.forEach(s => list.appendChild(makeCard(s, '<i data-lucide="window" size="28"></i>', { type: 'window', wid: s.wid })));
+    windows.forEach(s => list.appendChild(makeCard(s, '<i data-lucide="app-window" size="28"></i>', { type: 'window', wid: s.wid })));
   }
   document.getElementById('screen-overlay').classList.add('show');
   lucide.createIcons();
@@ -3277,6 +3282,12 @@ function _iniciarCapturaServidor(params) {
 
 socket.on('teacher_screen_preview', data => {
   if (!_sharing || _shareStream) return;
+  if (data.ended) {                   // p. ej. se cerró la ventana compartida
+    detenerCompartir();
+    toast(data.ended, '');
+    return;
+  }
+  if (data.aviso) { toast(data.aviso, ''); return; }
   if (data.error) {
     const sids = _shareSids;          // conservar los alumnos elegidos
     detenerCompartir(); _shareSids = sids;

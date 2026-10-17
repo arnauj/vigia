@@ -134,14 +134,69 @@ class TestWaylandMonitors(unittest.TestCase):
          'pos': {'x': 0, 'y': 0}, 'scale': 1, 'size': {'width': 800, 'height': 600}},
     ]}
 
-    def test_kscreen_logical_geometry_sorted_left_to_right(self):
+    def setUp(self):
+        sin_kwin = patch.object(screen_capture, '_monitores_kwin', return_value=[])
+        self.kwin = sin_kwin.start()
+        self.addCleanup(sin_kwin.stop)
+
+    def kscreen(self, salidas):
         import json
-        done = subprocess.CompletedProcess([], 0, json.dumps(self.KSCREEN), '')
+        done = subprocess.CompletedProcess([], 0, json.dumps({'outputs': salidas}), '')
         with patch.object(screen_capture.shutil, 'which', return_value='/usr/bin/kscreen-doctor'), \
              patch.object(screen_capture.subprocess, 'run', return_value=done):
-            mons = screen_capture.wayland_monitors()
+            return screen_capture.wayland_monitors()
+
+    def test_kscreen_logical_geometry_sorted_left_to_right(self):
+        mons = self.kscreen(self.KSCREEN['outputs'])
         self.assertEqual([(m['name'], m['left'], m['width'], m['height'], m['primary']) for m in mons],
                          [('eDP-1', 0, 1536, 960, True), ('HDMI-A-1', 1536, 1920, 1080, False)])
+
+    def test_kscreen_rotated_size_is_not_rotated_twice(self):
+        # libkscreen ya entrega «size» girado; solo el tamaño del modo va sin girar.
+        mons = self.kscreen([
+            {'name': 'DP-1', 'enabled': True, 'pos': {'x': 0, 'y': 0}, 'scale': 1,
+             'rotation': 2, 'size': {'width': 1080, 'height': 1920}},
+            {'name': 'DP-2', 'enabled': True, 'pos': {'x': 1080, 'y': 0}, 'scale': 1,
+             'rotation': 8, 'currentModeId': '1',
+             'modes': [{'id': '1', 'size': {'width': 1920, 'height': 1080}}]},
+        ])
+        self.assertEqual([(m['width'], m['height']) for m in mons], [(1080, 1920), (1080, 1920)])
+
+    def test_kscreen_without_enabled_field_and_mirrors(self):
+        # libkscreen ≥ 6.8 omite «enabled» si la salida no se puede desactivar;
+        # una réplica (modo espejo) no ocupa sitio propio en el escritorio.
+        mons = self.kscreen([
+            {'name': 'eDP-1', 'pos': {'x': 0, 'y': 0}, 'scale': 1,
+             'size': {'width': 1920, 'height': 1080}, 'replicationSource': 0},
+            {'name': 'HDMI-A-1', 'pos': {'x': 0, 'y': 0}, 'scale': 1, 'enabled': True,
+             'size': {'width': 1024, 'height': 768}, 'replicationSource': 1},
+            {'name': 'DP-3', 'pos': {'x': 0, 'y': 0}, 'scale': 1, 'enabled': True,
+             'size': {'width': 1920, 'height': 1080}},
+        ])
+        self.assertEqual([m['name'] for m in mons], ['eDP-1'])
+
+    def test_kwin_geometry_is_preferred(self):
+        self.kwin.return_value = [{'left': 0, 'top': 0, 'width': 1920, 'height': 1080,
+                                   'name': 'DP-1', 'primary': False}]
+        with patch.object(screen_capture, '_monitores_kscreen') as kscreen:
+            self.assertEqual(screen_capture.wayland_monitors()[0]['name'], 'DP-1')
+        kscreen.assert_not_called()
+
+    def test_window_region_is_cropped_and_hidden_regions_return_none(self):
+        from PIL import Image
+        full = Image.new('RGB', (2 * 3200, 2 * 1080))          # escala 2
+        full.paste((0, 255, 0), (2 * 2000, 2 * 100, 2 * 2400, 2 * 400))
+        todo = screen_capture.caja_total([
+            {'left': 0, 'top': 0, 'width': 1920, 'height': 1080},
+            {'left': 1920, 'top': 0, 'width': 1280, 'height': 1024}])
+        self.assertEqual(todo, {'left': 0, 'top': 0, 'width': 3200, 'height': 1080})
+        parte = screen_capture.recortar(
+            full, {'left': 2000, 'top': 100, 'width': 400, 'height': 300}, todo)
+        self.assertEqual(parte.size, (800, 600))
+        self.assertEqual(parte.getpixel((400, 300)), (0, 255, 0))
+        fuera = {'left': 4000, 'top': 0, 'width': 300, 'height': 300}
+        self.assertIsNone(screen_capture.recortar(full, fuera, todo))
+        self.assertIsNone(screen_capture.caja_total([]))
 
     def test_xrandr_fallback(self):
         out = ('Monitors: 2\n 0: +*XWAYLAND0 1920/510x1080/290+0+0  XWAYLAND0\n'

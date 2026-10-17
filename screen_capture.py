@@ -173,10 +173,7 @@ class CliBackend:
         mons = self._mons
         if not mons:
             return []
-        x0 = min(m['left'] for m in mons); y0 = min(m['top'] for m in mons)
-        x1 = max(m['left'] + m['width'] for m in mons)
-        y1 = max(m['top'] + m['height'] for m in mons)
-        return [{'left': x0, 'top': y0, 'width': x1 - x0, 'height': y1 - y0}] + mons
+        return [caja_total(mons)] + mons
 
     def set_monitor(self, index):
         """La herramienta solo captura el escritorio entero: un monitor
@@ -190,20 +187,8 @@ class CliBackend:
         mons = self.monitors()
         if not self.index or self.index >= len(mons):
             return img
-        todo, m = mons[0], mons[self.index]
-        # spectacle/grim devuelven el escritorio en píxeles físicos: escalar
-        # las coordenadas lógicas al tamaño real de la imagen (HiDPI).
-        fx = img.width / todo['width']
-        fy = img.height / todo['height']
-        caja = (round((m['left'] - todo['left']) * fx),
-                round((m['top'] - todo['top']) * fy),
-                round((m['left'] - todo['left'] + m['width']) * fx),
-                round((m['top'] - todo['top'] + m['height']) * fy))
-        caja = (max(0, caja[0]), max(0, caja[1]),
-                min(img.width, caja[2]), min(img.height, caja[3]))
-        if caja[2] - caja[0] < 2 or caja[3] - caja[1] < 2:
-            return img
-        return img.crop(caja)
+        parte = recortar(img, mons[self.index], mons[0])
+        return img if parte is None else parte
 
     def grab(self, max_age=0.0):
         img = self._grab_full(max_age)
@@ -250,7 +235,61 @@ class CliBackend:
             pass
 
 
+_avisos_recorte = set()
+
+
+def caja_total(mons):
+    """Rectángulo lógico que abarca todos los monitores (el que compone
+    spectacle al capturar el escritorio entero). None si no hay monitores."""
+    if not mons:
+        return None
+    x0 = min(m['left'] for m in mons); y0 = min(m['top'] for m in mons)
+    x1 = max(m['left'] + m['width'] for m in mons)
+    y1 = max(m['top'] + m['height'] for m in mons)
+    return {'left': x0, 'top': y0, 'width': x1 - x0, 'height': y1 - y0}
+
+
+def recortar(img, zona, todo=None):
+    """Recorta de la captura de TODO el escritorio una zona (monitor o ventana)
+    dada en coordenadas lógicas; `todo` es el rectángulo lógico del escritorio
+    completo. spectacle/grim devuelven píxeles físicos: las coordenadas se
+    escalan al tamaño real de la imagen (HiDPI). None si la zona no se ve."""
+    if todo is None:
+        todo = {'left': 0, 'top': 0, 'width': img.width, 'height': img.height}
+    if todo['width'] < 1 or todo['height'] < 1:
+        return None
+    fx = img.width / todo['width']
+    fy = img.height / todo['height']
+    # Con una disposición de monitores equivocada cada «monitor» saldría como
+    # un trozo de otro: avisar en el registro si la imagen no cuadra con ella.
+    if abs(fx - fy) > 0.03 * max(fx, fy):
+        aviso = (img.width, img.height, todo['width'], todo['height'])
+        if aviso not in _avisos_recorte:
+            _avisos_recorte.add(aviso)
+            print(f'[!] La captura ({img.width}×{img.height}) no cuadra con la '
+                  f'disposición de monitores ({todo["width"]}×{todo["height"]})')
+    caja = (round((zona['left'] - todo['left']) * fx),
+            round((zona['top'] - todo['top']) * fy),
+            round((zona['left'] - todo['left'] + zona['width']) * fx),
+            round((zona['top'] - todo['top'] + zona['height']) * fy))
+    caja = (max(0, caja[0]), max(0, caja[1]),
+            min(img.width, caja[2]), min(img.height, caja[3]))
+    if caja[2] - caja[0] < 2 or caja[3] - caja[1] < 2:
+        return None
+    return img.crop(caja)
+
+
 # ── Monitores en Wayland ─────────────────────────────────────────────────────
+
+def _monitores_kwin():
+    """Geometría de los monitores tal como la usa KWin para componer la captura
+    de todo el escritorio (la referencia exacta para recortar)."""
+    try:
+        import kwin_info
+    except ImportError:
+        return []
+    return kwin_info.monitores(kwin_info.consultar(max_age=2.0))
+
 
 def _monitores_kscreen():
     """Geometría lógica de las salidas activas según kscreen-doctor (KDE)."""
@@ -263,24 +302,36 @@ def _monitores_kscreen():
     if r.returncode != 0:
         return []
     salidas = json.loads(r.stdout or '{}').get('outputs', [])
-    mons = []
+    mons, vistos = [], set()
     for o in salidas:
-        if not (o.get('enabled') and o.get('connected', True)):
+        # libkscreen ≥ 6.8 solo escribe «enabled» si la salida se puede
+        # desactivar: que falte no significa que esté apagada.
+        if o.get('enabled') is False or not o.get('connected', True):
+            continue
+        # Réplica (modo espejo): muestra lo mismo que otra salida y no ocupa
+        # sitio propio en el escritorio.
+        if o.get('replicationSource'):
             continue
         size = o.get('size') or {}
+        girar = False
         if not size.get('width'):
             for mode in o.get('modes', []):
                 if str(mode.get('id')) == str(o.get('currentModeId')):
                     size = mode.get('size') or {}
+                    girar = True
         w, h = size.get('width'), size.get('height')
         if not w or not h:
             continue
-        if o.get('rotation') in (2, 8):          # girada 90°/270°
+        # «size» ya viene girado; el tamaño del modo, no.
+        if girar and o.get('rotation') in (2, 8):          # girada 90°/270°
             w, h = h, w
         scale = float(o.get('scale') or 1) or 1.0
         pos = o.get('pos') or {}
-        mons.append({'left': int(pos.get('x', 0)), 'top': int(pos.get('y', 0)),
-                     'width': round(w / scale), 'height': round(h / scale),
+        caja = (int(pos.get('x', 0)), int(pos.get('y', 0)), round(w / scale), round(h / scale))
+        if caja in vistos:
+            continue
+        vistos.add(caja)
+        mons.append({'left': caja[0], 'top': caja[1], 'width': caja[2], 'height': caja[3],
                      'name': o.get('name', ''), 'primary': o.get('priority') == 1})
     return mons
 
@@ -308,8 +359,10 @@ def wayland_monitors():
 
     spectacle/grim solo capturan el escritorio completo; esta geometría permite
     al profesor elegir UNA pantalla y recortarla, como hace el selector de
-    Chrome. Lista vacía si no se puede saber (se comparte todo)."""
-    for fuente in (_monitores_kscreen, _monitores_xrandr):
+    Chrome. Primero se pregunta a KWin (su geometría es la de la captura) y
+    después a kscreen-doctor/xrandr. Lista vacía si no se puede saber (se
+    comparte todo)."""
+    for fuente in (_monitores_kwin, _monitores_kscreen, _monitores_xrandr):
         try:
             mons = fuente()
         except Exception:

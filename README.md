@@ -77,7 +77,10 @@ VIGIA es una herramienta para profesores que permite **ver y controlar en tiempo
 - **Envío a uno o a todos** — cualquier acción (mensaje, bloqueo, pantalla del profesor) puede dirigirse a un alumno específico o lanzarse a todos a la vez.
 
 En el panel local de **KDE/Wayland**, **Compartir mi pantalla** abre el selector
-de VIGIA: pulsa la miniatura de **Pantalla completa** para iniciar el envío. Esta
+de VIGIA: pulsa **Pantalla completa** (con varios monitores, todos a la vez),
+**Monitor 1**, **Monitor 2**… o una de las **Ventanas** abiertas para iniciar el
+envío. Al compartir una ventana se trae al frente: se recorta de la captura del
+escritorio, así que lo que se ponga encima también se verá. Esta
 captura usa Spectacle y evita el diálogo Chrome/KDE cuyo botón **Compartir** puede
 quedar deshabilitado. Envía imágenes JPEG (la fluidez depende de Spectacle).
 **Pestaña o ventana del navegador…** permite abrir el selector del navegador si

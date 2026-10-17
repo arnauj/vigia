@@ -11,7 +11,8 @@ Classroom monitoring software for Linux (Kubuntu/Ubuntu). The teacher runs a ser
 - **Detección de sesión robusta:** `session_type()` detecta Wayland aunque el proceso se lance sin `WAYLAND_DISPLAY` (sondea el socket `wayland-*` en `XDG_RUNTIME_DIR`) y fija el entorno para los hijos (spectacle/ydotool). Sin esto, el cliente veía solo `DISPLAY=:0` (XWayland), usaba `mss` y capturaba el root vacío de XWayland = **pantalla negra**.
 - **Control remoto:** en Wayland el **puntero** (mover/clic/scroll) va por `vigia_input.py` — un demonio root propio que crea un dispositivo uinput con eje **ABSOLUTO** (servicio `vigia-input`). Es imprescindible: el dispositivo de ydotool solo tiene ejes RELATIVOS, así que `ydotool mousemove -a` deja el cursor pegado en la esquina superior izquierda (disparando además los hot-corners de KDE). El **teclado** va también por ese demonio (comando `{"t":"k"}`, códigos de kernel) cuando anuncia la capacidad `kb`: cada tecla por `ydotool` costaba un fork+exec (~20-30 ms) y escribir en remoto se notaba pegajoso. `ydotool` (servicio `vigia-ydotoold`) sigue siendo el respaldo y el único que escribe caracteres Unicode arbitrarios (`type`). xdotool/pynput son el backend X11.
 - **Bloqueo de pantalla:** en Wayland `grab_set_global()` (XGrabKeyboard) NO funciona. El bloqueo real lo hace el demonio `vigia-input` con `EVIOCGRAB` sobre los dispositivos de entrada FÍSICOS del alumno (su teclado/ratón quedan inertes), mientras el ratón virtual del profesor sigue inyectando. Se libera automáticamente si la conexión del cliente se cae (fail-safe: el alumno nunca queda bloqueado permanentemente).
-- Captura de ventanas individuales, bloqueo global de pantalla y captura a ~30 fps siguen requiriendo X11 (`plasma-session-x11` sigue en el archive de Ubuntu 26.04, sin soporte oficial de Kubuntu).
+- **Compartir una ventana concreta del profesor en Wayland (KDE):** sin portal ninguna herramienta captura una ventana suelta, así que `kwin_info.py` pregunta a KWin (script por D-Bus) la geometría de monitores y ventanas y el servidor la recorta de la captura de todo el escritorio (spectacle). La ventana se trae al frente al empezar (si otra la tapa, los alumnos ven lo que la tapa).
+- Bloqueo global de pantalla (Tk) y captura a ~30 fps siguen requiriendo X11 (`plasma-session-x11` sigue en el archive de Ubuntu 26.04, sin soporte oficial de Kubuntu).
 
 ## Running the application
 
@@ -78,7 +79,15 @@ server.py ───────────────────────�
   No reenvía frames idénticos (pantalla quieta = 0 tráfico; refresco forzado
   cada 2 s para los que acaban de conectarse), escala con BILINEAR a
   _share_cfg['width'] y manda la vista previa al profesor a 2 fps.
-  Captura de ventana individual: solo X11 (mss + xdotool).
+  Captura de ventana individual: en X11/Windows región con mss (+ xdotool);
+  en Wayland _VentanaWayland: recorta la ventana de la captura completa con la
+  geometría de kwin_info, la activa al empezar (kwin_info.activar) y relee
+  posición y apilamiento DESPUÉS de cada captura. Minimizada = no se envía
+  nada; TAPADA por otra ventana (kwin_info.tapada; p. ej. el propio panel, que
+  enseñaría las pantallas de los compañeros) = no se envía y se avisa una vez
+  con teacher_screen_preview {aviso}; cerrada = {ended} y el panel para.
+  Tamaño enviado: _escalar_para_compartir limita por ÁREA (max_w a 16:9), no
+  solo por ancho: dos monitores (3840×1080) a 1600 px quedaban en 1600×450.
   Pantalla del profesor como VÍDEO (vía preferente): _teacher_stream guarda
   {active, sid, sids, codec, w, h} y los eventos teacher_stream_start/chunk/stop
   se reparten con _emitir_a_alumnos(). Los bytes del trozo NO se tocan (se
@@ -99,6 +108,30 @@ screen_capture.py ────────────────────�
   En Wayland prueba PRIMERO PipeWireBackend (pipewire_capture) compartido por
   refcount (un solo stream/sesión del portal para miniaturas + WebRTC); si falla
   se marca _pw_disabled y no se reintenta (evita repetir diálogos).
+  Monitores en Wayland (wayland_monitors): 1º KWin (kwin_info, la geometría
+  exacta con la que KWin compone la captura), 2º kscreen-doctor -j, 3º xrandr.
+  OJO kscreen-doctor: «size» YA viene girado (solo el tamaño del modo va sin
+  girar); desde libkscreen 6.8 «enabled» falta si la salida no se puede
+  desactivar (no significa apagada); las réplicas (replicationSource, modo
+  espejo) no ocupan sitio propio. recortar(img, zona, todo) recorta monitor o
+  ventana (coordenadas lógicas → píxeles físicos, HiDPI); caja_total(mons).
+
+kwin_info.py ────────────────────────────────────────────────────────
+  Monitores y ventanas según KWin (Plasma 5 y 6). Carga un script JS por D-Bus
+  (org.kde.KWin /Scripting loadScript → /Scripting/ScriptN run → unloadScript)
+  que responde con callDBus() a un objeto exportado en nuestro nombre único:
+  {screens:[{x,y,w,h,name,scale}], windows:[{id(internalId),title,cls,res,app,
+  x,y,w,h,min,vis,skip}], activada}. Ventanas normales, de arriba abajo; vis =
+  no minimizada y en el escritorio virtual actual; skip = fuera de la barra de
+  tareas (no se ofrece, pero cuenta para tapada()). El D-Bus (Gio, python3-gi)
+  va en un proceso auxiliar PERSISTENTE (`kwin_info.py --servir`: «consultar» /
+  «activar ID» por stdin, JSON por línea; se rearranca si muere y se mata si
+  KWin no contesta) para no mezclar GLib con el bucle del servidor y porque la
+  ventana compartida se consulta en cada fotograma. API: consultar(max_age)
+  (caché), activar(id), monitores(datos), ventanas(datos, todas), ventana(datos,
+  id), tapada(datos, id). Fuera de KDE (XDG_CURRENT_DESKTOP) o sin python3-gi
+  devuelve None y todo sigue con kscreen-doctor/xrandr y sin ventanas.
+  Prueba manual en el equipo: `python3 kwin_info.py` (o `--activar ID`).
 
 pipewire_capture.py ─────────────────────────────────────────────────
   Captura fluida en Wayland vía PipeWire + xdg-desktop-portal ScreenCast
@@ -191,10 +224,14 @@ templates/dashboard.html ──────────────────�
   Resolución de pantalla: viene de screen_info (Socket.IO); onloadedmetadata
   solo actúa como fallback si screen_info aún no llegó (valores 1280×720).
   Compartir pantalla: en KDE/Wayland local la vía por defecto es la captura
-  DIRECTA del servidor (spectacle), con selector propio de pantalla: «Todas las
-  pantallas» + cada monitor (geometría de kscreen-doctor -j, respaldo xrandr;
-  CliBackend.set_monitor recorta el monitor de la captura completa, escalando a
-  HiDPI). Si la captura directa falla (screens_list/teacher_screen_preview con
+  DIRECTA del servidor (spectacle), con selector propio: «Pantalla completa:
+  los N monitores» + «Monitor 1», «Monitor 2»… (geometría de KWin, respaldo
+  kscreen-doctor/xrandr; CliBackend.set_monitor recorta el monitor de la
+  captura completa, escalando a HiDPI) + «Ventanas» (kwin_info; las
+  minimizadas, sin miniatura). Con un solo monitor solo sale «Pantalla
+  completa». Las miniaturas van con object-fit:contain (con «cover» la de dos
+  monitores, 32:9, salía recortada: media pantalla de cada monitor).
+  Si la captura directa falla (screens_list/teacher_screen_preview con
   error) se abre SOLO el selector de Chrome (_respaldoNavegador); si tampoco,
   se muestra el error con el botón «Usar el selector de Chrome…».
   El servidor NO arranca solo con el equipo (lo abre el profesor). El lanzador
@@ -304,6 +341,13 @@ instalar_cliente.sh ────────────────────
   Crea desktop entry en el menú de inicio.
   Crea ~/.config/autostart/vigia-alumno.desktop (XDG autostart).
   Arranca el cliente inmediatamente sin esperar al siguiente reinicio.
+
+test_kwin_info.py ───────────────────────────────────────────────────
+  kwin_info sin escritorio: normalización, caché, errores y una prueba de
+  integración con un KWin SIMULADO en un bus privado (dbus-run-session;
+  requiere python3-gi, si no se omite). El selector y el compartir ventana del
+  servidor se prueban en test_streaming.py; kscreen-doctor/recorte en
+  test_desktop_session.py.
 
 test_remote_control.py ─────────────────────────────────────────────
   Suite de tests (unittest) para el control remoto. 85 tests. Ejecutar:
@@ -472,6 +516,6 @@ Esto garantiza que `dist/vigia-server_1.2_amd64.deb` y `dist/vigia-client_1.2_al
 |---|---|
 | `server.py`, `vigia-launcher.py`, `templates/`, `instalar_servidor.sh`, `img/` | `vigia-server_1.2_amd64.deb` |
 | `client.py`, `vigia_overlay.py`, `vigia_input.py`, `instalar_cliente.sh` | `vigia-client_1.2_all.deb` |
-| `platform_utils.py`, `screen_capture.py`, `pipewire_capture.py` o cualquier cambio global | **Ambos** paquetes |
+| `platform_utils.py`, `screen_capture.py`, `kwin_info.py`, `pipewire_capture.py` o cualquier cambio global | **Ambos** paquetes |
 
 > Nunca entregar ni documentar un cambio sin haber ejecutado `bash build_debs.sh` y verificado que los `.deb` de `dist/` se han actualizado correctamente.

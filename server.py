@@ -11,6 +11,7 @@ import io
 import re
 import time
 import base64
+import functools
 import json
 import threading
 import subprocess
@@ -23,6 +24,7 @@ import platform_utils
 _LAUNCH_GRAPHICAL = bool(os.environ.get('WAYLAND_DISPLAY') or os.environ.get('DISPLAY'))
 _LAUNCH_SESSION = os.environ.get('XDG_SESSION_ID', '')
 import screen_capture
+import kwin_info
 from vigia_version import VERSION
 from streaming import PRESETS, normalize_config
 
@@ -620,6 +622,55 @@ def _get_window_region(wid):
     return platform_utils.get_window_region(wid)
 
 
+class _VentanaWayland:
+    """Ventana compartida en Wayland (KDE): ninguna herramienta sin portal
+    captura una ventana suelta, así que se recorta de la captura de todo el
+    escritorio con la posición que da KWin, releída tras cada captura (se
+    puede mover, redimensionar o quedar tapada)."""
+
+    def __init__(self, wid):
+        self.wid = str(wid)
+        self.zona = None       # rectángulo lógico; None = no se ve (minimizada…)
+        self.todo = None       # rectángulo lógico de todo el escritorio
+        self.tapada = False    # otra ventana encima: se vería en el recorte
+        self.cerrada = False
+
+    def actualizar(self):
+        """Relee la ventana de KWin. False si no hay datos (se conserva la
+        última posición) o si la ventana ya no existe (cerrada=True)."""
+        datos = kwin_info.consultar()
+        if datos is None:
+            return False
+        win = kwin_info.ventana(datos, self.wid)
+        if win is None:
+            self.cerrada = True
+            return False
+        self.todo = screen_capture.caja_total(kwin_info.monitores(datos))
+        self.zona = win if win['visible'] else None
+        self.tapada = kwin_info.tapada(datos, self.wid)
+        return True
+
+    def recortar(self, img):
+        if self.zona is None or self.tapada:
+            return None
+        return screen_capture.recortar(img, self.zona, self.todo)
+
+
+def _escalar_para_compartir(img, max_w):
+    """Limita el tamaño por ÁREA (la de max_w a 16:9), no solo por ancho: dos
+    monitores juntos (3840×1080) a 1600 px de ancho quedaban en 1600×450 y el
+    texto era ilegible en los alumnos con el mismo caudal."""
+    from PIL import Image
+    escala = min(1.0, ((max_w * max_w * 9 / 16) / (img.width * img.height)) ** 0.5,
+                 2 * max_w / img.width)
+    if escala >= 1.0:
+        return img
+    # BILINEAR + reducing_gap: a 10 fps, LANCZOS sobre 1080p consumía un
+    # núcleo entero del equipo del profesor.
+    return img.resize((max(1, round(img.width * escala)), max(1, round(img.height * escala))),
+                      Image.BILINEAR, reducing_gap=2.0)
+
+
 def _crear_capturador_profesor(verbose=True, intentos=3, espera_max=0.0, al_esperar=None):
     """Capturador directo (sin portal) con reintentos.
 
@@ -663,8 +714,9 @@ def _teacher_capture_loop(capture):
 
     capturer = None
     sct = None
-    if capture.get('type') == 'window':
-        # Captura de ventana: solo X11 (mss + xdotool)
+    ventana = None
+    if capture.get('type') == 'window' and not screen_capture.is_wayland():
+        # Captura de ventana en X11/Windows: región de pantalla con mss
         try:
             import mss
             sct = mss.mss()
@@ -679,7 +731,17 @@ def _teacher_capture_loop(capture):
     else:
         try:
             capturer = _crear_capturador_profesor()
-            if hasattr(capturer, 'set_monitor'):
+            if capture.get('type') == 'window':
+                ventana = _VentanaWayland(capture.get('wid'))
+                # Se recorta de la captura del escritorio: la ventana tiene que
+                # estar delante o los alumnos verían lo que la tape (p. ej. este
+                # mismo panel, con las pantallas de sus compañeros).
+                kwin_info.activar(ventana.wid)
+                if not ventana.actualizar():
+                    raise screen_capture.CaptureError(
+                        'la ventana ya no está abierta' if ventana.cerrada
+                        else 'KWin no informa de dónde está la ventana')
+            elif hasattr(capturer, 'set_monitor'):
                 capturer.set_monitor(capture.get('monitor', 1))
         except Exception as e:
             if capturer is not None:
@@ -695,9 +757,15 @@ def _teacher_capture_loop(capture):
     ultimo_hash = None
     ultimo_envio = 0.0
     ultima_preview = 0.0
+    avisada_tapada = False
     try:
         while capture['running']:
             try:
+                if ventana is not None and ventana.cerrada:
+                    socketio.emit('teacher_screen_preview',
+                                  {'ended': 'La ventana compartida se ha cerrado'},
+                                  to=capture['sid'])
+                    break
                 if sct is not None:
                     region = _get_window_region(capture['wid'])
                     if region is None:
@@ -707,17 +775,26 @@ def _teacher_capture_loop(capture):
                     img = Image.frombytes('RGB', (cap.width, cap.height), cap.rgb)
                 else:
                     img = capturer.grab()
+                    if ventana is not None:
+                        # Posición y apilamiento DESPUÉS de capturar: si algo la
+                        # tapaba en la captura, sigue tapándola ahora (~10 ms).
+                        ventana.actualizar()
+                        tapada = ventana.tapada and not ventana.cerrada
+                        if tapada and not avisada_tapada:
+                            socketio.emit('teacher_screen_preview', {
+                                'aviso': 'Hay otra ventana encima de la que compartes: '
+                                         'los alumnos ven la última imagen hasta que la despejes'},
+                                to=capture['sid'])
+                        avisada_tapada = tapada
+                        img = None if ventana.cerrada else ventana.recortar(img)
                 # Spectacle puede tardar en volver. No enviar ese fotograma si
                 # el profesor paró o inició otra sesión mientras se capturaba.
                 if not capture['running']:
                     break
-                max_w = _share_cfg['width']
-                if img.width > max_w:
-                    ratio = max_w / img.width
-                    # BILINEAR + reducing_gap: a 10 fps, LANCZOS sobre 1080p
-                    # consumía un núcleo entero del equipo del profesor.
-                    img = img.resize((max_w, int(img.height * ratio)),
-                                     Image.BILINEAR, reducing_gap=2.0)
+                if img is None:   # ventana minimizada, tapada o en otro escritorio
+                    socketio.sleep(0.5)
+                    continue
+                img = _escalar_para_compartir(img, _share_cfg['width'])
                 buf = io.BytesIO()
                 img.save(buf, 'JPEG', quality=_share_cfg['quality'])
                 jpeg = buf.getvalue()
@@ -839,7 +916,8 @@ def _find_desktop_icon(classes):
             if not fname.endswith('.desktop'):
                 continue
             try:
-                text = open(os.path.join(d, fname), encoding='utf-8', errors='ignore').read()
+                with open(os.path.join(d, fname), encoding='utf-8', errors='ignore') as f:
+                    text = f.read()
                 icon_m = re.search(r'^Icon=(.+)$', text, re.MULTILINE)
                 if not icon_m:
                     continue
@@ -880,6 +958,16 @@ def _find_icon_path(name, preferred_size=48):
             p = f'/usr/share/pixmaps/{n}.{ext}'
             if os.path.exists(p):
                 return p
+    # Sin GTK (lo normal en KDE): buscar en los temas de iconos a mano.
+    for tema in ('/usr/share/icons/hicolor', '/usr/share/icons/breeze',
+                 '/var/lib/flatpak/exports/share/icons/hicolor',
+                 os.path.expanduser('~/.local/share/icons/hicolor')):
+        for sub in ('48x48/apps', 'apps/48', '64x64/apps', 'apps/64', '128x128/apps',
+                    '256x256/apps', 'scalable/apps', '32x32/apps', 'apps/32'):
+            for ext in ('png', 'svg'):
+                p = os.path.join(tema, sub, f'{base}.{ext}')
+                if os.path.exists(p):
+                    return p
     return None
 
 
@@ -915,10 +1003,29 @@ def _get_window_app_icon(wid):
         classes = re.findall(r'"([^"]+)"', r.stdout)
         if not classes:
             return None
-        icon_name = _find_desktop_icon(classes) or classes[-1].lower()
+        return _icono_de_clases(tuple(classes[::-1]))
+    except Exception:
+        return None
+
+
+@functools.lru_cache(maxsize=256)
+def _icono_de_clases(classes):
+    """Icono (data URI) de una aplicación a partir de sus identificadores, del
+    más fiable al menos (nombre del .desktop, clase, instancia). Se cachea: el
+    selector recorre todos los .desktop por cada ventana."""
+    if not classes or platform_utils.IS_WINDOWS:
+        return None
+    try:
+        icon_name = _find_desktop_icon(list(classes)) or classes[0].lower()
         return _icon_to_b64(_find_icon_path(icon_name))
     except Exception:
         return None
+
+
+def _etiqueta_completa(ancho, alto, n_monitores):
+    if n_monitores > 1:
+        return f'Pantalla completa: los {n_monitores} monitores ({ancho}×{alto})'
+    return f'Pantalla completa ({ancho}×{alto})'
 
 
 def _thumb_from_image(img, max_w=192):
@@ -952,9 +1059,14 @@ def on_get_screens():
         try:
             if capturer.name == 'mss':
                 sct = capturer._sct
+                n_monitores = len(sct.monitors) - 1
                 for i, mon in enumerate(sct.monitors):
-                    label = f'Pantalla completa ({mon["width"]}×{mon["height"]})' if i == 0 \
-                            else f'Monitor {i} ({mon["width"]}×{mon["height"]})'
+                    if i == 0:
+                        label = _etiqueta_completa(mon['width'], mon['height'], n_monitores)
+                    elif n_monitores == 1:
+                        continue    # un solo monitor: la misma imagen que «Pantalla completa»
+                    else:
+                        label = f'Monitor {i} ({mon["width"]}×{mon["height"]})'
                     screens.append({
                         'type': 'monitor', 'index': i, 'label': label,
                         'thumb': _capture_thumb(sct, mon),
@@ -974,33 +1086,42 @@ def on_get_screens():
                     })
             else:
                 # Wayland (spectacle/grim/gnome-screenshot): la herramienta
-                # captura el escritorio entero; cada monitor se recorta de esa
-                # misma imagen. Las ventanas sueltas siguen requiriendo X11.
+                # captura el escritorio entero; cada monitor y cada ventana se
+                # recortan de esa misma imagen con la geometría de KWin.
+                datos = kwin_info.consultar()      # None fuera de KDE
                 mons = capturer.monitors() if hasattr(capturer, 'monitors') else []
-                if not isinstance(mons, list) or not hasattr(capturer, '_recortar'):
+                if not isinstance(mons, list):
                     mons = []
                 img = capturer.grab()
-                if len(mons) > 2:   # [todas, m1, m2, …]
-                    screens.append({
-                        'type': 'monitor', 'index': 0,
-                        'label': f'Todas las pantallas ({img.width}×{img.height})',
-                        'thumb': _thumb_from_image(img),
-                    })
+                n_monitores = max(0, len(mons) - 1)     # [todo, m1, m2, …]
+                screens.append({
+                    'type': 'monitor', 'index': 0,
+                    'label': _etiqueta_completa(img.width, img.height, n_monitores),
+                    'thumb': _thumb_from_image(img),
+                })
+                if n_monitores > 1:
                     for i, mon in enumerate(mons[1:], start=1):
-                        capturer.index = i
-                        parte = capturer._recortar(img)
+                        parte = screen_capture.recortar(img, mon, mons[0])
+                        if parte is None:
+                            parte = img
                         nombre = f' — {mon["name"]}' if mon.get('name') else ''
                         principal = ' · principal' if mon.get('primary') else ''
                         screens.append({
                             'type': 'monitor', 'index': i,
-                            'label': f'Pantalla {i}{nombre} ({parte.width}×{parte.height}){principal}',
+                            'label': f'Monitor {i}{nombre} ({parte.width}×{parte.height}){principal}',
                             'thumb': _thumb_from_image(parte),
                         })
-                else:
+                todo = mons[0] if mons else None
+                for win in kwin_info.ventanas(datos):
+                    if 'VIGIA' in win['title'] or win['width'] < 50 or win['height'] < 50:
+                        continue
+                    # Minimizada o en otro escritorio: sin miniatura (al
+                    # compartirla se trae al frente).
+                    parte = screen_capture.recortar(img, win, todo) if win['visible'] else None
                     screens.append({
-                        'type': 'monitor', 'index': 0,
-                        'label': f'Pantalla completa ({img.width}×{img.height})',
-                        'thumb': _thumb_from_image(img),
+                        'type': 'window', 'wid': win['wid'], 'label': win['title'],
+                        'thumb': _thumb_from_image(parte) if parte is not None else None,
+                        'icon': _icono_de_clases(tuple(win['classes'])),
                     })
         finally:
             capturer.close()

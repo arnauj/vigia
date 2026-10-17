@@ -274,28 +274,151 @@ class TestServerStreaming(unittest.TestCase):
         from vigia_version import VERSION
         client = self.server.app.test_client()
         response = client.get('/api/version')
-        self.assertEqual(response.json, {'app': 'vigia-server', 'version': VERSION})
+        self.assertEqual((response.json['app'], response.json['version']), ('vigia-server', VERSION))
+        self.assertTrue({'pid', 'uid', 'user', 'graphical', 'session'} <= set(response.json))
         self.assertEqual(response.headers['Cache-Control'], 'no-store')
         self.assertIn(f'<title>VIGIA {VERSION}', client.get('/').text)
 
-    def test_wayland_screen_list_offers_each_monitor(self):
+    KWIN = {
+        'screens': [{'x': 0, 'y': 0, 'w': 1920, 'h': 1080, 'name': 'eDP-1'},
+                    {'x': 1920, 'y': 0, 'w': 1920, 'h': 1080, 'name': 'HDMI-A-1'}],
+        'windows': [
+            {'id': '{doc}', 'title': 'Apuntes - Writer', 'cls': 'libreoffice', 'app': '',
+             'x': 2020, 'y': 100, 'w': 800, 'h': 600, 'min': False, 'vis': True},
+            {'id': '{min}', 'title': 'Minimizada', 'cls': 'kate', 'app': '',
+             'x': 0, 'y': 0, 'w': 800, 'h': 600, 'min': True, 'vis': False},
+            {'id': '{panel}', 'title': 'VIGIA 1.2 — Panel', 'cls': 'chrome', 'app': '',
+             'x': 0, 'y': 0, 'w': 1920, 'h': 1080, 'min': False, 'vis': True},
+        ],
+    }
+
+    def desktop_capture(self):
+        """Escritorio de dos monitores: el izquierdo rojo, el derecho azul y una
+        ventana verde en el derecho."""
         from PIL import Image
         import screen_capture as sc
-        full = Image.new('RGB', (3840, 1080), 'blue')
+        full = Image.new('RGB', (3840, 1080), 'red')
+        full.paste((0, 0, 255), (1920, 0, 3840, 1080))
+        full.paste((0, 255, 0), (2020, 100, 2820, 700))
         capture = object.__new__(sc.CliBackend)
         capture.name = 'spectacle'; capture.index = 0; capture._geom = None
-        capture._mons = [
-            {'left': 0, 'top': 0, 'width': 1920, 'height': 1080, 'name': 'eDP-1', 'primary': True},
-            {'left': 1920, 'top': 0, 'width': 1920, 'height': 1080, 'name': 'HDMI-A-1', 'primary': False},
-        ]
+        capture._mons = self.server.kwin_info.monitores(self.KWIN)
         capture._grab_full = lambda max_age=0.0: full
         capture.close = lambda: None
-        with patch.object(self.server.screen_capture, 'create_capturer', return_value=capture):
+        return capture
+
+    def test_wayland_screen_list_offers_full_desktop_each_monitor_and_windows(self):
+        import base64, io
+        from PIL import Image
+        capture = self.desktop_capture()
+        with patch.object(self.server.screen_capture, 'create_capturer', return_value=capture), \
+             patch.object(self.server.kwin_info, 'consultar', return_value=self.KWIN):
             self.teacher.emit('get_screens')
         screens = self.events(self.teacher, 'screens_list')[0]['screens']
-        self.assertEqual([s['index'] for s in screens], [0, 1, 2])
-        self.assertIn('Todas las pantallas (3840×1080)', screens[0]['label'])
-        self.assertIn('HDMI-A-1 (1920×1080)', screens[2]['label'])
+        monitors = [s for s in screens if s['type'] == 'monitor']
+        windows = [s for s in screens if s['type'] == 'window']
+        self.assertEqual([s['index'] for s in monitors], [0, 1, 2])
+        self.assertEqual(monitors[0]['label'], 'Pantalla completa: los 2 monitores (3840×1080)')
+        self.assertEqual(monitors[1]['label'], 'Monitor 1 — eDP-1 (1920×1080)')
+        self.assertEqual(monitors[2]['label'], 'Monitor 2 — HDMI-A-1 (1920×1080)')
+
+        def thumb(s):
+            return Image.open(io.BytesIO(base64.b64decode(s['thumb'].split(',', 1)[1]))).convert('RGB')
+
+        def rojo(px):
+            return px[0] > 200 and px[2] < 60
+
+        # La miniatura completa muestra los dos monitores; cada monitor, el suyo.
+        completa = thumb(monitors[0])
+        self.assertEqual(completa.size, (192, 54))
+        self.assertTrue(rojo(completa.getpixel((5, 27))))
+        self.assertFalse(rojo(completa.getpixel((186, 27))))
+        self.assertTrue(rojo(thumb(monitors[1]).getpixel((96, 54))))
+        self.assertFalse(rojo(thumb(monitors[2]).getpixel((5, 5))))
+        # Ventanas: sin el propio panel; la minimizada, sin miniatura.
+        self.assertEqual([(w['wid'], w['label']) for w in windows],
+                         [('{doc}', 'Apuntes - Writer'), ('{min}', 'Minimizada')])
+        doc = thumb(windows[0])
+        self.assertEqual(doc.size, (192, 144))
+        px = doc.getpixel((96, 72))
+        self.assertTrue(px[1] > 200 and px[0] < 60, px)
+        self.assertIsNone(windows[1]['thumb'])
+
+    def test_wayland_window_share_sends_only_that_window(self):
+        capture = self.desktop_capture()
+        with patch.object(self.server.socketio, 'start_background_task') as start:
+            self.teacher.emit('start_teacher_capture', {'type': 'window', 'wid': '{doc}'})
+        state = self.server._teacher_capture
+        with patch.object(self.server.screen_capture, 'create_capturer', return_value=capture), \
+             patch.object(self.server.screen_capture, 'is_wayland', return_value=True), \
+             patch.object(self.server.kwin_info, 'consultar', return_value=self.KWIN), \
+             patch.object(self.server.kwin_info, 'activar', return_value=True) as activar, \
+             patch.object(self.server.socketio, 'sleep', side_effect=lambda _: state.update(running=False)):
+            start.call_args.args[0](*start.call_args.args[1:])
+        activar.assert_called_once_with('{doc}')
+        frames = self.events(self.student, 'teacher_screen')
+        self.assertEqual(len(frames), 1)
+        import base64, io
+        from PIL import Image
+        img = Image.open(io.BytesIO(base64.b64decode(frames[0]['image'].split(',', 1)[1])))
+        self.assertEqual(img.size, (800, 600))
+
+    def test_wayland_window_minimized_or_closed(self):
+        ventana = self.server._VentanaWayland('{min}')
+        with patch.object(self.server.kwin_info, 'consultar', return_value=self.KWIN):
+            self.assertTrue(ventana.actualizar())
+        self.assertIsNone(ventana.recortar(self.desktop_capture().grab()))
+        with patch.object(self.server.kwin_info, 'consultar', return_value=None):
+            self.assertFalse(ventana.actualizar())       # KWin no contesta: no se da por cerrada
+        self.assertFalse(ventana.cerrada)
+        # Cerrada durante la clase: se avisa al panel y se para.
+        with patch.object(self.server.socketio, 'start_background_task'):
+            self.teacher.emit('start_teacher_capture', {'type': 'window', 'wid': '{doc}'})
+        state = self.server._teacher_capture
+        respuestas = iter([self.KWIN, {'screens': self.KWIN['screens'], 'windows': []}])
+        with patch.object(self.server.screen_capture, 'create_capturer', return_value=self.desktop_capture()), \
+             patch.object(self.server.screen_capture, 'is_wayland', return_value=True), \
+             patch.object(self.server.kwin_info, 'consultar', side_effect=lambda: next(respuestas)), \
+             patch.object(self.server.kwin_info, 'activar', return_value=True), \
+             patch.object(self.server.socketio, 'sleep'):
+            self.server._teacher_capture_loop(state)
+        self.assertFalse(state['running'])
+        self.assertEqual(self.events(self.teacher, 'teacher_screen_preview'),
+                         [{'ended': 'La ventana compartida se ha cerrado'}])
+        self.assertEqual(self.events(self.student, 'teacher_screen'), [])
+
+    def test_wayland_window_covered_by_another_is_not_sent(self):
+        # El panel (u otra ventana) encima de la compartida: el recorte lo
+        # mostraría a los alumnos. Se avisa una vez y no se envía nada.
+        tapada = {'screens': self.KWIN['screens'], 'windows': [
+            {'id': '{chat}', 'title': 'Chat', 'cls': 'x', 'x': 2400, 'y': 300, 'w': 600, 'h': 600,
+             'min': False, 'vis': True}] + self.KWIN['windows']}
+        with patch.object(self.server.socketio, 'start_background_task'):
+            self.teacher.emit('start_teacher_capture', {'type': 'window', 'wid': '{doc}'})
+        state = self.server._teacher_capture
+        vueltas = []
+
+        def sleep(_):
+            vueltas.append(1)
+            if len(vueltas) >= 3:
+                state['running'] = False
+
+        with patch.object(self.server.screen_capture, 'create_capturer', return_value=self.desktop_capture()), \
+             patch.object(self.server.screen_capture, 'is_wayland', return_value=True), \
+             patch.object(self.server.kwin_info, 'consultar', return_value=tapada), \
+             patch.object(self.server.kwin_info, 'activar', return_value=True), \
+             patch.object(self.server.socketio, 'sleep', side_effect=sleep):
+            self.server._teacher_capture_loop(state)
+        self.assertEqual(self.events(self.student, 'teacher_screen'), [])
+        avisos = [e for e in self.events(self.teacher, 'teacher_screen_preview') if 'aviso' in e]
+        self.assertEqual(len(avisos), 1)
+
+    def test_share_size_is_limited_by_area_not_only_width(self):
+        from PIL import Image
+        escalar = self.server._escalar_para_compartir
+        self.assertEqual(escalar(Image.new('RGB', (1920, 1080)), 1600).size, (1600, 900))
+        self.assertEqual(escalar(Image.new('RGB', (3840, 1080)), 1600).size, (2263, 636))
+        self.assertEqual(escalar(Image.new('RGB', (800, 600)), 1600).size, (800, 600))
 
     def test_direct_capture_retries_while_desktop_starts(self):
         capture = Mock(name='capture')
@@ -329,7 +452,8 @@ class TestServerStreaming(unittest.TestCase):
         capture = Mock(name='capture')
         capture.name = 'spectacle'
         capture.grab.return_value = Image.new('RGB', (640, 360), 'red')
-        with patch.object(self.server.screen_capture, 'create_capturer', return_value=capture) as create:
+        with patch.object(self.server.screen_capture, 'create_capturer', return_value=capture) as create, \
+             patch.object(self.server.kwin_info, 'consultar', return_value=None):
             self.teacher.emit('get_screens')
         create.assert_called_once_with(verbose=False, allow_portal=False)
         screens = self.events(self.teacher, 'screens_list')[0]['screens']
