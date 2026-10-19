@@ -53,8 +53,15 @@ server.py ───────────────────────�
     _class_settings = {teacher_on_top}           # ajustes del aula (Configuración)
     _student_order  = [clave, …]                 # orden de las tarjetas del panel
     _student_aliases = {clave: nombre visible}   # nombres puestos por el profesor
+    _panel_settings = {theme, density}           # apariencia del PANEL (no alumnos)
   Ajustes del aula: update_class_settings (panel) → class_settings (a todos;
   también al registrarse alumno/panel). Persisten en ~/.config/vigia/aula.json.
+  Apariencia del panel: theme 'dark'|'light' (por defecto dark) y density
+  's'|'m'|'l' (tamaño de tarjeta). update_panel_settings {theme?, density?}
+  (parcial, se fusiona; lo inválido se ignora campo a campo) → panel.json →
+  panel_settings SOLO a la sala 'professors' (también al registrarse el panel).
+  La ruta / pasa panel_settings a la plantilla, que pinta <html data-theme> ya
+  con el tema guardado (sin parpadeo); /manifest.json toma sus colores también.
   Orden de las tarjetas: el profesor las arrastra en el panel (drag & drop) →
   update_student_order [nombres] → se guarda en ~/.config/vigia/orden.json y se
   manda student_order a los paneles (también al registrarse). Va por NOMBRE (el
@@ -209,6 +216,29 @@ vigia-launcher.py ────────────────────�
 templates/dashboard.html ───────────────────────────────────────────
   SPA con JS vanilla + Socket.IO 4.x + Bootstrap 5 (todo por CDN).
   Sin proceso de build. Editar directamente el HTML.
+  Diseño «consola»: #app = rejilla con #sidebar (marca, «Alumnos» con
+  #count-badge, acciones para toda la clase con atajo S/M/T/V, estado del
+  servidor #server-card, selector de tema, Configuración) + #main (#live-badge =
+  franja EN DIRECTO con #share-preview, #topbar con estadísticas, buscador y
+  densidad S/M/L, #selection-bar, #grid). A ≤900 px la barra lateral pasa arriba.
+  Tarjeta: captura (.card-screen), nombre + «IP · hora» y 4 botones .card-act
+  (ver, controlar, bloquear, más). «Más» abre UN menú compartido #card-menu
+  (mensaje, comando, renombrar, apagar) que se coloca junto al botón.
+  TEMA CLARO/OSCURO: todos los colores salen de variables en
+  :root[data-theme="dark"|"light"] (bg, bg-soft, well, card-bg, card-bg-2,
+  field-bg, card-border, text, text-2, muted, faint, accent = tinta, accent-fill
+  + on-accent = botón relleno, green/red/amber y sus -soft, live-*, code-*…).
+  NUNCA un color literal en un estilo nuevo: se vería mal en uno de los temas.
+  Excepciones a propósito (colores de CONTENIDO o sobre fondo siempre oscuro):
+  pizarra/#lv-floating-text, velo de bloqueo, vista ampliada y fondo del vídeo.
+  aplicarTema()/elegirTema() y aplicarDensidad()/elegirDensidad(): se aplican y
+  se guardan al momento (barra lateral y Configuración → «Apariencia del
+  panel»); no van con Aplicar/Cancelar. data-bs-theme acompaña a data-theme.
+  Atajos (manejador en fase de CAPTURA en document): solo sin modal abierto
+  (_hayModalAbierto, incluye la vista en directo, donde las teclas son del
+  alumno), sin menú abierto y fuera de campos de texto; Ctrl+K enfoca el
+  buscador; Esc termina la selección. Bootstrap ya define .placeholder (un
+  bloque gris): no reutilizar ese nombre de clase (la tarjeta usa .card-wait).
   WebRTC: RTCPeerConnection con _iniciarWebRTC(sid, mode). En modo
   control crea DOS DataChannels con priority:'high':
     - 'vigia-mouse' (ordered:false, maxRetransmits:0) → ratón (UDP-like)
@@ -408,6 +438,8 @@ build_debs.sh ──────────────────────
 | `screens_status` | servidor → dashboard | Aviso mientras get_screens espera a Plasma |
 | `update_class_settings` | dashboard → servidor | Ajustes del aula (`teacher_on_top`) |
 | `class_settings` | servidor → dashboard/clientes | Difusión de los ajustes del aula |
+| `update_panel_settings` | dashboard → servidor | Apariencia del panel `{theme?, density?}` (parcial) |
+| `panel_settings` | servidor → dashboards | Tema y densidad guardados (`panel.json`), no va a los alumnos |
 | `update_student_order` | dashboard → servidor | Nuevo orden de las tarjetas (lista de nombres) |
 | `student_order` | servidor → dashboards | Orden guardado de las tarjetas |
 | `rename_student` | dashboard → servidor | Cambiar el nombre visible `{key, name}` (vacío = original) |

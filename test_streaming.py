@@ -193,6 +193,44 @@ class TestServerStreaming(unittest.TestCase):
             self.teacher.emit('update_student_order', 'basura')
             self.assertEqual(self.events(self.teacher, 'student_order'), [[]])
 
+    def test_panel_theme_is_saved_and_only_reaches_dashboards(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(self.server, '_PANEL_SETTINGS_FILE', os.path.join(tmp, 'panel.json')), \
+             patch.object(self.server, '_panel_settings', {'theme': 'dark', 'density': 'm'}):
+            self.teacher.emit('update_panel_settings', {'theme': 'light'})
+            self.assertEqual(self.events(self.teacher, 'panel_settings'),
+                             [{'theme': 'light', 'density': 'm'}])
+            # Es del panel: los alumnos no lo reciben.
+            self.assertEqual(self.events(self.student, 'panel_settings'), [])
+            dashboard = self.peer()
+            dashboard.emit('register_teacher')
+            self.assertEqual(self.events(dashboard, 'panel_settings'),
+                             [{'theme': 'light', 'density': 'm'}])
+            # Persistente: sobrevive a reiniciar el servidor.
+            self.assertEqual(self.server._load_panel_settings(), {'theme': 'light', 'density': 'm'})
+            # La página ya sale pintada con el tema guardado (sin parpadeo).
+            page = self.server.app.test_client().get('/').get_data(as_text=True)
+            self.assertIn('data-theme="light"', page)
+            # Valores inválidos: se conserva lo anterior; cada campo por separado.
+            self.teacher.emit('update_panel_settings', {'theme': 'rosa', 'density': 'l'})
+            self.assertEqual(self.events(self.teacher, 'panel_settings'),
+                             [{'theme': 'light', 'density': 'l'}])
+            self.teacher.emit('update_panel_settings', 'basura')
+            self.assertEqual(self.events(self.teacher, 'panel_settings'),
+                             [{'theme': 'light', 'density': 'l'}])
+
+    def test_panel_settings_file_garbage_falls_back_to_dark(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'panel.json')
+            with patch.object(self.server, '_PANEL_SETTINGS_FILE', path):
+                self.assertEqual(self.server._load_panel_settings(), {'theme': 'dark', 'density': 'm'})
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write('{"theme": "light", "density": 7')
+                self.assertEqual(self.server._load_panel_settings(), {'theme': 'dark', 'density': 'm'})
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write('["light"]')
+                self.assertEqual(self.server._load_panel_settings(), {'theme': 'dark', 'density': 'm'})
+
     def test_student_rename_is_saved_and_applied_on_reconnect(self):
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(self.server, '_STUDENT_ALIASES_FILE', os.path.join(tmp, 'nombres.json')), \
