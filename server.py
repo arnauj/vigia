@@ -185,6 +185,47 @@ def _save_class_settings(settings):
 
 _class_settings = _load_class_settings()
 
+# Preferencias del PANEL del profesor (no se mandan a los alumnos): tema claro
+# u oscuro y tamaño de las tarjetas. En el servidor y no en localStorage porque
+# el lanzador abre Chrome con un perfil temporal. La plantilla las recibe ya
+# al pintar la página, así que el tema no parpadea al abrir el panel.
+_PANEL_THEMES = ('dark', 'light')
+_PANEL_DENSITIES = ('s', 'm', 'l')
+_PANEL_SETTINGS_DEFAULT = {'theme': 'dark', 'density': 'm'}
+_PANEL_SETTINGS_FILE = os.path.join(os.path.dirname(_CLASS_SETTINGS_FILE), 'panel.json')
+
+
+def normalize_panel_settings(data, current=None):
+    settings = dict(_PANEL_SETTINGS_DEFAULT if current is None else current)
+    if isinstance(data, dict):
+        if data.get('theme') in _PANEL_THEMES:
+            settings['theme'] = data['theme']
+        if data.get('density') in _PANEL_DENSITIES:
+            settings['density'] = data['density']
+    return settings
+
+
+def _load_panel_settings():
+    try:
+        with open(_PANEL_SETTINGS_FILE, encoding='utf-8') as f:
+            return normalize_panel_settings(json.load(f))
+    except (OSError, ValueError):
+        return dict(_PANEL_SETTINGS_DEFAULT)
+
+
+def _save_panel_settings(settings):
+    try:
+        os.makedirs(os.path.dirname(_PANEL_SETTINGS_FILE), exist_ok=True)
+        tmp = _PANEL_SETTINGS_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(settings, f)
+        os.replace(tmp, _PANEL_SETTINGS_FILE)
+    except OSError as error:
+        print(f"[!] No se pudieron guardar las preferencias del panel: {error}")
+
+
+_panel_settings = _load_panel_settings()
+
 # Orden de las tarjetas del panel (lista de nombres de alumno; el sid cambia en
 # cada conexión, el nombre no). Lo guarda el servidor y no el navegador porque
 # el lanzador abre Chrome con un perfil temporal: localStorage se perdería.
@@ -302,7 +343,8 @@ def dashboard():
                                         vigia_version=VERSION,
                                         prefer_server_capture=prefer_server_capture,
                                         stream_presets=PRESETS,
-                                        stream_config=_performance_config))
+                                        stream_config=_performance_config,
+                                        panel_settings=_panel_settings))
     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     resp.headers['Pragma'] = 'no-cache'
     return resp
@@ -353,14 +395,16 @@ def serve_img(filename):
 @app.route('/manifest.json')
 def web_manifest():
     from flask import jsonify
+    # Mismos colores que el tema guardado del panel (fondo y barra lateral).
+    light = _panel_settings.get('theme') == 'light'
     manifest = {
         "name": "VIGIA — Panel del Profesor",
         "short_name": "VIGIA",
         "description": "Supervisión de aula en tiempo real",
         "start_url": "/",
         "display": "standalone",
-        "background_color": "#1a1d27",
-        "theme_color": "#1a1d27",
+        "background_color": "#f3f4f6" if light else "#0d0e10",
+        "theme_color": "#ffffff" if light else "#141619",
         "icons": [
             {"src": "/img/icon-192.png", "sizes": "192x192", "type": "image/png"},
             {"src": "/img/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
@@ -405,6 +449,7 @@ def on_register_teacher():
     join_room('professors')
     emit('config_update', _performance_config)
     emit('class_settings', _class_settings)
+    emit('panel_settings', _panel_settings)
     emit('student_order', _student_order)
     emit('student_aliases', _student_aliases)
     print(f"[👁] Dashboard registrado en sala 'professors': {request.sid}")
@@ -577,6 +622,17 @@ def on_update_class_settings(data):
     socketio.emit('class_settings', settings)
     print(f"[*] Ventana del profesor en alumnos: "
           f"{'siempre encima' if settings['teacher_on_top'] else 'normal'}")
+
+
+@socketio.on('update_panel_settings')
+def on_update_panel_settings(data):
+    """Tema/tamaño del panel: se guarda y se avisa solo a los paneles abiertos."""
+    global _panel_settings
+    settings = normalize_panel_settings(data, _panel_settings)
+    if settings != _panel_settings:
+        _panel_settings = settings
+        _save_panel_settings(settings)
+    socketio.emit('panel_settings', settings, to='professors')
 
 
 @socketio.on('update_student_order')
