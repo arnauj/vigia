@@ -43,11 +43,11 @@
       --card-bg-2: #22262b;     /* elevado: hover, activo */
       --field-bg: #111316;      /* campos de texto */
       --card-border: #2a2e35;
-      --border-strong: #3a3f48;
+      --border-strong: #636a75;
       --text: #eceef1;
       --text-2: #c9ced6;
       --muted: #9ba3ae;
-      --faint: #7d8590;
+      --faint: #858d98;
       --accent: #c3f53c;        /* texto, iconos y bordes de acento */
       --accent-fill: #c3f53c;   /* botones rellenos */
       --on-accent: #0d0e10;
@@ -85,17 +85,17 @@
       --card-bg-2: #eceef2;
       --field-bg: #ffffff;
       --card-border: #dde1e6;
-      --border-strong: #c3c9d1;
+      --border-strong: #8a919b;
       --text: #15181d;
       --text-2: #343b45;
       --muted: #59616d;
-      --faint: #6b7380;
-      --accent: #4a7a0c;
+      --faint: #5f6773;
+      --accent: #436f0b;
       --accent-fill: #c3f53c;
       --on-accent: #15181d;
       --accent-soft: rgba(132,204,22,.16);
       --accent-ring: rgba(77,124,15,.32);
-      --green: #15803d;
+      --green: #13733a;
       --green-soft: rgba(21,128,61,.10);
       --red: #c4320a;
       --red-soft: rgba(196,50,10,.08);
@@ -236,7 +236,7 @@
     .theme-switch button svg { width: 14px; height: 14px; }
     .theme-switch button:hover { color: var(--text); }
     .theme-switch button[aria-pressed="true"] {
-      background: var(--card-bg-2); color: var(--text); box-shadow: var(--shadow-sm);
+      background: var(--card-bg-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--border-strong);
     }
 
     /* ── Contenido ── */
@@ -317,7 +317,7 @@
       cursor: pointer; transition: background .12s, color .12s;
     }
     .seg button:hover { color: var(--text); }
-    .seg button[aria-pressed="true"] { background: var(--card-bg-2); color: var(--text); box-shadow: var(--shadow-sm); }
+    .seg button[aria-pressed="true"] { background: var(--card-bg-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--border-strong); }
 
     /* ── Barra de selección múltiple ── */
     #selection-bar {
@@ -385,7 +385,7 @@
     }
     /* «card-wait» y no «placeholder»: Bootstrap ya tiene .placeholder (un bloque gris) */
     .card-screen .card-wait {
-      color: var(--faint);
+      color: var(--muted);
       font-family: var(--font-mono); font-size: 11px;
       display: flex; flex-direction: column; align-items: center; gap: 6px;
       text-align: center;
@@ -761,7 +761,7 @@
     .link-field { margin-bottom: 10px; }
     .link-field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
     .link-field input {
-      width: 100%; background: var(--field-bg); border: 1px solid var(--card-border);
+      width: 100%; background: var(--field-bg); border: 1px solid var(--border-strong);
       color: var(--text); border-radius: 6px; padding: 7px 10px;
       font-size: 14px; outline: none; box-sizing: border-box;
     }
@@ -782,7 +782,9 @@
       color: var(--text);
       gap: 10px;
       flex-wrap: wrap;
+      justify-content: flex-start;
     }
+    #liveview-header-left { margin-right: 4px; }
     #liveview-header-left  { display: flex; align-items: center; gap: 10px; }
     #liveview-name         { font-weight: 600; font-size: 15px; }
     .lv-badge {
@@ -793,8 +795,12 @@
     .lv-badge.view    { color: var(--accent); border-color: var(--accent-ring); background: var(--accent-soft); }
     .lv-badge.control { color: var(--amber);  border-color: var(--amber-border);  background: var(--amber-soft); }
     #liveview-transport { font-family: var(--font-mono); font-size: 12px; color: var(--muted); margin-left: 8px; }
-    #liveview-fps { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+    #liveview-fps { font-family: var(--font-mono); font-size: 12px; color: var(--muted); margin-right: auto; }
+    /* Sin .d-flex de Bootstrap (display:flex !important): ganaba al
+       style.display='none' con el que el JS oculta Pizarra/Dibujar/Portapapeles
+       en «Solo ver», y salían botones que no hacían nada. */
     #liveview-header button {
+      display: inline-flex; align-items: center; gap: 8px;
       background: none; border: 1px solid var(--card-border); color: var(--text-2);
       border-radius: 8px; padding: 5px 12px; cursor: pointer; font-size: 13px;
       transition: border-color .15s, color .15s, background .15s;
@@ -863,7 +869,7 @@
     }
     #lv-overlay-text {
       background: var(--field-bg);
-      border: 1px solid var(--card-border);
+      border: 1px solid var(--border-strong);
       color: var(--text);
       border-radius: 8px;
       padding: 5px 9px;
@@ -954,6 +960,7 @@
       color: var(--faint); text-transform: uppercase; letter-spacing: .08em;
     }
     .screen-section-header:first-child { margin-top: 0; }
+    .screen-msg { grid-column: 1 / -1; margin: 0; color: var(--text-2); }
     #screen-list {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -1211,7 +1218,7 @@
     .name-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
     .name-input, .card-name-input {
       width: 100%; background: var(--field-bg); color: var(--text);
-      border: 1px solid var(--card-border); border-radius: 8px;
+      border: 1px solid var(--border-strong); border-radius: 8px;
       padding: 6px 10px; font-size: 0.82rem; font-family: inherit;
     }
     .name-input:focus, .card-name-input:focus { outline: none; border-color: var(--accent); }
@@ -1239,7 +1246,7 @@
       width: 18px; height: 18px; border-radius: 50%; background: var(--knob);
       box-shadow: 0 1px 3px rgba(0,0,0,.4); transition: transform .2s;
     }
-    .switch input:checked + .slider { background: var(--accent-fill); border-color: transparent; }
+    .switch input:checked + .slider { background: var(--accent-fill); border-color: var(--accent); }
     .switch input:checked + .slider::before { transform: translateX(18px); }
     .switch input:focus-visible + .slider { outline: 2px solid var(--accent); outline-offset: 2px; }
     /* El pie queda siempre visible aunque el contenido haga scroll */
@@ -3398,8 +3405,7 @@ function _respaldoNavegador(error) {
 
 function _mostrarErrorCaptura(error) {
   _screenListRequested = false;
-  const list = document.getElementById('screen-list');
-  list.textContent = 'No se pudo usar la captura directa: ' + error;
+  _mensajeSelector('No se pudo usar la captura directa: ' + error);
   document.getElementById('screen-browser').hidden = !_canGetDisplayMedia();
   document.getElementById('screen-overlay').classList.add('show');
 }
@@ -3467,10 +3473,18 @@ function compartirDesdeNavegador(errorServidor = null) {
 }
 
 // ── Selector de pantalla/ventana (launcher) ──
+// Estado o error del selector: en un hijo que ocupa toda la fila de la rejilla
+// (como texto suelto quedaba encajado en la primera columna, de 180 px).
+function _mensajeSelector(texto) {
+  const list = document.getElementById('screen-list');
+  list.innerHTML = '<p class="screen-msg"></p>';
+  list.firstChild.textContent = texto;
+}
+
 function abrirScreenModal() {
   if (_screenListRequested) return;
   _screenListRequested = true;
-  document.getElementById('screen-list').textContent = 'Cargando pantallas…';
+  _mensajeSelector('Cargando pantallas…');
   document.getElementById('screen-browser').hidden = !_canGetDisplayMedia();
   document.getElementById('screen-overlay').classList.add('show');
   socket.emit('get_screens');
@@ -3479,7 +3493,7 @@ function abrirScreenModal() {
 // El escritorio aún está arrancando: el servidor sigue reintentando.
 socket.on('screens_status', data => {
   if (!_screenListRequested) return;
-  document.getElementById('screen-list').textContent = data.message || 'Cargando pantallas…';
+  _mensajeSelector(data.message || 'Cargando pantallas…');
 });
 
 socket.on('screens_list', data => {
@@ -4076,12 +4090,12 @@ function _actualizarPrompt(cwd) {
       <span id="liveview-transport">JPEG</span>
     </div>
     <span id="liveview-fps">…</span>
-    <button onclick="abrirSettings()" class="d-flex align-items-center gap-2" title="Ajustar calidad y fluidez sin cerrar la sesión"><i data-lucide="settings" size="12"></i> Configuración</button>
-    <button id="lv-overlay-toggle" class="d-flex align-items-center gap-2" style="display:none" title="Activar/desactivar pizarra en el cliente"><i data-lucide="presentation" size="12"></i> Pizarra: OFF</button>
-    <button id="lv-draw-toggle" class="d-flex align-items-center gap-2" style="display:none" title="Alternar entre control remoto y dibujar sobre la pizarra"><i data-lucide="pencil" size="12"></i> Dibujar: OFF</button>
-    <button id="lv-clipboard-btn" onclick="pedirPortapapeles()" class="d-flex align-items-center gap-2" style="display:none"
+    <button onclick="abrirSettings()" title="Ajustar calidad y fluidez sin cerrar la sesión"><i data-lucide="settings" size="12"></i> Configuración</button>
+    <button id="lv-overlay-toggle" style="display:none" title="Activar/desactivar pizarra en el cliente"><i data-lucide="presentation" size="12"></i> Pizarra: OFF</button>
+    <button id="lv-draw-toggle" style="display:none" title="Alternar entre control remoto y dibujar sobre la pizarra"><i data-lucide="pencil" size="12"></i> Dibujar: OFF</button>
+    <button id="lv-clipboard-btn" onclick="pedirPortapapeles()" style="display:none"
             title="Obtener portapapeles del alumno (Ctrl+Shift+C)"><i data-lucide="clipboard" size="12"></i> Portapapeles</button>
-    <button onclick="cerrarLiveView()" class="d-flex align-items-center gap-2"><i data-lucide="x" size="12"></i> Cerrar (Esc)</button>
+    <button onclick="cerrarLiveView()"><i data-lucide="x" size="12"></i> Cerrar (Esc)</button>
     <div id="liveview-toolbar">
       <button id="lv-tool-brush" class="lv-tool-btn active d-inline-flex align-items-center gap-1" title="Pincel"><i data-lucide="brush" size="12"></i> Pincel</button>
       <button id="lv-tool-text" class="lv-tool-btn d-inline-flex align-items-center gap-1" title="Texto"><i data-lucide="type" size="12"></i> Texto</button>

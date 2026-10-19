@@ -149,6 +149,14 @@ def main():
                 assert page.inner_text('#stat-locked') == '0 bloqueados'
                 assert page.inner_text('#stat-online') == '2 conectados'
 
+                # «Solo ver»: sin los botones de pizarra/portapapeles (antes
+                # .d-flex de Bootstrap impedía ocultarlos y no hacían nada).
+                page.evaluate('(sid) => abrirLiveView(sid, "view")', peers[0].get_sid())
+                assert page.is_visible('#liveview-overlay')
+                for boton in ('#lv-overlay-toggle', '#lv-draw-toggle', '#lv-clipboard-btn'):
+                    assert not page.is_visible(boton), boton
+                page.evaluate('cerrarLiveView()')
+
                 assert not errors, errors
                 browser.close()
         finally:
