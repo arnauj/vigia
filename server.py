@@ -269,8 +269,15 @@ _student_order = _load_student_order()
 # visible}). La clave es el nombre con el que se registra el cliente
 # («usuario - equipo»), estable entre conexiones; el orden guardado también
 # usa esa clave, así que renombrar no descoloca la tarjeta.
+# Los nombres van por GRUPOS: en un aula entran grupos distintos cada hora y en
+# cada equipo se sienta otra persona, así que cada grupo guarda sus nombres y el
+# profesor carga el que toca. Se recuerda el último grupo usado.
+# nombres.json = {"actual": grupo, "grupos": {grupo: {clave: nombre}}}; el
+# formato antiguo (un solo {clave: nombre}) se lee como el grupo «General».
 _STUDENT_ALIASES_FILE = os.path.join(os.path.dirname(_CLASS_SETTINGS_FILE), 'nombres.json')
 _STUDENT_ALIAS_MAX_LEN = 60
+_STUDENT_GROUP_MAX_LEN = 40
+_STUDENT_GROUP_DEFAULT = 'General'
 
 
 def normalize_student_alias(name):
@@ -279,34 +286,72 @@ def normalize_student_alias(name):
     return ' '.join(name.split())[:_STUDENT_ALIAS_MAX_LEN]
 
 
-def _load_student_aliases():
+def normalize_student_group(name):
+    if not isinstance(name, str):
+        return ''
+    return ' '.join(name.split())[:_STUDENT_GROUP_MAX_LEN]
+
+
+def _normalize_aliases(data):
+    aliases = {}
+    if isinstance(data, dict):
+        for key, name in data.items():
+            name = normalize_student_alias(name)
+            if isinstance(key, str) and key and name and name != key:
+                aliases[key] = name
+    return aliases
+
+
+def _empty_student_groups():
+    return {'actual': _STUDENT_GROUP_DEFAULT, 'grupos': {_STUDENT_GROUP_DEFAULT: {}}}
+
+
+def _load_student_groups():
     try:
         with open(_STUDENT_ALIASES_FILE, encoding='utf-8') as f:
             data = json.load(f)
     except (OSError, ValueError):
-        return {}
+        return _empty_student_groups()
     if not isinstance(data, dict):
-        return {}
-    aliases = {}
-    for key, name in data.items():
-        name = normalize_student_alias(name)
-        if isinstance(key, str) and key and name and name != key:
-            aliases[key] = name
-    return aliases
+        return _empty_student_groups()
+    if not isinstance(data.get('grupos'), dict):
+        # Formato antiguo: un único grupo de nombres.
+        return {'actual': _STUDENT_GROUP_DEFAULT,
+                'grupos': {_STUDENT_GROUP_DEFAULT: _normalize_aliases(data)}}
+    groups = {}
+    for group, aliases in data['grupos'].items():
+        group = normalize_student_group(group)
+        if group and group not in groups:
+            groups[group] = _normalize_aliases(aliases)
+    if not groups:
+        return _empty_student_groups()
+    current = normalize_student_group(data.get('actual'))
+    if current not in groups:
+        current = sorted(groups)[0]
+    return {'actual': current, 'grupos': groups}
 
 
-def _save_student_aliases(aliases):
+def _save_student_groups(groups):
     try:
         os.makedirs(os.path.dirname(_STUDENT_ALIASES_FILE), exist_ok=True)
         tmp = _STUDENT_ALIASES_FILE + '.tmp'
         with open(tmp, 'w', encoding='utf-8') as f:
-            json.dump(aliases, f, ensure_ascii=False, indent=1)
+            json.dump(groups, f, ensure_ascii=False, indent=1)
         os.replace(tmp, _STUDENT_ALIASES_FILE)
     except OSError as error:
         print(f"[!] No se pudieron guardar los nombres de los alumnos: {error}")
 
 
-_student_aliases = _load_student_aliases()
+def _current_aliases():
+    """Nombres del grupo cargado ahora."""
+    return _student_groups['grupos'][_student_groups['actual']]
+
+
+def _student_groups_info():
+    return {'groups': sorted(_student_groups['grupos']), 'current': _student_groups['actual']}
+
+
+_student_groups = _load_student_groups()
 
 
 def get_local_ip():
@@ -451,7 +496,8 @@ def on_register_teacher():
     emit('class_settings', _class_settings)
     emit('panel_settings', _panel_settings)
     emit('student_order', _student_order)
-    emit('student_aliases', _student_aliases)
+    emit('student_aliases', _current_aliases())
+    emit('student_groups', _student_groups_info())
     print(f"[👁] Dashboard registrado en sala 'professors': {request.sid}")
 
 
@@ -487,7 +533,7 @@ def on_disconnect():
 def on_register(data):
     client_ip = _get_client_ip()
     key = data.get('name') or 'Alumno'
-    name = _student_aliases.get(key, key)
+    name = _current_aliases().get(key, key)
     now = datetime.now().strftime('%H:%M:%S')
     caps = data.get('caps') or {}
     students[request.sid] = {
@@ -648,24 +694,87 @@ def on_update_student_order(data):
 
 @socketio.on('rename_student')
 def on_rename_student(data):
-    """El profesor cambia el nombre visible de un alumno (vacío = el original)."""
+    """El profesor cambia el nombre visible de un alumno (vacío = el original).
+    Se guarda en el grupo cargado ahora."""
     if not isinstance(data, dict) or not isinstance(data.get('key'), str) or not data['key']:
         return
     key = data['key']
+    aliases = _current_aliases()
     name = normalize_student_alias(data.get('name'))
     if name and name != key:
-        _student_aliases[key] = name
+        aliases[key] = name
     else:
-        _student_aliases.pop(key, None)
+        aliases.pop(key, None)
         name = key
-    _save_student_aliases(_student_aliases)
+    _save_student_groups(_student_groups)
     for sid, student in students.items():
         if student.get('key', student['name']) == key:
             student['name'] = name
             socketio.emit('student_renamed', {'sid': sid, 'key': key, 'name': name},
                           to='professors')
-    socketio.emit('student_aliases', _student_aliases, to='professors')
-    print(f"[*] Alumno renombrado: {key} -> {name}")
+    socketio.emit('student_aliases', aliases, to='professors')
+    print(f"[*] Alumno renombrado ({_student_groups['actual']}): {key} -> {name}")
+
+
+def _anunciar_grupo():
+    """Aplica los nombres del grupo actual a los alumnos conectados y avisa a
+    los paneles (student_renamed de los que cambian + student_aliases +
+    student_groups)."""
+    aliases = _current_aliases()
+    for sid, student in students.items():
+        key = student.get('key', student['name'])
+        name = aliases.get(key, key)
+        if name != student['name']:
+            student['name'] = name
+            socketio.emit('student_renamed', {'sid': sid, 'key': key, 'name': name},
+                          to='professors')
+    socketio.emit('student_aliases', aliases, to='professors')
+    socketio.emit('student_groups', _student_groups_info(), to='professors')
+
+
+@socketio.on('select_student_group')
+def on_select_student_group(data):
+    """Carga los nombres de un grupo. Si no existe se crea vacío (= «Nuevo
+    grupo»): los alumnos vuelven al nombre del equipo hasta que se les ponga uno."""
+    name = normalize_student_group((data or {}).get('name') if isinstance(data, dict) else None)
+    if not name:
+        return
+    _student_groups['grupos'].setdefault(name, {})
+    _student_groups['actual'] = name
+    _save_student_groups(_student_groups)
+    _anunciar_grupo()
+    print(f"[*] Grupo de nombres cargado: {name}")
+
+
+@socketio.on('rename_student_group')
+def on_rename_student_group(data):
+    if not isinstance(data, dict):
+        return
+    old = normalize_student_group(data.get('old'))
+    new = normalize_student_group(data.get('name'))
+    groups = _student_groups['grupos']
+    if old not in groups or not new or new == old or new in groups:
+        socketio.emit('student_groups', _student_groups_info(), to=request.sid)
+        return
+    groups[new] = groups.pop(old)
+    if _student_groups['actual'] == old:
+        _student_groups['actual'] = new
+    _save_student_groups(_student_groups)
+    socketio.emit('student_groups', _student_groups_info(), to='professors')
+
+
+@socketio.on('delete_student_group')
+def on_delete_student_group(data):
+    """Borra un grupo y sus nombres. Siempre queda al menos uno."""
+    name = normalize_student_group(data.get('name') if isinstance(data, dict) else None)
+    groups = _student_groups['grupos']
+    if name not in groups or len(groups) <= 1:
+        return
+    del groups[name]
+    if _student_groups['actual'] == name:
+        _student_groups['actual'] = sorted(groups)[0]
+    _save_student_groups(_student_groups)
+    _anunciar_grupo()
 
 
 def _get_window_list():

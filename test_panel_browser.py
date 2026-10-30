@@ -37,7 +37,7 @@ def main():
          patch.object(server, '_STUDENT_ALIASES_FILE', os.path.join(tmp, 'nombres.json')), \
          patch.object(server, '_panel_settings', dict(server._PANEL_SETTINGS_DEFAULT)), \
          patch.object(server, '_student_order', []), \
-         patch.object(server, '_student_aliases', {}):
+         patch.object(server, '_student_groups', server._empty_student_groups()):
         threading.Thread(target=lambda: server.socketio.run(
             server.app, host='127.0.0.1', port=port,
             allow_unsafe_werkzeug=True, use_reloader=False), daemon=True).start()
@@ -140,6 +140,23 @@ def main():
                 page.keyboard.press('Escape')
                 assert first.locator('.card-name-input').count() == 0
 
+                # Grupos de nombres: un grupo nuevo empieza con los nombres del
+                # equipo; volver al anterior recupera los suyos.
+                assert page.evaluate('[...document.querySelectorAll("#group-select option")].map(o => o.value)') == ['General']
+                page.evaluate('_renombrar("ana - pc01", "Ana")')
+                page.wait_for_function('students[Object.keys(students).find(k => students[k].key === "ana - pc01")].name === "Ana"')
+                page.once('dialog', lambda dialog: dialog.accept('1º ESO A'))
+                page.evaluate('abrirSettings()')
+                page.click('#settings-box button:has-text("Nuevo grupo")')
+                page.wait_for_function('_studentGroups.current === "1º ESO A"')
+                other.wait_for_function('document.getElementById("group-select").value === "1º ESO A"')
+                page.wait_for_function('document.querySelector("#cfg-names-list .name-input").value === ""')
+                assert 'ana - pc01' in page.inner_text('#grid')
+                page.evaluate('cerrarSettings()')
+                page.select_option('#group-select', 'General')
+                page.wait_for_function('[...document.querySelectorAll("#grid .card-name")].some(e => e.textContent === "Ana")')
+                assert server._load_student_groups()['actual'] == 'General'
+
                 # Bloquear desde la tarjeta: llega al alumno y cuenta en la cabecera.
                 first.locator('.lock-btn').click()
                 assert locks.get(timeout=5) == 'lock'
@@ -163,7 +180,7 @@ def main():
             for peer in peers:
                 if peer.connected:
                     peer.disconnect()
-    print('PASS: tema claro/oscuro guardado y sincronizado, densidad, atajos, menú de tarjeta y bloqueo; sin errores JavaScript.')
+    print('PASS: tema claro/oscuro guardado y sincronizado, densidad, grupos de nombres, atajos, menú de tarjeta y bloqueo; sin errores JavaScript.')
 
 
 if __name__ == '__main__':

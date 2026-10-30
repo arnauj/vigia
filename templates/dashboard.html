@@ -1206,6 +1206,7 @@
       transition: border-color .15s, color .15s;
     }
     .settings-btn:hover { border-color: var(--accent); color: var(--text); }
+    .settings-btn:disabled { opacity: .5; cursor: default; border-color: var(--card-border); color: var(--text-2); }
     /* Nombres de los alumnos */
     #cfg-names-list {
       display: flex; flex-direction: column; gap: 6px;
@@ -1224,6 +1225,22 @@
     .name-input:focus, .card-name-input:focus { outline: none; border-color: var(--accent); }
     .name-key { color: var(--muted); font-size: 0.72rem; font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 2px; }
     .names-empty { padding: 4px 0; }
+    /* Grupos de nombres (cada grupo del aula guarda los suyos) */
+    .group-select {
+      background: var(--field-bg); color: var(--text);
+      border: 1px solid var(--border-strong); border-radius: 8px;
+      padding: 6px 10px; font-size: 0.82rem; font-family: inherit; cursor: pointer;
+      min-width: 0; max-width: 100%;
+    }
+    .group-select:focus { outline: none; border-color: var(--accent); }
+    .settings-row .group-select { flex: 0 1 210px; }
+    .group-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .group-picker {
+      display: flex; align-items: center; gap: 8px; padding: 4px 10px 0;
+      color: var(--muted); font-size: 12px;
+    }
+    .group-picker svg { width: 15px; height: 15px; flex: 0 0 auto; }
+    .group-picker .group-select { flex: 1; padding: 4px 8px; font-size: 13px; }
     .settings-divider { height: 1px; background: var(--card-border); margin: 14px 0 12px; }
     .settings-row-flush { margin-bottom: 0; }
     /* Interruptor moderno (ajustes del aula) */
@@ -1282,6 +1299,7 @@
       .nav-item > span:not(.nav-count) { flex: 0 1 auto; }
       .server-card { margin: 0; padding: 6px 10px; flex-direction: row; gap: 10px; }
       .theme-switch { margin: 0; }
+      .group-picker { padding: 0 6px; }
       #topbar, #grid { padding-left: 14px; padding-right: 14px; }
       #selection-bar { margin-left: 14px; margin-right: 14px; }
       #live-badge { padding: 8px 14px; }
@@ -1305,6 +1323,10 @@
     <i data-lucide="users"></i><span>Alumnos</span>
     <span id="count-badge" class="nav-count" title="Alumnos conectados">0</span>
   </div>
+  <label class="group-picker" title="Grupo: los nombres de los alumnos que se usan ahora (se gestionan en Configuración)">
+    <i data-lucide="graduation-cap"></i>
+    <select id="group-select" class="group-select" aria-label="Grupo" onchange="elegirGrupo(this.value)"></select>
+  </label>
 
   <div class="nav-label">Acciones</div>
   <button id="btn-compartir" class="nav-item" onclick="toggleCompartir()" title="Compartir tu pantalla con los alumnos (S)">
@@ -1696,6 +1718,71 @@ socket.on('student_renamed', data => {
   if (modalSid === data.sid) document.getElementById('modal-name').textContent = s.name;
   if (_liveviewSid === data.sid) document.getElementById('liveview-name').textContent = s.name;
 });
+
+// ── Grupos de nombres: cada grupo del aula guarda sus nombres; el servidor
+// recuerda el último cargado. Cambiar de grupo se aplica al momento (no espera
+// a «Aplicar»), pero antes se guardan los nombres que se estaban editando.
+let _studentGroups = { groups: [], current: '' };
+
+socket.on('student_groups', info => {
+  if (!info || !Array.isArray(info.groups)) return;
+  const cambio = info.current !== _studentGroups.current;
+  const habia = !!_studentGroups.current;
+  _studentGroups = info;
+  _pintarGrupos();
+  if (cambio && document.getElementById('settings-overlay').classList.contains('show'))
+    _pintarNombresSettings();
+  if (cambio && habia) toast(`Nombres del grupo «${info.current}» cargados`, 'connect');
+});
+
+function _pintarGrupos() {
+  const grupos = [..._studentGroups.groups]
+    .sort((a, b) => a.localeCompare(b, 'es', { numeric: true, sensitivity: 'base' }));
+  const opciones = grupos.map(g =>
+    `<option value="${escHtml(g)}"${g === _studentGroups.current ? ' selected' : ''}>${escHtml(g)}</option>`).join('');
+  ['group-select', 'cfg-group'].forEach(id => {
+    const sel = document.getElementById(id);
+    sel.innerHTML = opciones;
+    sel.value = _studentGroups.current;
+  });
+  document.getElementById('btn-delete-group').disabled = grupos.length <= 1;
+  document.getElementById('cfg-names-group').textContent =
+    `del grupo «${_studentGroups.current}». Déjalo vacío para usar el del equipo. También puedes pulsar ✎ en cada tarjeta.`;
+}
+
+function elegirGrupo(name, desdeAjustes) {
+  if (!name || name === _studentGroups.current) return;
+  if (desdeAjustes) _guardarNombresSettings();
+  socket.emit('select_student_group', { name });
+}
+
+function _pedirNombreGrupo(texto, inicial) {
+  const name = (prompt(texto, inicial || '') || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  return name;
+}
+
+function nuevoGrupo() {
+  const name = _pedirNombreGrupo('Nombre del grupo nuevo (p. ej. «1º ESO A»):');
+  if (!name) return;
+  if (_studentGroups.groups.includes(name)) { elegirGrupo(name, true); return; }
+  _guardarNombresSettings();
+  socket.emit('select_student_group', { name });
+}
+
+function renombrarGrupo() {
+  const old = _studentGroups.current;
+  const name = _pedirNombreGrupo(`Nuevo nombre para el grupo «${old}»:`, old);
+  if (!name || name === old) return;
+  if (_studentGroups.groups.includes(name)) { toast(`Ya existe un grupo «${name}»`, 'disconnect'); return; }
+  socket.emit('rename_student_group', { old, name });
+}
+
+function eliminarGrupo() {
+  const name = _studentGroups.current;
+  if (_studentGroups.groups.length <= 1) return;
+  if (!confirm(`¿Eliminar el grupo «${name}» y todos sus nombres?`)) return;
+  socket.emit('delete_student_group', { name });
+}
 
 function _nombreVisible(key) {
   return _studentAliases[key] || key;
@@ -4312,8 +4399,24 @@ function _actualizarPrompt(cwd) {
         </button>
       </div>
       <div class="settings-divider"></div>
+      <div class="settings-row">
+        <label for="cfg-group">Grupo <small>cada grupo guarda sus propios nombres. Al abrir VIGIA se carga el último usado.</small></label>
+        <select id="cfg-group" class="group-select" onchange="elegirGrupo(this.value, true)"></select>
+      </div>
+      <div class="group-actions">
+        <button type="button" class="settings-btn" onclick="nuevoGrupo()">
+          <i data-lucide="plus"></i> Nuevo grupo
+        </button>
+        <button type="button" class="settings-btn" onclick="renombrarGrupo()">
+          <i data-lucide="pencil"></i> Renombrar
+        </button>
+        <button type="button" class="settings-btn" id="btn-delete-group" onclick="eliminarGrupo()">
+          <i data-lucide="trash-2"></i> Eliminar
+        </button>
+      </div>
+      <div class="settings-divider"></div>
       <div class="settings-row settings-row-flush">
-        <label>Nombres <small>déjalo vacío para usar el del equipo. También puedes pulsar ✎ en cada tarjeta.</small></label>
+        <label>Nombres <small id="cfg-names-group">déjalo vacío para usar el del equipo. También puedes pulsar ✎ en cada tarjeta.</small></label>
       </div>
       <div id="cfg-names-list"></div>
     </div>

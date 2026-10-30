@@ -52,7 +52,8 @@ server.py ───────────────────────�
     viewers  = {student_sid: {prof_sid, mode}}   # sesiones activas view/control
     _class_settings = {teacher_on_top}           # ajustes del aula (Configuración)
     _student_order  = [clave, …]                 # orden de las tarjetas del panel
-    _student_aliases = {clave: nombre visible}   # nombres puestos por el profesor
+    _student_groups = {actual, grupos: {grupo: {clave: nombre visible}}}
+                                                 # nombres puestos por el profesor, por grupo
     _panel_settings = {theme, density}           # apariencia del PANEL (no alumnos)
   Ajustes del aula: update_class_settings (panel) → class_settings (a todos;
   también al registrarse alumno/panel). Persisten en ~/.config/vigia/aula.json.
@@ -75,6 +76,19 @@ server.py ───────────────────────�
   ~/.config/vigia/nombres.json, se avisa con student_renamed {sid,key,name} y
   student_aliases, y se aplica al volver a registrarse. El orden va por clave:
   renombrar no mueve la tarjeta.
+  GRUPOS DE NOMBRES: en un aula entran grupos distintos cada hora y en cada
+  equipo se sienta otra persona, así que los nombres van por grupo:
+  nombres.json = {"actual": grupo, "grupos": {grupo: {clave: nombre}}} (el
+  formato antiguo, un {clave: nombre} plano, se lee como el grupo «General»).
+  rename_student escribe en el grupo ACTUAL (_current_aliases()). El panel
+  elige grupo en la barra lateral (#group-select) o en Configuración → Alumnos
+  (Nuevo/Renombrar/Eliminar): select_student_group {name} (si no existe se crea
+  vacío), rename_student_group {old, name} (no pisa uno existente),
+  delete_student_group {name} (siempre queda uno). Al cambiar, _anunciar_grupo()
+  manda student_renamed de los conectados que cambian + student_aliases +
+  student_groups {groups, current}. El grupo actual se guarda: al abrir VIGIA
+  se carga el ÚLTIMO usado. El orden de las tarjetas es común a todos los
+  grupos (va por equipo, que no se mueve).
   teacher_on_top=False por defecto: la ventana del profesor en el alumno NO va
   siempre encima (el alumno puede trabajar en sus ventanas).
   Señalización WebRTC: relaya webrtc_offer/answer/ice entre dashboard
@@ -444,7 +458,11 @@ build_debs.sh ──────────────────────
 | `student_order` | servidor → dashboards | Orden guardado de las tarjetas |
 | `rename_student` | dashboard → servidor | Cambiar el nombre visible `{key, name}` (vacío = original) |
 | `student_renamed` | servidor → dashboards | Un alumno conectado cambia de nombre `{sid, key, name}` |
-| `student_aliases` | servidor → dashboards | Todos los nombres guardados `{clave: nombre}` |
+| `student_aliases` | servidor → dashboards | Nombres del grupo actual `{clave: nombre}` |
+| `select_student_group` | dashboard → servidor | Cargar (o crear vacío) un grupo de nombres `{name}` |
+| `rename_student_group` | dashboard → servidor | Renombrar un grupo `{old, name}` |
+| `delete_student_group` | dashboard → servidor | Borrar un grupo y sus nombres `{name}` |
+| `student_groups` | servidor → dashboards | Grupos guardados y el actual `{groups, current}` |
 | `teacher_stream_stop` | dashboard → servidor → clientes | Fin del vídeo del profesor |
 | `webrtc_offer` | dashboard → servidor → cliente | SDP offer para WebRTC |
 | `webrtc_answer` | cliente → servidor → dashboard | SDP answer para WebRTC |
