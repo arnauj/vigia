@@ -4,6 +4,7 @@ python3 test_streaming.py
 Las pruebas del servidor requieren flask-socketio.
 """
 
+import json
 import os
 import tempfile
 import unittest
@@ -234,14 +235,14 @@ class TestServerStreaming(unittest.TestCase):
     def test_student_rename_is_saved_and_applied_on_reconnect(self):
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(self.server, '_STUDENT_ALIASES_FILE', os.path.join(tmp, 'nombres.json')), \
-             patch.object(self.server, '_student_aliases', {}):
+             patch.object(self.server, '_student_groups', self.server._empty_student_groups()):
             key = self.server.students[self.sid]['key']
             self.teacher.emit('rename_student', {'key': key, 'name': '  Lucía   P. '})
             received = self.teacher.get_received()
             pick = lambda name: [e['args'][0] for e in received if e['name'] == name]
             self.assertEqual(pick('student_renamed'), [{'sid': self.sid, 'key': key, 'name': 'Lucía P.'}])
             self.assertEqual(pick('student_aliases'), [{key: 'Lucía P.'}])
-            self.assertEqual(self.server._load_student_aliases(), {key: 'Lucía P.'})
+            self.assertEqual(self.server._load_student_groups()['grupos']['General'], {key: 'Lucía P.'})
             # Al volver a conectarse llega ya con el nombre nuevo (y su clave).
             again = self.peer()
             again.emit('register', {'name': key})
@@ -252,8 +253,63 @@ class TestServerStreaming(unittest.TestCase):
             self.assertEqual(self.events(dashboard, 'student_aliases'), [{key: 'Lucía P.'}])
             # Vacío = vuelve al nombre del equipo.
             self.teacher.emit('rename_student', {'key': key, 'name': ''})
-            self.assertEqual(self.server._load_student_aliases(), {})
+            self.assertEqual(self.server._load_student_groups()['grupos']['General'], {})
             self.assertEqual(self.server.students[self.sid]['name'], key)
+
+    def test_student_name_groups_switch_and_remember_last(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(self.server, '_STUDENT_ALIASES_FILE', os.path.join(tmp, 'nombres.json')), \
+             patch.object(self.server, '_student_groups', self.server._empty_student_groups()):
+            key = self.server.students[self.sid]['key']
+            self.teacher.emit('rename_student', {'key': key, 'name': 'Ana'})
+            # Grupo nuevo: vacío, el alumno vuelve al nombre del equipo.
+            self.teacher.get_received()
+            self.teacher.emit('select_student_group', {'name': ' 2º  ESO B '})
+            received = self.teacher.get_received()
+            pick = lambda name: [e['args'][0] for e in received if e['name'] == name]
+            self.assertEqual(pick('student_renamed'), [{'sid': self.sid, 'key': key, 'name': key}])
+            self.assertEqual(pick('student_aliases'), [{}])
+            self.assertEqual(pick('student_groups'),
+                             [{'groups': ['2º ESO B', 'General'], 'current': '2º ESO B'}])
+            self.teacher.emit('rename_student', {'key': key, 'name': 'Bruno'})
+            self.assertEqual(self.server.students[self.sid]['name'], 'Bruno')
+            # Volver al primero recupera sus nombres.
+            self.teacher.emit('select_student_group', {'name': 'General'})
+            self.assertEqual(self.server.students[self.sid]['name'], 'Ana')
+            # Se recuerda el último grupo cargado (también al reiniciar).
+            self.teacher.emit('select_student_group', {'name': '2º ESO B'})
+            saved = self.server._load_student_groups()
+            self.assertEqual(saved['actual'], '2º ESO B')
+            self.assertEqual(saved['grupos'], {'General': {key: 'Ana'}, '2º ESO B': {key: 'Bruno'}})
+            dashboard = self.peer()
+            dashboard.emit('register_teacher')
+            received = dashboard.get_received()
+            self.assertEqual(pick('student_aliases'), [{key: 'Bruno'}])
+            self.assertEqual(pick('student_groups'),
+                             [{'groups': ['2º ESO B', 'General'], 'current': '2º ESO B'}])
+            # Renombrar el grupo (sin pisar otro que ya exista).
+            self.teacher.emit('rename_student_group', {'old': '2º ESO B', 'name': 'General'})
+            self.assertEqual(sorted(self.server._student_groups['grupos']), ['2º ESO B', 'General'])
+            self.teacher.emit('rename_student_group', {'old': '2º ESO B', 'name': '2B'})
+            self.assertEqual(self.server._student_groups['actual'], '2B')
+            # Borrar el actual carga otro; el último no se puede borrar.
+            self.teacher.emit('delete_student_group', {'name': '2B'})
+            self.assertEqual(self.server._student_groups['actual'], 'General')
+            self.assertEqual(self.server.students[self.sid]['name'], 'Ana')
+            self.teacher.emit('delete_student_group', {'name': 'General'})
+            self.assertEqual(list(self.server._student_groups['grupos']), ['General'])
+
+    def test_old_flat_names_file_becomes_general_group(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'nombres.json')
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump({'ana - pc01': 'Ana', 'bea - pc02': ''}, f)
+            with patch.object(self.server, '_STUDENT_ALIASES_FILE', path):
+                self.assertEqual(self.server._load_student_groups(),
+                                 {'actual': 'General', 'grupos': {'General': {'ana - pc01': 'Ana'}}})
+                with open(path, 'w', encoding='utf-8') as f:
+                    json.dump({'actual': 'Nope', 'grupos': {'1A': {}, '1B': {'x': 'X'}}}, f)
+                self.assertEqual(self.server._load_student_groups()['actual'], '1A')
 
     def test_binary_jpeg_and_render_confirmation_round_trip(self):
         self.start()
