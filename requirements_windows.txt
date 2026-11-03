@@ -12,6 +12,12 @@ websocket-client>=1.7
 mss>=9.0
 Pillow>=10.0
 pynput>=1.7
+# Vista en directo por WebRTC (H.264/VP8) y pantalla del profesor como vídeo,
+# como en Linux. En Windows hay wheels binarios con FFmpeg (libx264, libvpx).
+# Sin ellos el cliente funciona igual, pero solo por JPEG (menos fluido).
+numpy>=1.26
+av>=14.0
+aiortc>=1.10
 
 # Empaquetado (solo para build)
 # pyinstaller>=6.0

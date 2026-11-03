@@ -107,6 +107,12 @@ python -m PyInstaller ^
     --add-data "img;img" ^
     --add-data "platform_utils.py;." ^
     --collect-all pynput ^
+    --collect-all aiortc ^
+    --collect-all aioice ^
+    --collect-all av ^
+    --collect-all pylibsrtp ^
+    --collect-all google_crc32c ^
+    --hidden-import numpy ^
     --distpath dist\windows ^
     client.py
 

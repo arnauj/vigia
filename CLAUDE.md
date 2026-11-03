@@ -539,6 +539,14 @@ Dashboard → Cliente            : eventos teclado (RTCDataChannel 'vigia-input'
 | Cliente (WebRTC + vídeo del profesor) | — | `python3-aiortc python3-av python3-numpy` |
 | Cliente (Wayland) | — | `ydotool` + `kde-spectacle`/`grim`/`gnome-screenshot` |
 | Ventana nativa fallback (profesor) | — | `python3-gi gir1.2-webkit2-4.1 libwebkit2gtk-4.1-0 libgtk-3-0` |
+| Cliente Windows (.exe) | `requirements_windows.txt`: además `numpy av aiortc` (wheels binarios de Windows: FFmpeg con libx264 y libvpx) | — |
+
+En Windows el cliente lleva WebRTC (H.264, como en Linux) y la pantalla del
+profesor como vídeo: `build_windows.bat` empaqueta `--collect-all aiortc aioice
+av pylibsrtp google_crc32c` (+numpy). Sin esos `--collect-all` aiortc carga sus
+códecs con importlib y PyInstaller no los ve → el .exe cae a JPEG sin avisar.
+Comprobación: en `%APPDATA%\vigia\client.log` debe salir «Encoder H.264 (x264
+ultrafast) preferido» (el log va con búfer: cerrar el cliente sin /F).
 
 Regla general: **cualquier librería con extensión nativa va por apt**; pip solo
 para paquetes Python puros (sus wheels `py3-none-any` valen en cualquier Python).
