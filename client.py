@@ -41,9 +41,13 @@ if sys.platform == 'win32':
         if os.path.isfile(_pythonw):
             import subprocess as _sp, tempfile
             _vbs = os.path.join(tempfile.gettempdir(), 'vigia_client_launch.vbs')
-            _cmd = f'"{_pythonw}" ' + ' '.join(f'"{a}"' for a in sys.argv)
+            _args = [os.path.abspath(sys.argv[0])] + sys.argv[1:]
+            _cmd = f'"{_pythonw}" ' + ' '.join(f'"{a}"' for a in _args)
             with open(_vbs, 'w') as _f:
-                _f.write(f'CreateObject("WScript.Shell").Run "{_cmd}", 0, False\n')
+                # En un literal VBScript las comillas van dobladas; sin esto wscript
+                # mostraba «Se esperaba un final de instrucción» y no arrancaba nada.
+                _f.write('CreateObject("WScript.Shell").Run "%s", 0, False\n'
+                         % _cmd.replace('"', '""'))
             os.startfile(_vbs)
             sys.exit(0)
     # Paso 4: instancia unica por sesion. El cliente arranca solo al encender

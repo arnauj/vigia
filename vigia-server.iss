@@ -15,7 +15,7 @@
 
 [Setup]
 AppName=VIGIA Server
-AppVersion=1.1
+AppVersion=1.2.1
 AppPublisher=VIGIA
 DefaultDirName={autopf}\VIGIA Server
 DefaultGroupName=VIGIA
@@ -75,6 +75,21 @@ Filename: "schtasks"; Parameters: "/Delete /TN ""VIGIA Server"" /F"; Flags: runh
 function EsInstalacionSilenciosa(): Boolean;
 begin
   Result := WizardSilent;
+end;
+
+{ Cerrar la version anterior ANTES de copiar los archivos. Si no, el servidor
+  viejo (arrancado al encender por la clave Run, a veces elevado) seguia vivo
+  en el puerto 5000 sirviendo el panel ANTIGUO tras actualizar (p. ej. la
+  vista en directo pequena ya corregida), y sus .exe en uso no se reemplazaban. }
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM vigia-launcher.exe', '',
+       SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM vigia-servidor.exe', '',
+       SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := '';
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

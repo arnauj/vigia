@@ -14,7 +14,7 @@
 
 [Setup]
 AppName=VIGIA Client
-AppVersion=1.1
+AppVersion=1.2.1
 AppPublisher=VIGIA
 DefaultDirName={autopf}\VIGIA Client
 DefaultGroupName=VIGIA
@@ -98,6 +98,17 @@ end;
 function GetRunCommand(Param: String): String;
 begin
   Result := 'wscript.exe "' + ExpandConstant('{app}') + '\vigia-cliente-silent.vbs" ' + GetServerIP('');
+end;
+
+{ Cerrar el cliente anterior ANTES de copiar los archivos: con el .exe en uso
+  no se reemplazaba y seguia corriendo la version vieja hasta reiniciar. }
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM vigia-cliente.exe', '',
+       SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := '';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

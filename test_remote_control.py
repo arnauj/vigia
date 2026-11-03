@@ -639,7 +639,9 @@ class TestVigiaInputTeclado(unittest.TestCase):
         # El servicio vigia-input puede arrancar DESPUÉS que el cliente: el
         # saludo se reintenta y el teclado pasa a uinput sin reiniciar nada.
         client._VI_TECLADO = False
-        client._VI_KB_PROBE = 0.0
+        # Último sondeo hace 60 s. Con 0.0 fallaba en un equipo (o VM WSL)
+        # recién arrancado: time.monotonic() aún no llegaba a los 30 s.
+        client._VI_KB_PROBE = client.time.monotonic() - 60
         self.vi.features = lambda timeout=0.8: {'kb'}
         with patch.object(client, '_ES_WAYLAND', True):
             self.assertTrue(client._vi_teclado_disponible())
