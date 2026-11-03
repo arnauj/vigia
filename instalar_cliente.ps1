@@ -66,6 +66,12 @@ $PythonwExe = Join-Path $VenvDir "Scripts\pythonw.exe"
 # -- Instalar dependencias --
 Write-Host "[*] Instalando dependencias del cliente..."
 & $PipExe install python-socketio[client] websocket-client mss Pillow pynput
+# WebRTC (vista en directo fluida) y pantalla del profesor como vídeo, como en
+# Linux. Opcional: si falla, el cliente sigue funcionando por JPEG.
+& $PipExe install numpy av aiortc
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[!] No se pudo instalar aiortc/av: la vista en directo irá por JPEG."
+}
 
 # -- Guardar IP en configuración --
 $ConfigDir = Join-Path $env:APPDATA "vigia"
