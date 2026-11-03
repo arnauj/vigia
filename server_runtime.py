@@ -4,7 +4,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-import pwd
 import signal
 import sys
 import time
@@ -44,7 +43,7 @@ def started_outside_session(info, env=None):
     if not info.get('graphical'):
         return True
     uid = info.get('uid')
-    if isinstance(uid, int) and uid != os.getuid():
+    if isinstance(uid, int) and hasattr(os, 'getuid') and uid != os.getuid():
         return True     # servicio antiguo de OTRO usuario (p.ej. quien instaló)
     env = os.environ if env is None else env
     mine, theirs = env.get('XDG_SESSION_ID'), info.get('session')
@@ -125,8 +124,13 @@ def retire_autostart_services(users=None):
     el equipo con OTRO usuario, ocupaba el puerto 5000 y no podía capturar la
     sesión del profesor. Solo toca ficheros con el nombre exacto del servicio.
     Devuelve los usuarios limpiados."""
+    if users is None:
+        # pwd solo existe en Unix: importarlo arriba tumbaba vigia-launcher.exe
+        # en Windows nada más abrirlo (el lanzador importa este módulo).
+        import pwd
+        users = pwd.getpwall()
     cleaned = []
-    for entry in pwd.getpwall() if users is None else users:
+    for entry in users:
         base = Path(entry.pw_dir) / '.config' / 'systemd' / 'user'
         found = False
         for path in (base / SERVICE, base / 'default.target.wants' / SERVICE):

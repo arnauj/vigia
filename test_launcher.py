@@ -95,14 +95,50 @@ class TestLauncher(unittest.TestCase):
 
     def test_old_server_on_port_is_not_reused(self):
         self.server_ready.return_value = False
-        with patch.object(self.launcher.sys, 'argv', ['vigia-launcher.py']), \
+        with patch.object(self.launcher.platform_utils, 'IS_WINDOWS', False), \
+             patch.object(self.launcher.sys, 'argv', ['vigia-launcher.py']), \
              patch.object(self.launcher, 'wait_for_port', return_value=True), \
+             patch.object(self.launcher, 'retire_old_windows_server') as retire, \
              patch.object(self.launcher, 'report_server_mismatch') as report, \
              patch.object(self.launcher, 'run_chrome_app') as chrome, \
              self.assertRaises(SystemExit):
             self.launcher.main()
+        retire.assert_not_called()
         report.assert_called_once_with(5000)
         chrome.assert_not_called()
+
+    def test_windows_replaces_old_server_on_port(self):
+        # Windows: el servidor viejo del arranque automático servía el panel
+        # antiguo (vista en directo pequeña) y el lanzador salía sin avisar.
+        self.server_ready.side_effect = [False, True]
+        with patch.object(self.launcher.platform_utils, 'IS_LINUX', False), \
+             patch.object(self.launcher.platform_utils, 'IS_WINDOWS', True), \
+             patch.object(self.launcher.sys, 'argv', ['vigia-launcher.py']), \
+             patch.object(self.launcher.sys, 'frozen', False, create=True), \
+             patch.object(self.launcher, 'wait_for_port', return_value=True), \
+             patch.object(self.launcher, 'retire_old_windows_server', return_value=True) as retire, \
+             patch.object(self.launcher, 'report_server_mismatch') as report, \
+             patch.object(self.launcher.subprocess, 'CREATE_NO_WINDOW', 0, create=True), \
+             patch.object(self.launcher, 'run_chrome_app', return_value=True) as chrome, \
+             patch.object(self.launcher.subprocess, 'Popen') as start:
+            self.launcher.main()
+        retire.assert_called_once_with(5000)
+        report.assert_not_called()
+        start.assert_called_once()
+        self.assertIs(chrome.call_args[0][1], start.return_value)
+
+    def test_windows_old_server_that_cannot_be_closed_is_reported(self):
+        self.server_ready.return_value = False
+        with patch.object(self.launcher.platform_utils, 'IS_WINDOWS', True), \
+             patch.object(self.launcher.sys, 'argv', ['vigia-launcher.py']), \
+             patch.object(self.launcher, 'wait_for_port', return_value=True), \
+             patch.object(self.launcher, 'retire_old_windows_server', return_value=False), \
+             patch.object(self.launcher, 'report_server_mismatch') as report, \
+             patch.object(self.launcher.subprocess, 'Popen') as start, \
+             self.assertRaises(SystemExit):
+            self.launcher.main()
+        report.assert_called_once_with(5000)
+        start.assert_not_called()
 
     def test_webview_and_browser_fallback_preserve_capture_choice(self):
         with patch.dict('os.environ', {'XDG_CURRENT_DESKTOP': 'KDE'}), \

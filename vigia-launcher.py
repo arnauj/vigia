@@ -47,9 +47,13 @@ if sys.platform == 'win32':
         if os.path.isfile(_pythonw):
             import tempfile as _tmpmod
             _vbs = os.path.join(_tmpmod.gettempdir(), 'vigia_launcher_launch.vbs')
-            _cmd = f'"{_pythonw}" ' + ' '.join(f'"{a}"' for a in sys.argv)
+            _args = [os.path.abspath(sys.argv[0])] + sys.argv[1:]
+            _cmd = f'"{_pythonw}" ' + ' '.join(f'"{a}"' for a in _args)
             with open(_vbs, 'w') as _f:
-                _f.write(f'CreateObject("WScript.Shell").Run "{_cmd}", 0, False\n')
+                # En un literal VBScript las comillas van dobladas; sin esto wscript
+                # mostraba «Se esperaba un final de instrucción» y no arrancaba nada.
+                _f.write('CreateObject("WScript.Shell").Run "%s", 0, False\n'
+                         % _cmd.replace('"', '""'))
             os.startfile(_vbs)
             sys.exit(0)
     # Paso 4: redirigir stdout/stderr a log
@@ -385,6 +389,25 @@ def retire_outside_server(port, info=None) -> bool:
     return False
 
 
+def retire_old_windows_server(port) -> bool:
+    """Windows: cierra el vigia-servidor.exe de otra versión que ocupa el puerto.
+
+    Lo deja ahí el arranque automático (clave Run) o una instalación anterior
+    que no se cerró al actualizar, y seguía sirviendo el panel VIEJO (p. ej. la
+    vista en directo pequeña, ya corregida). Antes el lanzador salía sin decir
+    nada. Solo puede cerrar procesos del propio usuario sin elevar; uno
+    arrancado como administrador lo cierra el instalador. True si el puerto
+    quedó libre."""
+    print('[VIGIA] Hay un servidor de otra versión en el puerto; cerrándolo…')
+    try:
+        subprocess.run(['taskkill', '/F', '/IM', 'vigia-servidor.exe'],
+                       capture_output=True, timeout=15, check=False,
+                       creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    except (OSError, subprocess.TimeoutExpired) as error:
+        print(f'[VIGIA] No se pudo cerrar el servidor anterior: {error}', file=sys.stderr)
+    return _port_freed(port)
+
+
 def report_server_mismatch(port):
     message = (f'El servidor del puerto {port} no corresponde a VIGIA {VERSION}. '
                'Cierra las ventanas antiguas de VIGIA y reinstala el paquete nuevo. '
@@ -392,6 +415,13 @@ def report_server_mismatch(port):
     print(f'[VIGIA] {message}', file=sys.stderr)
     if platform_utils.IS_LINUX and shutil.which('kdialog'):
         subprocess.run(['kdialog', '--title', 'VIGIA', '--error', message], check=False)
+    elif platform_utils.IS_WINDOWS:
+        # El .exe no tiene consola: sin esta ventana el profesor no veía nada.
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, message, 'VIGIA', 0x10)
+        except (OSError, AttributeError):
+            pass
 
 
 def main() -> None:
@@ -412,16 +442,17 @@ def main() -> None:
     reuse = False
     foreign = False
     if wait_for_port(port, timeout=1.5):
-        if not wait_for_current_server(port, timeout=3):
+        if wait_for_current_server(port, timeout=3):
+            info = server_info(port)
+            reuse = not (platform_utils.IS_LINUX
+                         and started_outside_session(info)
+                         and retire_outside_server(port, info))
+            uid = (info or {}).get('uid')
+            foreign = reuse and isinstance(uid, int) and hasattr(os, 'getuid') \
+                and uid != os.getuid()
+        elif not (platform_utils.IS_WINDOWS and retire_old_windows_server(port)):
             report_server_mismatch(port)
             sys.exit(1)
-        info = server_info(port)
-        reuse = not (platform_utils.IS_LINUX
-                     and started_outside_session(info)
-                     and retire_outside_server(port, info))
-        uid = (info or {}).get('uid')
-        foreign = reuse and isinstance(uid, int) and hasattr(os, 'getuid') \
-            and uid != os.getuid()
     if reuse:
         print(f'[VIGIA] Servidor detectado en :{port}, reutilizando…')
         proc = None

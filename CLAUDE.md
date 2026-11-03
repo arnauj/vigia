@@ -221,6 +221,19 @@ vigia-launcher.py ────────────────────�
   rápido de usuario) no se le cierra la clase: se reutiliza con
   ?capture=browser (su captura directa vería la otra sesión) y se avisa.
   /api/version → {app, version, pid, uid, user, graphical, session}.
+  WINDOWS: si en el puerto responde un servidor de OTRA versión (o uno tan
+  viejo que no tiene /api/version), el lanzador hace taskkill de
+  vigia-servidor.exe y arranca el suyo; si no puede (proceso elevado) lo avisa
+  con MessageBox (antes salía sin decir nada). Ese servidor viejo lo deja el
+  arranque automático (clave Run) y servía el panel ANTIGUO: p. ej. la vista en
+  directo «pequeña» (max-width/max-height), corregida hace tiempo en Linux.
+  Los instaladores .iss cierran (PrepareToInstall + taskkill) servidor,
+  lanzador y cliente ANTES de copiar archivos.
+  server_runtime.py y todo lo que importa el lanzador debe cargar en Windows:
+  NADA de `import pwd`/`fcntl` a nivel de módulo (un `import pwd` arriba tumbó
+  vigia-launcher.exe en Windows desde 3406a5f sin dejar rastro).
+  Relanzado con pythonw (.py en Windows): el .vbs generado debe DOBLAR las
+  comillas dentro del literal de VBScript.
   Anclado en KDE: en Wayland la ventana Chrome --app NO se llama «vigia» sino
   chrome-localhost__-Default (--class solo afecta a X11). Sin un .desktop con
   ese nombre, «Fijar en el gestor de tareas» se perdía al reiniciar. El .deb
